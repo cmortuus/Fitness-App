@@ -197,3 +197,47 @@ class TestPlansCRUD:
         assert bench_list[0]["display_name"] == "Bench Press"
         # primary_muscles inside each item must be a list
         assert isinstance(bench_list[0]["primary_muscles"], list)
+
+    async def test_update_plan_rename(self, client: AsyncClient):
+        """PUT /plans/{id} can rename the plan."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], name="Old Name")
+
+        r = await client.put(f"/api/plans/{plan['id']}", json={"name": "New Name"})
+        assert r.status_code == 200
+        assert r.json()["name"] == "New Name"
+
+    async def test_update_plan_days(self, client: AsyncClient):
+        """PUT /plans/{id} can replace the days structure."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=3, reps=8)
+
+        new_days = [
+            {
+                "day_number": 1,
+                "day_name": "Push",
+                "exercises": [
+                    {
+                        "exercise_id": ex["id"],
+                        "sets": 4,
+                        "reps": 6,
+                        "starting_weight_kg": 0,
+                        "progression_type": "linear",
+                    }
+                ],
+            }
+        ]
+        r = await client.put(
+            f"/api/plans/{plan['id']}",
+            json={"number_of_days": 1, "days": new_days},
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["number_of_days"] == 1
+        assert data["days"][0]["day_name"] == "Push"
+        assert data["days"][0]["exercises"][0]["sets"] == 4
+
+    async def test_update_plan_not_found(self, client: AsyncClient):
+        """PUT /plans/99999 returns 404."""
+        r = await client.put("/api/plans/99999", json={"name": "Ghost"})
+        assert r.status_code == 404
