@@ -221,7 +221,7 @@ class ProgressionRecommendation(BaseModel):
 
 # Body weight schemas
 class BodyWeightCreate(BaseModel):
-    weight_kg: float
+    weight_kg: float = Field(gt=0, description="Body weight in kg — must be greater than zero")
     recorded_at: str | None = None  # ISO datetime string, optional
     notes: str | None = None
 
