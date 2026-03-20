@@ -428,16 +428,20 @@ async def create_session_from_plan(
 
         # If the rep target changed, convert the prior weight to the new rep range
         # via Epley before running the standard overload logic.
-        if target_reps != prior_planned and prior_weight and prior_weight > 0 and prior_reps > 0:
+        # Guard: skip conversion when target_reps is 0 (plan exercise has no rep
+        # target set), falling through to use prior_planned as the target.
+        if target_reps > 0 and target_reps != prior_planned and prior_weight and prior_weight > 0 and prior_reps > 0:
             one_rm = prior_weight * (1 + prior_reps / 30)
             prior_weight = round(one_rm / (1 + target_reps / 30) / 2.5) * 2.5
             prior_reps   = target_reps   # at this weight the user should hit target_reps
             prior_planned = target_reps
 
+        # Use prior_planned as the rep target when the plan has no rep target (0)
+        effective_planned = prior_planned if prior_planned > 0 else (target_reps or 8)
         return compute_overload(
             prior_weight=prior_weight,
             prior_reps=prior_reps,
-            planned_reps=prior_planned,
+            planned_reps=effective_planned,
             overload_style=overload_style,
             is_assisted=bool(ex_model and ex_model.is_assisted),
             is_bodyweight=prior_weight <= 0,
