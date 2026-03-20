@@ -284,8 +284,6 @@
         {@const isToday   = key === todayStr}
         {@const isSelected = key === selectedDay}
         {@const hasWorkout = hits.length > 0}
-        {@const hasCompleted = hits.some(s => s.status === 'completed')}
-        {@const hasAbandoned = hits.some(s => s.status !== 'completed' && s.status !== 'skipped')}
 
         <button
           onclick={() => hasWorkout && selectDay(key)}

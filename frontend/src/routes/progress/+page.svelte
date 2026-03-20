@@ -3,13 +3,18 @@
   import { Line } from 'svelte-chartjs';
   import { getProgress, getRecommendations } from '$lib/api';
   import type { ProgressMetric } from '$lib/api';
+  import { settings } from '$lib/stores';
 
   // Weight conversion
   const KG_TO_LBS = 2.20462;
 
-  function kgToLbs(kg: number): number {
-    return Math.round(kg * KG_TO_LBS * 10) / 10;
+  function displayWeight(kg: number): number {
+    return $settings.weightUnit === 'lbs'
+      ? Math.round(kg * KG_TO_LBS * 10) / 10
+      : Math.round(kg * 10) / 10;
   }
+
+  let unit = $derived($settings.weightUnit);
 
   let progressData = $state<ProgressMetric[]>([]);
   let recommendations = $state<any[]>([]);
@@ -63,7 +68,7 @@
         label: exercise,
         data: dates.map(date => {
           const point = exerciseData.find(p => p.date === date);
-          return point?.estimated_1rm ? kgToLbs(point.estimated_1rm) : null;
+          return point?.estimated_1rm ? displayWeight(point.estimated_1rm) : null;
         }) as (number | null)[],
         borderColor: colors[idx % colors.length],
         backgroundColor: colors[idx % colors.length] + '20',
@@ -72,7 +77,7 @@
     }) : [],
   } as any);
 
-  const chartOptions = {
+  let chartOptions = $derived({
     responsive: true,
     plugins: {
       legend: {
@@ -88,7 +93,7 @@
         beginAtZero: false,
         title: {
           display: true,
-          text: 'Weight (lbs)',
+          text: `Weight (${unit})`,
         },
       },
       x: {
@@ -98,7 +103,7 @@
         },
       },
     },
-  };
+  });
 </script>
 
 <div class="space-y-6">
@@ -155,10 +160,10 @@
             {#each recommendations as rec}
               <tr class="border-b border-gray-700 hover:bg-gray-700">
                 <td class="py-2 px-4 font-medium">{rec.exercise_name}</td>
-                <td class="py-2 px-4">{kgToLbs(rec.current_weight).toFixed(1)} lbs</td>
+                <td class="py-2 px-4">{displayWeight(rec.current_weight).toFixed(1)} {unit}</td>
                 <td class="py-2 px-4">
                   <span class="{rec.recommended_weight > rec.current_weight ? 'text-green-400' : rec.recommended_weight < rec.current_weight ? 'text-red-400' : 'text-yellow-400'}">
-                    {kgToLbs(rec.recommended_weight).toFixed(1)} lbs
+                    {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
                   </span>
                 </td>
                 <td class="py-2 px-4 text-sm text-gray-300">{rec.reason}</td>
@@ -193,8 +198,8 @@
               <tr class="border-b border-gray-700 hover:bg-gray-700">
                 <td class="py-2 px-4">{row.date}</td>
                 <td class="py-2 px-4">{row.exercise_name}</td>
-                <td class="py-2 px-4">{kgToLbs(row.volume_load).toFixed(1)} lbs</td>
-                <td class="py-2 px-4">{row.estimated_1rm ? kgToLbs(row.estimated_1rm).toFixed(1) : '-'} lbs</td>
+                <td class="py-2 px-4">{displayWeight(row.volume_load).toFixed(1)} {unit}</td>
+                <td class="py-2 px-4">{row.estimated_1rm ? displayWeight(row.estimated_1rm).toFixed(1) : '-'} {unit}</td>
               </tr>
             {/each}
           </tbody>
