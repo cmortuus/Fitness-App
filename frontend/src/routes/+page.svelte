@@ -13,9 +13,15 @@
   }
 
   let allSessions    = $state<WorkoutSession[]>([]);
-  let nextWorkout    = $state<NextWorkout | null>(null);
   let loading        = $state(true);
   let archiving      = $state(false);
+
+  // Derived so it re-evaluates whenever allSessions or workoutPlans changes —
+  // this prevents the "Create a plan" flash that occurred when the layout's
+  // getPlans() resolved after the dashboard's getSessions() completed.
+  let nextWorkout = $derived(
+    loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
+  );
 
   // ── Calendar state ────────────────────────────────────────────────────
   const today      = new Date();
@@ -29,10 +35,15 @@
 
   onMount(async () => {
     try {
-      // Pull enough sessions to fill several months of calendar
-      const sessions = await getSessions({ limit: 200 });
+      // Fetch sessions and plans in parallel. Plans may not have resolved
+      // from the layout yet, so we fetch them here too to guarantee the
+      // nextWorkout derived value has both by the time loading = false.
+      const [sessions, plans] = await Promise.all([
+        getSessions({ limit: 200 }),
+        getPlans(),
+      ]);
       allSessions = sessions;
-      nextWorkout = resolveNextWorkout(sessions, $workoutPlans);
+      workoutPlans.set(plans);
     } catch (e) {
       console.error('Failed to load dashboard:', e);
     } finally {
@@ -96,7 +107,7 @@
       const [sessions, plans] = await Promise.all([getSessions({ limit: 200 }), getPlans()]);
       allSessions = sessions;
       workoutPlans.set(plans);
-      nextWorkout = resolveNextWorkout(sessions, plans);
+      // nextWorkout is $derived — no manual assignment needed
     } catch (e) {
       console.error('Failed to archive plan:', e);
     } finally {
