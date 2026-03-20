@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.exercise import Exercise
-from app.models.workout import ExerciseSet, WorkoutSession
+from app.models.workout import ExerciseSet, WorkoutSession, WorkoutStatus
 
 router = APIRouter()
 
@@ -38,7 +38,7 @@ async def get_progress(
     session_result = await db.execute(
         select(WorkoutSession)
         .where(
-            WorkoutSession.status == "completed",
+            WorkoutSession.status == WorkoutStatus.COMPLETED,
             WorkoutSession.date >= start_date,
             WorkoutSession.date <= end_date,
         )
@@ -131,7 +131,7 @@ async def get_recommendations(
     # ── Batch fetch sessions ──────────────────────────────────────────────────
     sessions_result = await db.execute(
         select(WorkoutSession).where(
-            WorkoutSession.status == "completed",
+            WorkoutSession.status == WorkoutStatus.COMPLETED,
             WorkoutSession.date >= start_date,
         )
     )
