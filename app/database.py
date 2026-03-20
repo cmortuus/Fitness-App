@@ -427,7 +427,6 @@ async def seed_exercises() -> None:
             {"name": "ez_bar_spider_curl", "display_name": "EZ Bar Spider Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
         ]
 
-        import json
         seeded_count = 0
         skipped_count = 0
 
@@ -445,8 +444,8 @@ async def seed_exercises() -> None:
                 display_name=ex_data["display_name"],
                 movement_type=ex_data["movement_type"],
                 body_region=ex_data["body_region"],
-                primary_muscles=json.dumps(ex_data["primary_muscles"]),
-                secondary_muscles=json.dumps(ex_data["secondary_muscles"]),
+                primary_muscles=ex_data["primary_muscles"],
+                secondary_muscles=ex_data["secondary_muscles"],
             )
             session.add(exercise)
             seeded_count += 1

@@ -1,6 +1,5 @@
 """Exercise API endpoints."""
 
-import json
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -35,8 +34,8 @@ async def list_exercises(
             "is_unilateral": bool(getattr(ex, 'is_unilateral', False)),
             "is_assisted":   bool(getattr(ex, 'is_assisted',   False)),
             "description": ex.description,
-            "primary_muscles": json.loads(ex.primary_muscles) if ex.primary_muscles else [],
-            "secondary_muscles": json.loads(ex.secondary_muscles) if ex.secondary_muscles else [],
+            "primary_muscles": ex.primary_muscles or [],
+            "secondary_muscles": ex.secondary_muscles or [],
         })
     return responses
 
@@ -61,8 +60,8 @@ async def get_exercise(
         "movement_type": getattr(ex, 'movement_type', 'compound'),
         "body_region": getattr(ex, 'body_region', 'upper'),
         "description": ex.description,
-        "primary_muscles": json.loads(ex.primary_muscles) if ex.primary_muscles else [],
-        "secondary_muscles": json.loads(ex.secondary_muscles) if ex.secondary_muscles else [],
+        "primary_muscles": ex.primary_muscles or [],
+        "secondary_muscles": ex.secondary_muscles or [],
     }
 
 
@@ -80,8 +79,8 @@ async def create_exercise(
         is_unilateral=exercise_data.is_unilateral,
         is_assisted=exercise_data.is_assisted,
         description=exercise_data.description,
-        primary_muscles=json.dumps(exercise_data.primary_muscles),
-        secondary_muscles=json.dumps(exercise_data.secondary_muscles),
+        primary_muscles=exercise_data.primary_muscles,
+        secondary_muscles=exercise_data.secondary_muscles,
     )
     db.add(exercise)
     await db.flush()
