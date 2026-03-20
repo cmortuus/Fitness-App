@@ -174,13 +174,13 @@
   <div class="card">
     <h3 class="text-lg font-semibold mb-4">Estimated 1RM Over Time</h3>
     {#if loading}
-      <div class="animate-pulse bg-gray-700 rounded h-48"></div>
+      <div class="animate-pulse bg-zinc-800 rounded h-48"></div>
     {:else if error}
       <p class="text-red-400 text-center py-8">{error}</p>
     {:else if filteredData.length > 0}
       <Line data={chartData()} options={chartOptions} />
     {:else}
-      <p class="text-gray-400 text-center py-8">
+      <p class="text-zinc-400 text-center py-8">
         No data for the selected range. Complete a workout with logged sets to see your progress here.
       </p>
     {/if}
@@ -192,14 +192,14 @@
     {#if loading}
       <div class="space-y-2">
         {#each { length: 3 } as _}
-          <div class="animate-pulse bg-gray-700 rounded h-10"></div>
+          <div class="animate-pulse bg-zinc-800 rounded h-10"></div>
         {/each}
       </div>
     {:else if recommendations.length > 0}
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead>
-            <tr class="border-b border-gray-700 text-gray-400">
+            <tr class="border-b border-zinc-800 text-zinc-400">
               <th class="py-2 px-3">Exercise</th>
               <th class="py-2 px-3">Current best</th>
               <th class="py-2 px-3">Recommended</th>
@@ -209,7 +209,7 @@
           <tbody>
             {#each recommendations as rec}
               {@const delta = rec.recommended_weight - rec.current_weight}
-              <tr class="border-b border-gray-700/50 hover:bg-gray-800">
+              <tr class="border-b border-zinc-800/50 hover:bg-zinc-900">
                 <td class="py-2 px-3 font-medium">{rec.exercise_name}</td>
                 <td class="py-2 px-3 font-mono">{displayWeight(rec.current_weight).toFixed(1)} {unit}</td>
                 <td class="py-2 px-3 font-mono {delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-yellow-400'}">
@@ -218,14 +218,14 @@
                   {:else if delta < 0}<span class="text-xs ml-1">↓</span>
                   {:else}<span class="text-xs ml-1">→</span>{/if}
                 </td>
-                <td class="py-2 px-3 text-gray-400">{rec.reason}</td>
+                <td class="py-2 px-3 text-zinc-400">{rec.reason}</td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
     {:else}
-      <p class="text-gray-400 text-center py-6">
+      <p class="text-zinc-400 text-center py-6">
         No recommendations yet — complete at least one workout in the selected time range.
       </p>
     {/if}
@@ -235,12 +235,12 @@
   <div class="card">
     <h3 class="text-lg font-semibold mb-4">Session Log</h3>
     {#if loading}
-      <div class="animate-pulse bg-gray-700 rounded h-24"></div>
+      <div class="animate-pulse bg-zinc-800 rounded h-24"></div>
     {:else if filteredData.length > 0}
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm">
           <thead>
-            <tr class="border-b border-gray-700 text-gray-400">
+            <tr class="border-b border-zinc-800 text-zinc-400">
               <th class="py-2 px-3">Date</th>
               <th class="py-2 px-3">Exercise</th>
               <th class="py-2 px-3">Volume</th>
@@ -249,8 +249,8 @@
           </thead>
           <tbody>
             {#each [...filteredData].reverse() as row}
-              <tr class="border-b border-gray-700/50 hover:bg-gray-800">
-                <td class="py-2 px-3 text-gray-400">{row.date}</td>
+              <tr class="border-b border-zinc-800/50 hover:bg-zinc-900">
+                <td class="py-2 px-3 text-zinc-400">{row.date}</td>
                 <td class="py-2 px-3">{row.exercise_name}</td>
                 <td class="py-2 px-3 font-mono">{displayWeight(row.volume_load).toFixed(0)} {unit}</td>
                 <td class="py-2 px-3 font-mono">
@@ -262,7 +262,7 @@
         </table>
       </div>
     {:else}
-      <p class="text-gray-400 text-center py-4">No data for selected filters.</p>
+      <p class="text-zinc-400 text-center py-4">No data for selected filters.</p>
     {/if}
   </div>
 </div>

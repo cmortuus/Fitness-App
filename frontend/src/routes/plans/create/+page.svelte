@@ -421,10 +421,10 @@
 
 <div class="min-h-screen bg-gray-900">
   <!-- Header -->
-  <div class="bg-gray-800 border-b border-gray-700 p-4">
+  <div class="bg-zinc-900 border-b border-zinc-800 p-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <button onclick={() => currentStep === 1 ? cancel() : goBackToStep1()} class="text-gray-400 hover:text-white">
+        <button onclick={() => currentStep === 1 ? cancel() : goBackToStep1()} class="text-zinc-400 hover:text-white">
           ← {currentStep === 1 ? 'Back to Plans' : 'Back'}
         </button>
         <h1 class="text-xl font-bold">Create Workout Plan</h1>
@@ -447,7 +447,7 @@
       {#if !initialized}
         <div class="card max-w-2xl mx-auto text-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
-          <p class="text-gray-400 mb-4">Loading exercises...</p>
+          <p class="text-zinc-400 mb-4">Loading exercises...</p>
           <button
             class="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-500"
             onclick={async () => {
@@ -537,14 +537,14 @@
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-semibold">Configure Days</h2>
-          <p class="text-sm text-gray-400">Drag and drop exercises between days to reorganize</p>
+          <p class="text-sm text-zinc-400">Drag and drop exercises between days to reorganize</p>
         </div>
 
         <!-- Days grid - responsive columns -->
         <div class="grid gap-4" style="grid-template-columns: repeat({Math.min(numberOfDays, 7)}, minmax(280px, 1fr));">
           {#each days as day}
             <div
-              class="border border-gray-700 rounded-lg p-4 min-h-[400px] transition-colors {dragOverDay === day.day_number ? 'border-primary-500 bg-gray-700/30' : 'bg-gray-800'}"
+              class="border border-zinc-800 rounded-lg p-4 min-h-[400px] transition-colors {dragOverDay === day.day_number ? 'border-primary-500 bg-zinc-800/30' : 'bg-zinc-900'}"
               ondragover={(e) => handleDragOver(day.day_number, e)}
               ondragleave={handleDragLeave}
               ondrop={(e) => handleDrop(day.day_number, e)}
@@ -557,7 +557,7 @@
                   type="text"
                   value={day.day_name}
                   oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
-                  class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-gray-700"
+                  class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
                   placeholder="Day name..."
                 />
               </div>
@@ -565,7 +565,7 @@
               <!-- Add exercise button -->
               <button
                 onclick={() => openExerciseSelector(day.day_number)}
-                class="w-full py-2 border-2 border-dashed border-gray-600 rounded-lg text-gray-400 hover:border-primary-500 hover:text-primary-400 transition-colors text-sm mb-4"
+                class="w-full py-2 border-2 border-dashed border-zinc-700 rounded-lg text-zinc-400 hover:border-primary-500 hover:text-primary-400 transition-colors text-sm mb-4"
               >
                 + Add Exercise
               </button>
@@ -574,7 +574,7 @@
               <div class="space-y-2">
                 {#each day.exercises as ex, idx}
                   <div
-                    class="bg-gray-700 rounded-lg p-3 cursor-move hover:bg-gray-600 transition-colors"
+                    class="bg-zinc-800 rounded-lg p-3 cursor-move hover:bg-gray-600 transition-colors"
                     draggable="true"
                     ondragstart={() => handleDragStart(day.day_number, idx, ex)}
                     role="button"
@@ -584,12 +584,12 @@
                     <div class="flex items-start justify-between gap-2">
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1.5">
-                          <span class="text-gray-400 text-xs shrink-0">#{idx + 1}</span>
+                          <span class="text-zinc-400 text-xs shrink-0">#{idx + 1}</span>
                           <span class="font-medium text-sm truncate">{getExerciseName(ex.exercise_id)}</span>
                         </div>
                         <!-- Inline editable sets only -->
                         <div class="flex items-center gap-2">
-                          <label class="text-xs text-gray-500">Sets</label>
+                          <label class="text-xs text-zinc-500">Sets</label>
                           <input
                             type="number"
                             value={ex.sets}
@@ -619,7 +619,7 @@
               </div>
 
               {#if day.exercises.length === 0}
-                <p class="text-gray-500 text-sm text-center py-8">No exercises yet. Click "Add Exercise" to start.</p>
+                <p class="text-zinc-500 text-sm text-center py-8">No exercises yet. Click "Add Exercise" to start.</p>
               {/if}
             </div>
           {/each}
@@ -635,16 +635,16 @@
     <div class="card max-w-2xl w-full max-h-[80vh] overflow-y-auto">
       <div class="flex items-center justify-between mb-4">
         <h4 class="text-lg font-semibold">Add Exercise to {days.find(d => d.day_number === selectingForDay)?.day_name}</h4>
-        <button onclick={closeExerciseSelector} class="text-gray-400 hover:text-white">✕</button>
+        <button onclick={closeExerciseSelector} class="text-zinc-400 hover:text-white">✕</button>
       </div>
 
       {#if configuringExercise}
         <!-- Exercise Configuration -->
         <div class="space-y-4">
           <!-- Exercise header -->
-          <div class="bg-gray-700 rounded-lg p-4">
+          <div class="bg-zinc-800 rounded-lg p-4">
             <h5 class="font-medium mb-1">{configuringExercise.exercise?.display_name}</h5>
-            <p class="text-sm text-gray-400">{configuringExercise.exercise?.primary_muscles.join(', ')}</p>
+            <p class="text-sm text-zinc-400">{configuringExercise.exercise?.primary_muscles.join(', ')}</p>
           </div>
 
           <!-- Sets only — weight & reps are set during the workout -->
@@ -657,7 +657,7 @@
               max="20"
               class="input max-w-[120px]"
             />
-            <p class="text-xs text-gray-500 mt-1">Weight and reps are logged during the workout.</p>
+            <p class="text-xs text-zinc-500 mt-1">Weight and reps are logged during the workout.</p>
           </div>
 
           <div class="flex justify-between gap-3">
@@ -713,13 +713,13 @@
           <div class="flex gap-2">
             <button
               onclick={() => viewMode = 'browse'}
-              class="px-3 py-1.5 rounded text-sm font-medium transition-colors {viewMode === 'browse' ? 'bg-primary-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
+              class="px-3 py-1.5 rounded text-sm font-medium transition-colors {viewMode === 'browse' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-gray-300 hover:bg-gray-600'}"
             >
               Browse by Muscle
             </button>
             <button
               onclick={() => viewMode = 'search'}
-              class="px-3 py-1.5 rounded text-sm font-medium transition-colors {viewMode === 'search' ? 'bg-primary-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
+              class="px-3 py-1.5 rounded text-sm font-medium transition-colors {viewMode === 'search' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-gray-300 hover:bg-gray-600'}"
               disabled={searchResults.length === 0}
             >
               Search Results ({searchResults.length})
@@ -736,18 +736,18 @@
             <!-- Search Results -->
             <div>
               {#if searchResults.length === 0}
-                <p class="text-gray-500 text-sm text-center py-4">No exercises found. Try a different search or create a custom exercise.</p>
+                <p class="text-zinc-500 text-sm text-center py-4">No exercises found. Try a different search or create a custom exercise.</p>
               {:else}
                 <div class="space-y-1 max-h-64 overflow-y-auto">
                   {#each searchResults as exercise}
                     <div class="flex items-center justify-between gap-2">
                       <button
                         onclick={() => selectExercise(exercise)}
-                        class="flex-1 text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+                        class="flex-1 text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
                       >
                         <div class="flex items-center justify-between">
                           <span class="font-medium">{exercise.display_name}</span>
-                          <span class="text-xs text-gray-400">{exercise.primary_muscles[0] || 'other'}</span>
+                          <span class="text-xs text-zinc-400">{exercise.primary_muscles[0] || 'other'}</span>
                         </div>
                       </button>
                       <button
@@ -771,7 +771,7 @@
                             alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
                           }
                         }}
-                        class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-gray-700 rounded transition-colors"
+                        class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors"
                         title="Delete exercise"
                       >
                         🗑️
@@ -787,17 +787,17 @@
               <!-- Recently Used -->
               {#if recentExercises.length > 0 && searchQuery === ''}
                 <div>
-                  <h5 class="text-sm font-medium text-gray-400 mb-2">Recently Used</h5>
+                  <h5 class="text-sm font-medium text-zinc-400 mb-2">Recently Used</h5>
                   <div class="space-y-1 max-h-40 overflow-y-auto">
                     {#each recentExercises as exercise}
                       <div class="flex items-center justify-between gap-2">
                         <button
                           onclick={() => selectExercise(exercise)}
-                          class="flex-1 text-left px-3 py-2 rounded hover:bg-gray-700 transition-colors"
+                          class="flex-1 text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
                         >
                           <div class="flex items-center justify-between">
                             <span class="font-medium">{exercise.display_name}</span>
-                            <span class="text-xs text-gray-400">Used {exercise.usage_count} times</span>
+                            <span class="text-xs text-zinc-400">Used {exercise.usage_count} times</span>
                           </div>
                         </button>
                         <button
@@ -817,7 +817,7 @@
                               alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
                             }
                           }}
-                          class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-gray-700 rounded transition-colors"
+                          class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors"
                           title="Delete exercise"
                         >
                           🗑️
@@ -830,31 +830,31 @@
 
               <!-- Grouped by Muscle -->
               <div>
-                <h5 class="text-sm font-medium text-gray-400 mb-2">Browse by Muscle Group</h5>
+                <h5 class="text-sm font-medium text-zinc-400 mb-2">Browse by Muscle Group</h5>
                 {#if Object.keys(groupedExercises).length === 0}
-                  <p class="text-gray-500 text-sm text-center py-4">No exercises loaded. Check console for errors.</p>
+                  <p class="text-zinc-500 text-sm text-center py-4">No exercises loaded. Check console for errors.</p>
                 {:else}
                   <div class="space-y-2 max-h-64 overflow-y-auto">
                     {#each Object.entries(groupedExercises) as [muscle, muscleExercises]}
-                      <div class="border border-gray-700 rounded-lg overflow-hidden">
+                      <div class="border border-zinc-800 rounded-lg overflow-hidden">
                         <button
                           onclick={() => toggleMuscleGroup(muscle)}
-                          class="w-full flex items-center justify-between px-3 py-2 bg-gray-700/50 hover:bg-gray-700 transition-colors"
+                          class="w-full flex items-center justify-between px-3 py-2 bg-zinc-800/50 hover:bg-zinc-800 transition-colors"
                         >
                           <span class="text-sm font-medium text-primary-400">
                             {muscleGroupNames[muscle] || muscle} ({muscleExercises.length})
                           </span>
-                          <span class="text-gray-400">
+                          <span class="text-zinc-400">
                             {expandedMuscleGroups[muscle] ? '−' : '+'}
                           </span>
                         </button>
                         {#if expandedMuscleGroups[muscle]}
-                          <div class="space-y-1 px-3 py-2 bg-gray-800">
+                          <div class="space-y-1 px-3 py-2 bg-zinc-900">
                             {#each muscleExercises as exercise}
                               <div class="flex items-center justify-between gap-2">
                                 <button
                                   onclick={() => selectExercise(exercise)}
-                                  class="flex-1 text-left px-3 py-1.5 rounded hover:bg-gray-700 transition-colors text-sm"
+                                  class="flex-1 text-left px-3 py-1.5 rounded hover:bg-zinc-800 transition-colors text-sm"
                                 >
                                   {exercise.display_name}
                                 </button>
@@ -875,7 +875,7 @@
                                       alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
                                     }
                                   }}
-                                  class="px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-gray-700 rounded transition-colors text-sm"
+                                  class="px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors text-sm"
                                   title="Delete exercise"
                                 >
                                   🗑️
@@ -903,7 +903,7 @@
     <div class="card max-w-md w-full">
       <div class="flex items-center justify-between mb-4">
         <h4 class="text-lg font-semibold">Create Custom Exercise</h4>
-        <button onclick={closeCustomExerciseModal} class="text-gray-400 hover:text-white">✕</button>
+        <button onclick={closeCustomExerciseModal} class="text-zinc-400 hover:text-white">✕</button>
       </div>
 
       <div class="space-y-4">
@@ -950,7 +950,7 @@
                     customPrimaryMuscles = [...customPrimaryMuscles, muscle.value];
                   }
                 }}
-                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customPrimaryMuscles.includes(muscle.value) ? 'bg-primary-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}"
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customPrimaryMuscles.includes(muscle.value) ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-gray-300 hover:bg-gray-600'}"
               >
                 {muscle.label}
               </button>
@@ -972,7 +972,7 @@
                     customSecondaryMuscles = [...customSecondaryMuscles, muscle.value];
                   }
                 }}
-                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customSecondaryMuscles.includes(muscle.value) ? 'bg-purple-600 text-white' : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}"
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customSecondaryMuscles.includes(muscle.value) ? 'bg-purple-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-gray-600'}"
               >
                 {muscle.label}
               </button>
