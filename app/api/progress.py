@@ -48,7 +48,7 @@ async def get_progress(
         sets_result = await db.execute(
             select(ExerciseSet).where(
                 ExerciseSet.workout_session_id == session.id,
-                ExerciseSet.actual_reps != None,
+                ExerciseSet.actual_reps.is_not(None),
             )
         )
         sets = sets_result.scalars().all()
@@ -122,7 +122,7 @@ async def get_recommendations(
         sets_result = await db.execute(
             select(ExerciseSet).where(
                 ExerciseSet.workout_session_id == session.id,
-                ExerciseSet.actual_reps != None,
+                ExerciseSet.actual_reps.is_not(None),
             )
         )
         sets = sets_result.scalars().all()
