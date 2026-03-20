@@ -145,3 +145,76 @@ class TestSessionLifecycle:
         data = r.json()
         assert isinstance(data, list)
         assert len(data) <= 500
+
+    async def test_add_set_to_session(self, client: AsyncClient):
+        """POST /sessions/{id}/sets creates a new set and returns 201."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+
+        r = await client.post(
+            f"/api/sessions/{sess['id']}/sets",
+            json={
+                "exercise_id": ex["id"],
+                "set_number": 99,
+                "planned_reps": 10,
+                "planned_weight_kg": 60.0,
+            },
+        )
+        assert r.status_code == 201
+        data = r.json()
+        assert data["exercise_id"] == ex["id"]
+        assert data["set_number"] == 99
+        assert data["planned_reps"] == 10
+        assert data["planned_weight_kg"] == 60.0
+        assert "id" in data
+
+    async def test_add_set_session_not_found(self, client: AsyncClient):
+        """POST /sessions/99999/sets returns 404 when session doesn't exist."""
+        ex = await create_exercise(client)
+        r = await client.post(
+            "/api/sessions/99999/sets",
+            json={
+                "exercise_id": ex["id"],
+                "set_number": 1,
+                "planned_reps": 8,
+            },
+        )
+        assert r.status_code == 404
+
+    async def test_delete_set(self, client: AsyncClient):
+        """DELETE /sessions/{id}/sets/{set_id} removes the set and returns 204."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=2, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+
+        set_id = sess["sets"][0]["id"]
+        r = await client.delete(f"/api/sessions/{sess['id']}/sets/{set_id}")
+        assert r.status_code == 204
+
+        # Verify the set is gone
+        r2 = await client.get(f"/api/sessions/{sess['id']}")
+        assert r2.status_code == 200
+        remaining_ids = [s["id"] for s in r2.json()["sets"]]
+        assert set_id not in remaining_ids
+
+    async def test_delete_set_not_found(self, client: AsyncClient):
+        """DELETE /sessions/{id}/sets/99999 returns 404."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+
+        r = await client.delete(f"/api/sessions/{sess['id']}/sets/99999")
+        assert r.status_code == 404
+
+    async def test_delete_set_wrong_session(self, client: AsyncClient):
+        """DELETE with set_id belonging to a different session returns 404."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess1 = await start_session_from_plan(client, plan["id"])
+        sess2 = await start_session_from_plan(client, plan["id"])
+
+        # Try to delete sess1's set via sess2's endpoint
+        set_id = sess1["sets"][0]["id"]
+        r = await client.delete(f"/api/sessions/{sess2['id']}/sets/{set_id}")
+        assert r.status_code == 404
