@@ -60,6 +60,20 @@ class TestExercisesCRUD:
         data = r.json()
         assert data["is_unilateral"] is True
 
+    async def test_create_exercise_rejects_overlapping_muscles(self, client: AsyncClient):
+        """Creating an exercise where a muscle appears in both primary and secondary is rejected."""
+        r = await client.post(
+            "/api/exercises/",
+            json={
+                "name": "overlap_test",
+                "display_name": "Overlap Test",
+                "primary_muscles": ["back"],
+                "secondary_muscles": ["back", "biceps"],
+            },
+        )
+        assert r.status_code == 422
+        assert "primary and secondary" in r.text
+
     async def test_get_exercise_by_id(self, client: AsyncClient):
         """GET /exercises/{id} returns correct exercise."""
         ex = await create_exercise(client, name="squat", display_name="Squat")

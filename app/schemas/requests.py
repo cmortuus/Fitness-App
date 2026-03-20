@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from enum import Enum
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # Enums (mirroring model enums)
@@ -63,6 +63,15 @@ class ExerciseCreate(BaseModel):
     description: str | None = None
     primary_muscles: list[str] = []
     secondary_muscles: list[str] = []
+
+    @model_validator(mode="after")
+    def no_overlap_between_primary_and_secondary(self) -> "ExerciseCreate":
+        overlap = set(self.primary_muscles) & set(self.secondary_muscles)
+        if overlap:
+            raise ValueError(
+                f"A muscle cannot be both primary and secondary: {sorted(overlap)}"
+            )
+        return self
 
 
 class ExerciseResponse(BaseModel):

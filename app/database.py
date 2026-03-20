@@ -127,7 +127,7 @@ async def seed_exercises() -> None:
             {"name": "dumbbell_row", "display_name": "Dumbbell Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "cable_row", "display_name": "Cable Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "seated_cable_row", "display_name": "Seated Cable Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
-            {"name": "chest_supported_row", "display_name": "Chest Supported Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "chest_supported_row", "display_name": "Chest Supported Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["mid_back"], "secondary_muscles": ["lats", "biceps"]},
             {"name": "machine_row", "display_name": "Machine Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "t_bar_row", "display_name": "T-Bar Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "meadows_row", "display_name": "Meadows Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
