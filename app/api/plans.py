@@ -38,13 +38,13 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         "id": plan.id,
         "name": plan.name,
         "description": plan.description,
-        "block_type": getattr(plan, 'block_type', 'other'),
-        "duration_weeks": getattr(plan, 'duration_weeks', 4),
-        "current_week": getattr(plan, 'current_week', 1),
+        "block_type": plan.block_type,
+        "duration_weeks": plan.duration_weeks,
+        "current_week": plan.current_week,
         "number_of_days": number_of_days,
         "days": days,
         "auto_progression": plan.auto_progression,
-        "is_archived": getattr(plan, 'is_archived', False),
+        "is_archived": plan.is_archived,
         "created_at": plan.created_at,
     }
 
@@ -99,7 +99,7 @@ async def get_recent_exercises(
             "name": ex.name,
             "display_name": ex.display_name,
             "movement_type": ex.movement_type,
-            "primary_muscles": json.loads(ex.primary_muscles) if ex.primary_muscles else [],
+            "primary_muscles": ex.primary_muscles or [],
             "usage_count": ex.usage_count,
             "last_used": ex.last_used.isoformat() if ex.last_used else None,
         }
@@ -118,7 +118,7 @@ async def get_exercises_grouped(
     grouped: dict[str, list[dict]] = {}
 
     for ex in exercises:
-        primary_muscles = json.loads(ex.primary_muscles) if ex.primary_muscles else ["other"]
+        primary_muscles = ex.primary_muscles or ["other"]
 
         for muscle in primary_muscles:
             muscle = muscle.lower().replace(" ", "_")
@@ -128,8 +128,8 @@ async def get_exercises_grouped(
                 "id": ex.id,
                 "name": ex.name,
                 "display_name": ex.display_name,
-                "movement_type": getattr(ex, 'movement_type', 'compound'),
-                "body_region": getattr(ex, 'body_region', 'upper'),
+                "movement_type": ex.movement_type,
+                "body_region": ex.body_region,
                 "primary_muscles": primary_muscles,
             })
 

@@ -116,3 +116,84 @@ class TestPlansCRUD:
 
         r = await client.delete(f"/api/plans/{plan['id']}")
         assert r.status_code == 204
+
+    async def test_delete_plan_gone(self, client: AsyncClient):
+        """Deleted plan is no longer retrievable."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"])
+        await client.delete(f"/api/plans/{plan['id']}")
+
+        r = await client.get(f"/api/plans/{plan['id']}")
+        assert r.status_code == 404
+
+    async def test_recent_exercises_empty(self, client: AsyncClient):
+        """GET /plans/exercises/recent returns [] when no sets have been logged."""
+        r = await client.get("/api/plans/exercises/recent")
+        assert r.status_code == 200
+        assert r.json() == []
+
+    async def test_recent_exercises_returns_muscle_lists(self, client: AsyncClient):
+        """GET /plans/exercises/recent returns primary_muscles as a list, not a string."""
+        from tests.conftest import create_plan, start_session_from_plan, log_set
+
+        ex = await create_exercise(
+            client,
+            name="squat",
+            display_name="Squat",
+            body_region="lower",
+            primary_muscles=["quads", "glutes"],
+            secondary_muscles=["hamstrings"],
+        )
+        plan = await create_plan(client, ex["id"])
+        sess = await start_session_from_plan(client, plan["id"])
+
+        # Log one set so this exercise shows up in recent
+        set_id = sess["sets"][0]["id"]
+        await log_set(client, sess["id"], set_id, 100.0, 8)
+
+        r = await client.get("/api/plans/exercises/recent")
+        assert r.status_code == 200
+        exercises = r.json()
+        assert len(exercises) >= 1
+        found = next((e for e in exercises if e["id"] == ex["id"]), None)
+        assert found is not None
+        # primary_muscles must be a list, not a JSON string
+        assert isinstance(found["primary_muscles"], list)
+        assert "quads" in found["primary_muscles"]
+
+    async def test_grouped_exercises_empty(self, client: AsyncClient):
+        """GET /plans/exercises/grouped returns {} when no exercises exist."""
+        r = await client.get("/api/plans/exercises/grouped")
+        assert r.status_code == 200
+        assert r.json() == {}
+
+    async def test_grouped_exercises_structure(self, client: AsyncClient):
+        """GET /plans/exercises/grouped returns dict keyed by muscle, values are lists."""
+        await create_exercise(
+            client,
+            name="bench",
+            display_name="Bench Press",
+            primary_muscles=["chest"],
+            secondary_muscles=["triceps"],
+        )
+        await create_exercise(
+            client,
+            name="squat",
+            display_name="Squat",
+            body_region="lower",
+            primary_muscles=["quads"],
+            secondary_muscles=["glutes"],
+        )
+
+        r = await client.get("/api/plans/exercises/grouped")
+        assert r.status_code == 200
+        data = r.json()
+        assert isinstance(data, dict)
+        assert "chest" in data
+        assert "quads" in data
+        # Each value must be a list of dicts with correct keys
+        bench_list = data["chest"]
+        assert isinstance(bench_list, list)
+        assert bench_list[0]["display_name"] == "Bench Press"
+        # primary_muscles inside each item must be a list
+        assert isinstance(bench_list[0]["primary_muscles"], list)
