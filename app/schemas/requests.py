@@ -208,3 +208,15 @@ class ProgressionRecommendation(BaseModel):
     recommended_weight: float
     reason: str
     confidence: float
+
+
+# Body weight schemas
+class BodyWeightCreate(BaseModel):
+    weight_kg: float
+    recorded_at: str | None = None  # ISO datetime string, optional
+    notes: str | None = None
+
+
+class BodyWeightUpdate(BaseModel):
+    weight_kg: float | None = None
+    notes: str | None = None

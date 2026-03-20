@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
+from app.schemas.requests import BodyWeightCreate
 
 router = APIRouter()
 
@@ -52,17 +53,16 @@ async def get_latest(
 
 @router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def add_entry(
-    data: dict,
+    data: BodyWeightCreate,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Log a new weigh-in."""
-    weight_kg = data.get("weight_kg")
-    if not weight_kg or weight_kg <= 0:
+    if not data.weight_kg or data.weight_kg <= 0:
         raise HTTPException(status_code=400, detail="weight_kg must be a positive number")
     entry = BodyWeightEntry(
-        weight_kg=float(weight_kg),
-        recorded_at=datetime.fromisoformat(data["recorded_at"]) if data.get("recorded_at") else datetime.now(timezone.utc),
-        notes=data.get("notes"),
+        weight_kg=data.weight_kg,
+        recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.now(timezone.utc),
+        notes=data.notes,
     )
     db.add(entry)
     await db.flush()
