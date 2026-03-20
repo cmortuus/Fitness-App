@@ -1,7 +1,11 @@
 """Tests for workout session lifecycle API."""
+from datetime import date
+
 import pytest
 from httpx import AsyncClient
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.workout import WorkoutSession, WorkoutStatus
 from tests.conftest import create_exercise, create_plan, start_session_from_plan
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
@@ -88,6 +92,39 @@ class TestSessionLifecycle:
         data = r.json()
         assert data["actual_weight_kg"] == 80.0
         assert data["actual_reps"] == 10
+
+    async def test_guard_survives_multiple_in_progress_sessions(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        """Guard uses .scalars().first() so pre-existing dirty data (multiple
+        in-progress sessions) does not cause a MultipleResultsFound 500 crash.
+
+        Why this wasn't caught before: tests use a fresh DB per run and
+        always complete sessions before creating new ones, so there is never
+        more than one in-progress row.  This test simulates the real-world
+        scenario where a user has orphaned in-progress sessions in their DB.
+        """
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+
+        # Bypass the guard by inserting two IN_PROGRESS sessions directly into the DB
+        for i in range(2):
+            db.add(WorkoutSession(
+                name=f"Orphaned Session {i}",
+                date=date.today(),
+                status=WorkoutStatus.IN_PROGRESS,
+                workout_plan_id=plan["id"],
+            ))
+        await db.commit()
+
+        # Now calling from-plan must return 409 (not 500) even with 2 in-progress rows
+        r = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
+        )
+        assert r.status_code == 409, (
+            f"Expected 409 (duplicate guard), got {r.status_code}: {r.text}"
+        )
 
     async def test_pagination_cap(self, client: AsyncClient):
         """GET /sessions/?limit=9999 returns at most 500 results."""

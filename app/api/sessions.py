@@ -148,7 +148,7 @@ async def start_session(
             WorkoutSession.id != session_id,
         )
     )
-    existing = existing_result.scalar_one_or_none()
+    existing = existing_result.scalars().first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -341,11 +341,13 @@ async def create_session_from_plan(
 
     day_name = day.get("day_name", f"Day {day_number}")
 
-    # Guard: only one in-progress session at a time
+    # Guard: only one in-progress session at a time.
+    # Use .scalars().first() (not scalar_one_or_none) so pre-existing dirty data
+    # with multiple in-progress sessions doesn't cause a MultipleResultsFound crash.
     existing_result = await db.execute(
         select(WorkoutSession).where(WorkoutSession.status == WorkoutStatus.IN_PROGRESS)
     )
-    existing = existing_result.scalar_one_or_none()
+    existing = existing_result.scalars().first()
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
