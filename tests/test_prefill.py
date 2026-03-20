@@ -216,13 +216,14 @@ class TestWeek2Prefill:
 # ── Per-set independence ──────────────────────────────────────────────────────
 
 class TestPerSetIndependence:
-    async def test_all_sets_use_set1_baseline(self, client: AsyncClient):
-        """All sets in the new session use set 1 as the progression baseline.
+    async def test_each_set_progresses_from_its_own_prior_set(self, client: AsyncClient):
+        """Each set in week 2 is progressed from the matching set in week 1.
 
-        Even if previous sets had different reps (due to intra-session fatigue),
-        the new session's planned weight/reps should be uniform across sets so
-        the user sees a clean starting point.  The frontend Epley drop-off handles
-        intra-session variation as sets are completed.
+        e.g. week 1: 100×8 / 100×7 / 100×6
+             week 2: set 1 hit target (8) → progress to 9 reps
+                     set 2 missed target (7 < 8) → retry at 100×7
+                     set 3 missed target (6 < 8) → retry at 100×6
+        This preserves per-set weight steps across weeks.
         """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
@@ -234,16 +235,21 @@ class TestPerSetIndependence:
         await log_set(client, sess1["id"], sets_by_num[2]["id"], 100.0, 7)
         await log_set(client, sess1["id"], sets_by_num[3]["id"], 100.0, 6)
 
-        # Week 2: all sets should progress from set 1's result (8 reps → 9 reps)
+        # Week 2: each set progresses from its own prior-session set
         sess2 = await start_session_from_plan(client, plan["id"])
         s2_by_num = {s["set_number"]: s for s in sess2["sets"]}
 
-        # All sets use set 1 baseline (8 reps hit target → progress to 9)
-        for set_num in (1, 2, 3):
-            assert s2_by_num[set_num]["planned_reps"] == 9, \
-                f"Set {set_num}: expected 9 (set-1 baseline), got {s2_by_num[set_num]['planned_reps']}"
-            assert s2_by_num[set_num]["planned_weight_kg"] == 100.0, \
-                f"Set {set_num}: expected 100.0 kg, got {s2_by_num[set_num]['planned_weight_kg']}"
+        # Set 1: hit target (8 reps) → progress to 9 reps at same weight
+        assert s2_by_num[1]["planned_reps"] == 9,        f"Set 1: expected 9, got {s2_by_num[1]['planned_reps']}"
+        assert s2_by_num[1]["planned_weight_kg"] == 100.0, f"Set 1: expected 100.0 kg"
+
+        # Set 2: missed target (7 < 8) → retry at prior weight/reps
+        assert s2_by_num[2]["planned_reps"] == 7,        f"Set 2: expected 7, got {s2_by_num[2]['planned_reps']}"
+        assert s2_by_num[2]["planned_weight_kg"] == 100.0, f"Set 2: expected 100.0 kg"
+
+        # Set 3: missed target (6 < 8) → retry at prior weight/reps
+        assert s2_by_num[3]["planned_reps"] == 6,        f"Set 3: expected 6, got {s2_by_num[3]['planned_reps']}"
+        assert s2_by_num[3]["planned_weight_kg"] == 100.0, f"Set 3: expected 100.0 kg"
 
     async def test_extra_set_falls_back_gracefully(self, client: AsyncClient):
         """If week 2 has more sets than week 1, extra sets fall back to the last available."""

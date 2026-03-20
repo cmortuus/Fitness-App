@@ -402,32 +402,42 @@ async def create_session_from_plan(
                 "planned_reps": s.planned_reps,
             }
 
-    def _overload_for_exercise(
-        exercise_id: int, target_reps: int, ex_model
+    def _overload_for_set(
+        exercise_id: int, set_num: int, target_reps: int, ex_model
     ) -> tuple[float | None, int | None]:
-        """Compute the progressive overload suggestion for an exercise.
+        """Compute progressive overload for a specific set.
 
-        Uses set 1 from the prior session as the baseline (the heaviest set
-        the user actually performed).  All sets in the new session are pre-filled
-        with the same suggested weight so the display doesn't show a stepped-down
-        weight before the user has even started.  The frontend's inter-set
-        Epley drop-off will reduce subsequent sets' weight as each set is
-        completed during the workout.
+        Each set is progressed from its own corresponding prior-session set so
+        that week-over-week weight steps are preserved per-set.  For example
+        if week 1 was 195×5 / 185×5 / 175×5, week 2 will suggest
+        200×5 / 190×5 / 180×5.
+
+        If the plan's rep target changed since the last session, Epley is used
+        to convert the prior set's weight to an equivalent load at the new rep
+        count before applying the normal progression logic.
         """
         ex_sets = prior_set_data.get(exercise_id)
         if not ex_sets:
             return None, None
 
-        # Prefer set 1 as the baseline; fall back to the lowest-numbered set present.
-        baseline_set = ex_sets.get(1) or ex_sets[min(ex_sets.keys())]
-        prior_weight = baseline_set["weight"]
-        prior_reps = baseline_set["reps"]
-        planned_reps = baseline_set.get("planned_reps") or target_reps
+        # Use the matching prior set; fall back to set 1 if that set wasn't recorded.
+        prior_set = ex_sets.get(set_num) or ex_sets.get(1) or ex_sets[min(ex_sets.keys())]
+        prior_weight = prior_set["weight"]
+        prior_reps   = prior_set["reps"]
+        prior_planned = prior_set.get("planned_reps") or target_reps
+
+        # If the rep target changed, convert the prior weight to the new rep range
+        # via Epley before running the standard overload logic.
+        if target_reps != prior_planned and prior_weight and prior_weight > 0 and prior_reps > 0:
+            one_rm = prior_weight * (1 + prior_reps / 30)
+            prior_weight = round(one_rm / (1 + target_reps / 30) / 2.5) * 2.5
+            prior_reps   = target_reps   # at this weight the user should hit target_reps
+            prior_planned = target_reps
 
         return compute_overload(
             prior_weight=prior_weight,
             prior_reps=prior_reps,
-            planned_reps=planned_reps,
+            planned_reps=prior_planned,
             overload_style=overload_style,
             is_assisted=bool(ex_model and ex_model.is_assisted),
             is_bodyweight=prior_weight <= 0,
@@ -469,13 +479,9 @@ async def create_session_from_plan(
 
         ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
-        # Compute progression once per exercise (from set 1 baseline) so that
-        # all sets in the new session share the same suggested weight.  The
-        # frontend's Epley drop-off will step the weight down as sets are
-        # completed during the workout.
-        weight_kg, suggested_reps = _overload_for_exercise(exercise_id, reps, ex_model)
-
         for set_num in range(1, sets + 1):
+            # Each set is progressed from its own corresponding prior-session set.
+            weight_kg, suggested_reps = _overload_for_set(exercise_id, set_num, reps, ex_model)
             planned_reps_val = suggested_reps if suggested_reps is not None else None
 
             exercise_set = ExerciseSet(

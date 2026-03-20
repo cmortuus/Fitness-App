@@ -543,7 +543,7 @@
       function epleyWeightForReps(w: number, doneReps: number, targetReps: number): number {
         const oneRM = w * (1 + doneReps / 30);
         const raw   = oneRM / (1 + targetReps / 30);
-        return Math.round(raw / 2.5) * 2.5; // nearest 2.5 lb/kg increment
+        return Math.round(raw / 5) * 5; // nearest 5 lb/kg increment
       }
 
       function setForPosition(
