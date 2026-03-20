@@ -225,6 +225,24 @@
         </button>
       {/each}
     </div>
+
+    <!-- Rep bracket explanation — shown when "Rep first" style is active -->
+    {#if $settings.progressionStyle === 'rep'}
+      <div class="text-xs text-gray-400 bg-gray-800 rounded-lg p-3 space-y-1">
+        <p class="font-medium text-gray-300">How rep brackets work</p>
+        <p>Your rep range is split into three brackets:</p>
+        <ul class="list-disc list-inside space-y-0.5 pl-1">
+          <li><span class="text-white font-mono">Bracket 1</span> — 1–9 reps</li>
+          <li><span class="text-white font-mono">Bracket 2</span> — 10–14 reps</li>
+          <li><span class="text-white font-mono">Bracket 3</span> — 15+ reps</li>
+        </ul>
+        <p class="pt-0.5">
+          Each session you add 1 rep. When the next rep would push you into a higher bracket,
+          weight increases instead (via the Epley 1RM formula) and reps reset to the bottom of
+          the new bracket range.
+        </p>
+      </div>
+    {/if}
   </div>
 
   <!-- ── Rest Timer ──────────────────────────────────────────────────── -->
