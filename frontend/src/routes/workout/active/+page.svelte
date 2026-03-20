@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
+  import { onMount, onDestroy, tick } from 'svelte';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getRecentExercises, getSession,
@@ -678,15 +678,16 @@
     })()
   );
 
-  function openAddModal() {
+  async function openAddModal() {
     searchQuery = '';
     pickingExercise = null;
     pendingSets = 3;
     filterRegion = 'all';
     filterType = 'all';
     showAddModal = true;
-    // Focus the search box on the next frame once the modal is in the DOM
-    setTimeout(() => searchInputEl?.focus(), 50);
+    // Wait for Svelte to flush DOM updates, then focus immediately — no setTimeout needed
+    await tick();
+    searchInputEl?.focus();
   }
 
   function confirmAdd() {
