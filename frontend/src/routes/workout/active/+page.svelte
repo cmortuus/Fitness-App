@@ -3,12 +3,12 @@
   import { beforeNavigate } from '$app/navigation';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
-    getExercises, getPlan, getPlans, getRecentExercises, getSession,
+    getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, ExerciseHistorySession } from '$lib/api';
+  import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -190,7 +190,16 @@
     showPicker = false;
     try {
       const bodyWtKg = $latestBodyWeight?.weight_kg ?? 0;
-      const raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
+      let raw;
+      try {
+        raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
+      } catch (e: any) {
+        if (e?.response?.status === 409) {
+          await handleConflict(() => startFromPlan(planId, dayNumber));
+          return;
+        }
+        throw e;
+      }
       const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
@@ -263,10 +272,19 @@
     loading = true;
     showPicker = false;
     try {
-      const raw = await createSession({
-        date: new Date().toISOString().split('T')[0],
-        name: `Workout – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
-      });
+      let raw;
+      try {
+        raw = await createSession({
+          date: new Date().toISOString().split('T')[0],
+          name: `Workout – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        });
+      } catch (e: any) {
+        if (e?.response?.status === 409) {
+          await handleConflict(startFreeSession);
+          return;
+        }
+        throw e;
+      }
       const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
@@ -809,6 +827,41 @@
     window.location.href = '/';
   }
 
+  // ─── Conflict state (existing in-progress session blocks starting a new one) ──
+  let conflictSession = $state<WorkoutSession | null>(null);
+  let conflictRetry = $state<(() => Promise<void>) | null>(null); // re-run after abandoning
+
+  async function handleConflict(retry: () => Promise<void>) {
+    // Find the existing in-progress session to show its name in the UI
+    try {
+      const sessions = await getSessions({ limit: 20 });
+      conflictSession = sessions.find(s => s.status === 'in_progress') ?? null;
+    } catch { conflictSession = null; }
+    conflictRetry = retry;
+    loading = false;
+  }
+
+  async function continueExisting() {
+    const sess = conflictSession;
+    conflictSession = null;
+    conflictRetry = null;
+    // Ensure the store is set so resumeSession() can look up the ID
+    if (sess) currentSession.set(sess);
+    await resumeSession();
+  }
+
+  async function abandonAndRetry() {
+    if (!conflictSession) return;
+    loading = true;
+    try {
+      await deleteSession(conflictSession.id);
+    } catch { /* ignore if delete fails */ }
+    conflictSession = null;
+    const retry = conflictRetry;
+    conflictRetry = null;
+    if (retry) await retry();
+  }
+
   // ─── Exercise notes toggle ────────────────────────────────────────────────
   let expandedNotes = $state(new Set<string>());
   function toggleNotes(uiId: string) {
@@ -927,6 +980,27 @@
         </button>
       </div>
 
+  </div>
+
+<!-- ─── Conflict: existing in-progress session ────────────────────────── -->
+{:else if conflictSession}
+  <div class="flex items-center justify-center flex-1 p-4">
+    <div class="card max-w-md w-full text-center space-y-4">
+      <div class="text-amber-400 text-4xl">⚠️</div>
+      <h2 class="text-xl font-semibold">Workout already in progress</h2>
+      <p class="text-gray-400 text-sm">
+        <span class="text-white font-medium">{conflictSession.name}</span> is still active.
+        Do you want to continue it or abandon it and start a new one?
+      </p>
+      <div class="flex flex-col gap-3 pt-1">
+        <button onclick={continueExisting} class="btn-primary w-full">▶ Continue Existing Workout</button>
+        <button
+          onclick={abandonAndRetry}
+          class="w-full px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors text-sm font-medium"
+        >🗑 Abandon & Start New</button>
+      </div>
+      <a href="/plans" class="block text-xs text-gray-500 hover:text-gray-300 transition-colors">← Back to Plans</a>
+    </div>
   </div>
 
 <!-- ─── Error ──────────────────────────────────────────────────────────── -->
