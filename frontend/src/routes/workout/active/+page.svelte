@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
+  import { beforeNavigate } from '$app/navigation';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getRecentExercises, getSession,
@@ -169,6 +170,18 @@
   onDestroy(() => {
     if (clockInterval) clearInterval(clockInterval);
     if (restInterval) clearInterval(restInterval);
+  });
+
+  // Warn before leaving the page if there's an active session with incomplete sets
+  beforeNavigate(({ cancel }) => {
+    if (!$currentSession) return;
+    const hasUnsaved = uiExercises.some(ex => ex.sets.some(s => !s.done));
+    if (hasUnsaved) {
+      const confirmed = confirm(
+        'You have an active workout with unfinished sets. Leave anyway? Your progress so far is saved.'
+      );
+      if (!confirmed) cancel();
+    }
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────

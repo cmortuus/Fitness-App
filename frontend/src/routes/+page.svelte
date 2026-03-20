@@ -284,6 +284,8 @@
         {@const isToday   = key === todayStr}
         {@const isSelected = key === selectedDay}
         {@const hasWorkout = hits.length > 0}
+        {@const hasCompleted = hits.some(s => s.status === 'completed')}
+        {@const hasAbandoned = hits.some(s => s.status !== 'completed' && s.status !== 'skipped')}
 
         <button
           onclick={() => hasWorkout && selectDay(key)}
@@ -297,8 +299,14 @@
           <span class="{isToday ? 'text-primary-400 font-bold' : ''}">{day}</span>
           {#if hasWorkout}
             <div class="flex gap-0.5">
-              {#each { length: Math.min(hits.length, 3) } as _}
-                <div class="w-1.5 h-1.5 rounded-full {isSelected ? 'bg-primary-300' : 'bg-primary-500'}"></div>
+              {#each hits.slice(0, 3) as s}
+                <div class="w-1.5 h-1.5 rounded-full {
+                  isSelected
+                    ? 'bg-primary-300'
+                    : s.status === 'completed'
+                      ? 'bg-green-500'
+                      : 'bg-gray-500'
+                }"></div>
               {/each}
             </div>
           {/if}

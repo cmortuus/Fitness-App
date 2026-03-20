@@ -138,9 +138,9 @@
   </div>
 
   <!-- Recommendations -->
+  <div class="card">
+    <h3 class="text-lg font-semibold mb-4">Progression Recommendations</h3>
   {#if recommendations.length > 0}
-    <div class="card">
-      <h3 class="text-lg font-semibold mb-4">Progression Recommendations</h3>
       <div class="overflow-x-auto">
         <table class="w-full text-left">
           <thead>
@@ -167,8 +167,12 @@
           </tbody>
         </table>
       </div>
-    </div>
+  {:else}
+    <p class="text-gray-400 text-center py-6">
+      No recommendations yet — complete at least one workout in the selected time range and the engine will suggest next weights based on your performance.
+    </p>
   {/if}
+  </div>
 
   <!-- Detailed Stats -->
   <div class="card">
