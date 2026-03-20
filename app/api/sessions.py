@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.exercise import Exercise
 from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
+from app.services.progression import compute_overload
 from app.schemas.requests import (
     SetCreate,
     SetResponse,
@@ -74,7 +75,6 @@ async def list_sessions(
 ) -> list[dict]:
     """List workout sessions, most recent first."""
     limit = min(limit, 500)
-    from sqlalchemy import desc
     result = await db.execute(
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
@@ -392,76 +392,28 @@ async def create_session_from_plan(
                 "planned_reps": s.planned_reps,
             }
 
-    def rep_bracket(reps: int) -> int:
-        """Same brackets as the in-workout drop-off."""
-        if reps >= 15:
-            return 3
-        if reps >= 10:
-            return 2
-        return 1
-
-    def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> float:
-        """Use Epley 1RM to find the weight equivalent to having done done_reps at `weight`,
-        expressed at target_reps.  Rounds to nearest 2.5 kg (~5 lbs)."""
-        one_rm = weight * (1 + done_reps / 30)
-        new_w  = one_rm / (1 + target_reps / 30)
-        return round(new_w / 2.5) * 2.5
-
-    def progressive_overload(exercise_id: int, set_number: int, target_reps: int, ex_model) -> tuple[float | None, int | None]:
-        """Return (suggested_weight_kg, suggested_reps) for a specific set.
-        Looks up the corresponding set from the prior session so each set
-        is overloaded from its own history. Falls back to None if no data."""
+    def _overload_for_set(
+        exercise_id: int, set_number: int, target_reps: int, ex_model
+    ) -> tuple[float | None, int | None]:
+        """Resolve prior-session data for this set and delegate to compute_overload()."""
         ex_sets = prior_set_data.get(exercise_id)
         if not ex_sets:
             return None, None
 
-        # Use the matching set from the prior session; fall back to the closest
-        # set number if the session had fewer sets (e.g. prior had 3, now doing 4).
-        prior_set = ex_sets.get(set_number)
-        if prior_set is None:
-            # Fall back: use the last available set (handles added sets gracefully)
-            last_set_num = max(ex_sets.keys())
-            prior_set = ex_sets[last_set_num]
-
+        prior_set = ex_sets.get(set_number) or ex_sets[max(ex_sets.keys())]
         prior_weight = prior_set["weight"]
-        prior_reps   = prior_set["reps"]
+        prior_reps = prior_set["reps"]
         planned_reps = prior_set.get("planned_reps") or target_reps
 
-        if prior_reps <= 0:
-            return None, None
-
-        is_assisted = ex_model and ex_model.is_assisted
-
-        # Assisted: prior_weight is the NET effective weight (body - assist).
-        # Convert back to assist amount so the frontend can pre-fill directly.
-        if is_assisted:
-            new_reps = prior_reps + 1 if prior_reps >= planned_reps else prior_reps
-            if body_weight_kg > 0 and prior_weight > 0:
-                assist_kg = max(0.0, round((body_weight_kg - prior_weight) / 1.25) * 1.25)
-                return assist_kg, new_reps
-            return None, new_reps
-
-        # Bodyweight exercise: no weight to suggest, but still apply rep progression
-        if prior_weight <= 0:
-            if prior_reps >= planned_reps:
-                return None, prior_reps + 1
-            return None, prior_reps
-
-        # Didn't hit planned reps → retry same weight / same reps
-        if prior_reps < planned_reps:
-            return prior_weight, prior_reps
-
-        # ── Hit target: apply progression ─────────────────────────────────────
-        if overload_style == "weight":
-            new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-            return new_weight, prior_reps
-        else:
-            projected_reps = prior_reps + 1
-            if rep_bracket(projected_reps) <= rep_bracket(prior_reps):
-                return prior_weight, projected_reps
-            else:
-                new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-                return new_weight, prior_reps
+        return compute_overload(
+            prior_weight=prior_weight,
+            prior_reps=prior_reps,
+            planned_reps=planned_reps,
+            overload_style=overload_style,
+            is_assisted=bool(ex_model and ex_model.is_assisted),
+            is_bodyweight=prior_weight <= 0,
+            body_weight_kg=body_weight_kg,
+        )
 
     # Create session
     workout_session = WorkoutSession(
@@ -486,7 +438,7 @@ async def create_session_from_plan(
         for set_num in range(1, sets + 1):
             # Compute progression individually per set so each set uses
             # its own history from the prior session.
-            weight_kg, suggested_reps = progressive_overload(exercise_id, set_num, reps, ex_model)
+            weight_kg, suggested_reps = _overload_for_set(exercise_id, set_num, reps, ex_model)
             planned_reps_val = suggested_reps if suggested_reps is not None else None
 
             exercise_set = ExerciseSet(
