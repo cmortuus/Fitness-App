@@ -257,6 +257,7 @@ async def delete_plan(
             detail=f"Workout plan {plan_id} not found",
         )
     await db.delete(plan)
+    await db.flush()
 
 
 class PlanUpdate(BaseModel):
