@@ -37,18 +37,20 @@ async def list_entries(
     return [serialize_entry(e) for e in result.scalars().all()]
 
 
-@router.get("/latest", response_model=dict | None)
+@router.get("/latest", response_model=dict)
 async def get_latest(
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> dict | None:
-    """Return the most recent weigh-in, or null if none exists."""
+) -> dict:
+    """Return the most recent weigh-in, or 404 if none exists."""
     result = await db.execute(
         select(BodyWeightEntry)
         .order_by(desc(BodyWeightEntry.recorded_at))
         .limit(1)
     )
     entry = result.scalar_one_or_none()
-    return serialize_entry(entry) if entry else None
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No weigh-in entries found")
+    return serialize_entry(entry)
 
 
 @router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
@@ -57,8 +59,6 @@ async def add_entry(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Log a new weigh-in."""
-    if not data.weight_kg or data.weight_kg <= 0:
-        raise HTTPException(status_code=400, detail="weight_kg must be a positive number")
     entry = BodyWeightEntry(
         weight_kg=data.weight_kg,
         recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.now(timezone.utc),
@@ -81,6 +81,6 @@ async def delete_entry(
     )
     entry = result.scalar_one_or_none()
     if not entry:
-        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Entry {entry_id} not found")
     await db.delete(entry)
     await db.flush()
