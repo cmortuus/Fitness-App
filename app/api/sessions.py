@@ -1,6 +1,6 @@
 """Workout session API endpoints."""
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -73,6 +73,7 @@ async def list_sessions(
     offset: int = 0,
 ) -> list[dict]:
     """List workout sessions, most recent first."""
+    limit = min(limit, 500)
     from sqlalchemy import desc
     result = await db.execute(
         select(WorkoutSession)
@@ -142,7 +143,7 @@ async def start_session(
         )
 
     workout_session.status = WorkoutStatus.IN_PROGRESS
-    workout_session.started_at = datetime.utcnow()
+    workout_session.started_at = datetime.now(timezone.utc)
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id)
     return serialize_session(workout_session)
@@ -167,7 +168,7 @@ async def complete_session(
         )
 
     workout_session.status = WorkoutStatus.COMPLETED
-    workout_session.completed_at = datetime.utcnow()
+    workout_session.completed_at = datetime.now(timezone.utc)
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id)
     return serialize_session(workout_session)
