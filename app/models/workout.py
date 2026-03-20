@@ -50,7 +50,11 @@ class ExerciseSet(Base):
     actual_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    # Unilateral rep tracking (left/right independently)
+    # Unilateral planned targets (left/right independently)
+    planned_reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    planned_reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Unilateral actual rep tracking (left/right independently)
     reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

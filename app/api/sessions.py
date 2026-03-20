@@ -40,9 +40,13 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "exercise_id": exercise_set.exercise_id,
         "set_number": exercise_set.set_number,
         "planned_reps": exercise_set.planned_reps,
+        "planned_reps_left": exercise_set.planned_reps_left,
+        "planned_reps_right": exercise_set.planned_reps_right,
         "planned_weight_kg": exercise_set.planned_weight_kg,
         "actual_reps": exercise_set.actual_reps,
         "actual_weight_kg": exercise_set.actual_weight_kg,
+        "reps_left": exercise_set.reps_left,
+        "reps_right": exercise_set.reps_right,
         "notes": exercise_set.notes,
         "started_at": exercise_set.started_at,
         "completed_at": exercise_set.completed_at,
@@ -400,44 +404,33 @@ async def create_session_from_plan(
                 "weight": s.actual_weight_kg,
                 "reps": s.actual_reps,
                 "planned_reps": s.planned_reps,
+                "reps_left": s.reps_left,
+                "reps_right": s.reps_right,
+                "planned_reps_left": s.planned_reps_left,
+                "planned_reps_right": s.planned_reps_right,
             }
 
-    def _overload_for_set(
-        exercise_id: int, set_num: int, target_reps: int, ex_model
+    def _overload_for_side(
+        prior_weight: float | None,
+        prior_reps: int | None,
+        prior_planned: int | None,
+        target_reps: int,
+        ex_model,
     ) -> tuple[float | None, int | None]:
-        """Compute progressive overload for a specific set.
-
-        Each set is progressed from its own corresponding prior-session set so
-        that week-over-week weight steps are preserved per-set.  For example
-        if week 1 was 195×5 / 185×5 / 175×5, week 2 will suggest
-        200×5 / 190×5 / 180×5.
-
-        If the plan's rep target changed since the last session, Epley is used
-        to convert the prior set's weight to an equivalent load at the new rep
-        count before applying the normal progression logic.
-        """
-        ex_sets = prior_set_data.get(exercise_id)
-        if not ex_sets:
+        """Compute overload for one side (or a bilateral set) given prior values."""
+        if prior_reps is None or prior_reps <= 0:
             return None, None
 
-        # Use the matching prior set; fall back to set 1 if that set wasn't recorded.
-        prior_set = ex_sets.get(set_num) or ex_sets.get(1) or ex_sets[min(ex_sets.keys())]
-        prior_weight = prior_set["weight"]
-        prior_reps   = prior_set["reps"]
-        prior_planned = prior_set.get("planned_reps") or target_reps
+        planned = prior_planned or target_reps
 
-        # If the rep target changed, convert the prior weight to the new rep range
-        # via Epley before running the standard overload logic.
-        # Guard: skip conversion when target_reps is 0 (plan exercise has no rep
-        # target set), falling through to use prior_planned as the target.
-        if target_reps > 0 and target_reps != prior_planned and prior_weight and prior_weight > 0 and prior_reps > 0:
-            one_rm = prior_weight * (1 + prior_reps / 30)
+        # Epley conversion when rep target changed (and target is valid)
+        if target_reps > 0 and target_reps != planned and prior_weight > 0 and prior_reps > 0:
+            one_rm   = prior_weight * (1 + prior_reps / 30)
             prior_weight = round(one_rm / (1 + target_reps / 30) / 2.5) * 2.5
-            prior_reps   = target_reps   # at this weight the user should hit target_reps
-            prior_planned = target_reps
+            prior_reps   = target_reps
+            planned      = target_reps
 
-        # Use prior_planned as the rep target when the plan has no rep target (0)
-        effective_planned = prior_planned if prior_planned > 0 else (target_reps or 8)
+        effective_planned = planned if planned and planned > 0 else (target_reps or 8)
         return compute_overload(
             prior_weight=prior_weight,
             prior_reps=prior_reps,
@@ -447,6 +440,55 @@ async def create_session_from_plan(
             is_bodyweight=prior_weight <= 0,
             body_weight_kg=body_weight_kg,
         )
+
+    def _overload_for_set(
+        exercise_id: int, set_num: int, target_reps: int, ex_model
+    ) -> tuple[float | None, int | None, int | None, int | None]:
+        """Return (weight_kg, planned_reps, planned_reps_left, planned_reps_right).
+
+        Bilateral exercises: planned_reps_left/right are None.
+        Unilateral exercises: each side is progressed independently from its
+        own prior reps_left / reps_right; planned_reps is set to the weaker side.
+        """
+        ex_sets = prior_set_data.get(exercise_id)
+        if not ex_sets:
+            return None, None, None, None
+
+        prior_set = ex_sets.get(set_num) or ex_sets.get(1) or ex_sets[min(ex_sets.keys())]
+
+        left_reps  = prior_set.get("reps_left")
+        right_reps = prior_set.get("reps_right")
+        is_unilateral = bool(ex_model and ex_model.is_unilateral)
+
+        if is_unilateral and (left_reps or right_reps):
+            # Each side progresses independently
+            prior_weight = prior_set["weight"]
+            weight_kg, _ = _overload_for_side(
+                prior_weight, left_reps or right_reps,
+                prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
+                target_reps, ex_model,
+            )
+            _, new_reps_left = _overload_for_side(
+                prior_weight, left_reps,
+                prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
+                target_reps, ex_model,
+            )
+            _, new_reps_right = _overload_for_side(
+                prior_weight, right_reps,
+                prior_set.get("planned_reps_right") or prior_set.get("planned_reps"),
+                target_reps, ex_model,
+            )
+            # planned_reps = weaker side (conservative display)
+            weaker = min(v for v in (new_reps_left, new_reps_right) if v is not None) \
+                if new_reps_left and new_reps_right else (new_reps_left or new_reps_right)
+            return weight_kg, weaker, new_reps_left, new_reps_right
+
+        # Bilateral: standard single-side logic
+        weight_kg, planned_reps = _overload_for_side(
+            prior_set["weight"], prior_set["reps"],
+            prior_set.get("planned_reps"), target_reps, ex_model,
+        )
+        return weight_kg, planned_reps, None, None
 
     # Create session
     workout_session = WorkoutSession(
@@ -485,14 +527,16 @@ async def create_session_from_plan(
 
         for set_num in range(1, sets + 1):
             # Each set is progressed from its own corresponding prior-session set.
-            weight_kg, suggested_reps = _overload_for_set(exercise_id, set_num, reps, ex_model)
-            planned_reps_val = suggested_reps if suggested_reps is not None else None
+            weight_kg, suggested_reps, planned_left, planned_right = \
+                _overload_for_set(exercise_id, set_num, reps, ex_model)
 
             exercise_set = ExerciseSet(
                 workout_session_id=workout_session.id,
                 exercise_id=exercise_id,
                 set_number=set_num,
-                planned_reps=planned_reps_val,
+                planned_reps=suggested_reps,
+                planned_reps_left=planned_left,
+                planned_reps_right=planned_right,
                 planned_weight_kg=weight_kg,
             )
             db.add(exercise_set)

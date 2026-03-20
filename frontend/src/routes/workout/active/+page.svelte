@@ -222,12 +222,16 @@
               ? fromKg(bset.planned_weight_kg)
               : null;
             const suggestedReps = (bset?.planned_reps ?? 0) > 0 ? bset!.planned_reps : null;
+            // Per-side planned reps for unilateral exercises (null for bilateral)
+            const suggestedRepsLeft  = (bset?.planned_reps_left  ?? 0) > 0 ? bset!.planned_reps_left  : null;
+            const suggestedRepsRight = (bset?.planned_reps_right ?? 0) > 0 ? bset!.planned_reps_right : null;
 
             // Compute 1RM anchor so the user can freely adjust weight or reps
             // and have the other field auto-fill via Epley.
+            const refRepsForOneRM = suggestedRepsLeft ?? suggestedReps;
             const oneRM = (suggestedWeight != null && suggestedWeight > 0 &&
-                           suggestedReps   != null && suggestedReps   > 0)
-              ? suggestedWeight * (1 + suggestedReps / 30)
+                           refRepsForOneRM != null && refRepsForOneRM > 0)
+              ? suggestedWeight * (1 + refRepsForOneRM / 30)
               : null;
 
             sets.push({
@@ -235,12 +239,11 @@
               backendId: bset?.id ?? null,
               setNumber: i,
               weightLbs: suggestedWeight,
-              // Pre-fill reps with the suggested target so the user can see what
-              // they're aiming for.  The Epley drop-off adjusts weight (not reps)
-              // as each set is completed.
               reps: suggestedReps,
-              repsLeft: null,
-              repsRight: null,
+              // Pre-fill L/R with per-side planned reps when available,
+              // falling back to the bilateral planned_reps.
+              repsLeft:  suggestedRepsLeft  ?? suggestedReps,
+              repsRight: suggestedRepsRight ?? suggestedReps,
               done: false,
               saving: false,
               oneRM,
@@ -563,6 +566,11 @@
         ? Math.max(0, bodyWeightInUnit - assistVal)
         : (set.weightLbs ?? 0);
 
+      // Drop-off only applies to sets with no backend-planned weight.
+      // Week 2+ sets already have per-set planned values from the server
+      // (initWeight !== null) — those should be left untouched.
+      const week1PendingSets = pendingSets.filter(s => s.initWeight === null);
+
       if (ex.isUnilateral) {
         const leftReps  = set.repsLeft  ?? 0;
         const rightReps = set.repsRight ?? 0;
@@ -571,12 +579,11 @@
           : (leftReps || rightReps);
 
         if (refReps > 0 && completedWeight > 0) {
-          pendingSets.forEach((s, idx) => {
+          week1PendingSets.forEach((s, idx) => {
             const { weight, reps } = setForPosition(completedWeight, refReps, idx + 1);
             s.repsLeft  = reps;
             s.repsRight = reps;
             if (isAssisted) {
-              // convert net load back to assist amount
               s.weightLbs = Math.max(0, Math.round((bodyWeightInUnit - weight) / 2.5) * 2.5);
             } else {
               s.weightLbs = weight;
@@ -585,7 +592,7 @@
         }
       } else {
         if (effectiveReps > 0 && completedWeight > 0) {
-          pendingSets.forEach((s, idx) => {
+          week1PendingSets.forEach((s, idx) => {
             const { weight, reps } = setForPosition(completedWeight, effectiveReps, idx + 1);
             s.reps = reps;
             if (isAssisted) {
