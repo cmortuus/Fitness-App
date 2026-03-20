@@ -21,74 +21,83 @@ async def get_progress(
     start_date: date | None = Query(None, description="Start date for progress"),
     end_date: date | None = Query(None, description="End date for progress"),
 ) -> list[dict]:
-    """Get progress metrics over time."""
-    # Default to last 30 days
+    """Get progress metrics over time.
+
+    Returns one entry per completed session × exercise so the frontend
+    can plot a proper trend line.  Previously this endpoint collapsed
+    every session for an exercise into a single aggregate row and then
+    stamped the wrong date on it (the last session's date rather than
+    each session's own date).
+    """
     if not start_date:
         start_date = date.today() - timedelta(days=30)
     if not end_date:
         end_date = date.today()
 
-    # Query completed sessions in date range
-    query = select(WorkoutSession).where(
-        WorkoutSession.status == "completed",
-        WorkoutSession.date >= start_date,
-        WorkoutSession.date <= end_date,
+    # Fetch completed sessions in the requested date range, oldest first
+    # so the chart x-axis is naturally ordered.
+    session_result = await db.execute(
+        select(WorkoutSession)
+        .where(
+            WorkoutSession.status == "completed",
+            WorkoutSession.date >= start_date,
+            WorkoutSession.date <= end_date,
+        )
+        .order_by(WorkoutSession.date, WorkoutSession.id)
     )
+    sessions = session_result.scalars().all()
 
-    if exercise_id:
-        query = query.join(ExerciseSet).where(ExerciseSet.exercise_id == exercise_id)
-
-    result = await db.execute(query)
-    sessions = result.scalars().all()
-
-    # Build progress data per exercise
-    exercise_data = {}
+    progress_list: list[dict] = []
 
     for session in sessions:
-        sets_result = await db.execute(
-            select(ExerciseSet).where(
-                ExerciseSet.workout_session_id == session.id,
-                ExerciseSet.actual_reps.is_not(None),
-            )
+        # Fetch all completed sets for this session (optionally filtered)
+        sets_query = select(ExerciseSet).where(
+            ExerciseSet.workout_session_id == session.id,
+            ExerciseSet.actual_reps.is_not(None),
         )
+        if exercise_id:
+            sets_query = sets_query.where(ExerciseSet.exercise_id == exercise_id)
+
+        sets_result = await db.execute(sets_query)
         sets = sets_result.scalars().all()
 
-        for exercise_set in sets:
-            ex_id = exercise_set.exercise_id
-            if ex_id not in exercise_data:
-                exercise_data[ex_id] = {
-                    "volume": 0,
-                    "total_reps": 0,
-                    "total_sets": 0,
-                    "max_weight": 0,
-                }
+        # Group sets by exercise
+        exercise_sets: dict[int, list[ExerciseSet]] = {}
+        for s in sets:
+            exercise_sets.setdefault(s.exercise_id, []).append(s)
 
-            volume = (exercise_set.actual_reps or 0) * (exercise_set.actual_weight_kg or 0)
-            exercise_data[ex_id]["volume"] += volume
-            exercise_data[ex_id]["total_reps"] += exercise_set.actual_reps or 0
-            exercise_data[ex_id]["total_sets"] += 1
-            exercise_data[ex_id]["max_weight"] = max(
-                exercise_data[ex_id]["max_weight"],
-                exercise_set.actual_weight_kg or 0
+        for ex_id, ex_sets in exercise_sets.items():
+            exercise = await db.get(Exercise, ex_id)
+            if not exercise:
+                continue
+
+            # Volume for this session = Σ(weight × reps) across all sets
+            volume = sum(
+                (s.actual_reps or 0) * (s.actual_weight_kg or 0)
+                for s in ex_sets
             )
 
-    # Get exercise names and format response
-    progress_list = []
-    for ex_id, data in exercise_data.items():
-        exercise = await db.get(Exercise, ex_id)
-        if exercise:
-            # Estimate 1RM using Epley formula
-            estimated_1rm = None
-            if data["max_weight"] > 0 and data["total_reps"] > 0:
-                estimated_1rm = data["max_weight"] * (1 + data["total_reps"] / 30)
+            # Best Epley 1RM across sets: max(weight × (1 + reps/30))
+            # Use per-set reps — NOT the total reps sum, which produces
+            # wildly inflated estimates.
+            estimated_1rm: float | None = None
+            max_weight: float = 0.0
+            for s in ex_sets:
+                w = s.actual_weight_kg or 0.0
+                r = s.actual_reps or 0
+                max_weight = max(max_weight, w)
+                if w > 0 and r > 0:
+                    one_rm = w * (1 + r / 30)
+                    if estimated_1rm is None or one_rm > estimated_1rm:
+                        estimated_1rm = one_rm
 
             progress_list.append({
                 "exercise_id": ex_id,
                 "exercise_name": exercise.display_name,
                 "date": session.date.isoformat(),
                 "estimated_1rm": round(estimated_1rm, 1) if estimated_1rm else None,
-                "volume_load": round(data["volume"], 1),
-                "recommended_weight": round(data["max_weight"] * 1.05, 1),
+                "volume_load": round(volume, 1),
+                "recommended_weight": round(max_weight * 1.05, 1),
             })
 
     return progress_list
@@ -103,7 +112,6 @@ async def get_recommendations(
 
     start_date = date.today() - timedelta(days=days_back)
 
-    # Get completed sessions
     result = await db.execute(
         select(WorkoutSession).where(
             WorkoutSession.status == "completed",
@@ -115,8 +123,8 @@ async def get_recommendations(
     if not sessions:
         return []
 
-    # Collect data per exercise
-    exercise_performance = {}
+    # Collect best performance per exercise across all sessions
+    exercise_performance: dict[int, dict] = {}
 
     for session in sessions:
         sets_result = await db.execute(
@@ -131,13 +139,13 @@ async def get_recommendations(
             ex_id = exercise_set.exercise_id
             if ex_id not in exercise_performance:
                 exercise_performance[ex_id] = {
-                    "best_weight": 0,
+                    "best_weight": 0.0,
                     "best_reps": 0,
-                    "total_volume": 0,
+                    "total_volume": 0.0,
                     "set_count": 0,
                 }
 
-            weight = exercise_set.actual_weight_kg or 0
+            weight = exercise_set.actual_weight_kg or 0.0
             reps = exercise_set.actual_reps or 0
 
             if weight > exercise_performance[ex_id]["best_weight"]:
@@ -147,7 +155,6 @@ async def get_recommendations(
             exercise_performance[ex_id]["total_volume"] += weight * reps
             exercise_performance[ex_id]["set_count"] += 1
 
-    # Generate recommendations
     recommendations = []
     for ex_id, perf in exercise_performance.items():
         exercise = await db.get(Exercise, ex_id)
@@ -155,21 +162,19 @@ async def get_recommendations(
             continue
 
         current_weight = perf["best_weight"]
-        recommended_weight = current_weight
 
-        # Progression logic based on reps achieved
         if perf["best_reps"] >= 10:
             recommended_weight = current_weight * 1.05
-            reason = "Achieved 10+ reps - increase weight by 5%"
+            reason = "Achieved 10+ reps — increase weight by 5%"
         elif perf["best_reps"] >= 8:
             recommended_weight = current_weight * 1.025
-            reason = "Achieved 8-9 reps - small weight increase"
+            reason = "Achieved 8–9 reps — small weight increase"
         elif perf["best_reps"] >= 5:
             recommended_weight = current_weight
             reason = "Focus on adding reps before increasing weight"
         else:
             recommended_weight = current_weight * 0.95
-            reason = "Below 5 reps - consider deloading"
+            reason = "Below 5 reps — consider deloading"
 
         recommendations.append({
             "exercise_id": ex_id,
