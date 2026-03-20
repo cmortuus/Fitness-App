@@ -521,77 +521,64 @@
         if (!s.weightLbs) s.weightLbs = set.weightLbs;
       }
 
-      // ── Rep drop-off helpers ─────────────────────────────────────────
-      function repDropoff(reps: number): number {
-        if (reps >= 15) return 3;
-        if (reps >= 10) return 2;
-        if (reps >= 5)  return 1;
-        return 0;
-      }
-      function epley1RM(w: number, r: number) { return w * (1 + r / 30); }
-      function weightForReps(oneRM: number, r: number) { return oneRM / (1 + r / 30); }
+      // ── Epley inter-set weight drop-off ──────────────────────────────
+      // Apply fatigue to weight only (not reps). Each pending set gets 3%
+      // less effective 1RM per position. Reps stay at their planned target
+      // so the user stays in the intended rep range throughout the exercise.
+      function epley1RM(w: number, r: number): number { return w * (1 + r / 30); }
+      function weightForReps(oneRM: number, r: number): number { return oneRM / (1 + r / 30); }
 
-      // Project reps for a single side at a given set position (floors at 1, no rounding)
-      function projectReps(startReps: number, setNum: number): number {
-        return Math.max(1, startReps - repDropoff(startReps) * setNum);
-      }
-      // True when the floor kicks in (reps would naturally go below 5)
-      function isFloored(startReps: number, setNum: number): boolean {
-        return (startReps - repDropoff(startReps) * setNum) < 5;
-      }
-
-      // Use effective weight for Epley/drop-off (net load, not assist amount)
+      // Use effective (net) weight for Epley calculations
       const completedWeight = isAssisted
         ? Math.max(0, bodyWeightInUnit - assistVal)
         : (set.weightLbs ?? 0);
 
-      if (ex.isUnilateral) {
-        const leftReps  = set.repsLeft  ?? 0;
-        const rightReps = set.repsRight ?? 0;
-
-        pendingSets.forEach((s, idx) => {
-          const setNum = idx + 1;
-
-          // Always apply drop-off to reps
-          if (leftReps  > 0) s.repsLeft  = projectReps(leftReps,  setNum);
-          if (rightReps > 0) s.repsRight = projectReps(rightReps, setNum);
-
-          // Weight reduction only when reps hit the floor
-          const weakerReps = leftReps > 0 && rightReps > 0
+      if (completedWeight > 0) {
+        if (ex.isUnilateral) {
+          const leftReps  = set.repsLeft  ?? 0;
+          const rightReps = set.repsRight ?? 0;
+          // Weaker side is the limiting factor for 1RM calculation
+          const refReps = leftReps > 0 && rightReps > 0
             ? Math.min(leftReps, rightReps)
             : (leftReps || rightReps);
 
-          if (weakerReps > 0 && isFloored(weakerReps, setNum) && completedWeight > 0) {
-            const fatigued1RM  = epley1RM(completedWeight, weakerReps) * Math.pow(0.97, setNum);
-            const newEffective = Math.min(completedWeight, Math.round(weightForReps(fatigued1RM, 5) / 2.5) * 2.5);
-            if (isAssisted) {
-              const newAssist = Math.max(0, Math.round((bodyWeightInUnit - newEffective) / 2.5) * 2.5);
-              if (newAssist > (s.weightLbs ?? 0)) s.weightLbs = newAssist;
-            } else {
-              if (newEffective < (s.weightLbs ?? completedWeight)) s.weightLbs = newEffective;
-            }
-          }
-        });
-      } else {
-        if (effectiveReps > 0) {
-          const oneRM = epley1RM(completedWeight, effectiveReps);
-          pendingSets.forEach((s, idx) => {
-            const setNum = idx + 1;
-
-            // Always apply drop-off to reps
-            s.reps = projectReps(effectiveReps, setNum);
-
-            if (isFloored(effectiveReps, setNum) && completedWeight > 0) {
-              const fatigued1RM  = oneRM * Math.pow(0.97, setNum);
-              const newEffective = Math.min(completedWeight, Math.round(weightForReps(fatigued1RM, 5) / 2.5) * 2.5);
+          if (refReps > 0) {
+            const oneRM = epley1RM(completedWeight, refReps);
+            pendingSets.forEach((s, idx) => {
+              // Target reps: use this set's planned reps; fall back to completed reps
+              const targetReps = Math.max(4, s.initReps ?? refReps);
+              const fatigued1RM = oneRM * Math.pow(0.97, idx + 1);
+              const newEffective = Math.min(
+                completedWeight,
+                Math.round(weightForReps(fatigued1RM, targetReps) / 2.5) * 2.5,
+              );
               if (isAssisted) {
                 const newAssist = Math.max(0, Math.round((bodyWeightInUnit - newEffective) / 2.5) * 2.5);
                 if (newAssist > (s.weightLbs ?? 0)) s.weightLbs = newAssist;
               } else {
-                if (newEffective < (s.weightLbs ?? completedWeight)) s.weightLbs = newEffective;
+                s.weightLbs = Math.max(0, newEffective);
               }
-            }
-          });
+            });
+          }
+        } else {
+          if (effectiveReps > 0) {
+            const oneRM = epley1RM(completedWeight, effectiveReps);
+            pendingSets.forEach((s, idx) => {
+              // Target reps: use this set's planned reps; fall back to completed reps
+              const targetReps = Math.max(4, s.initReps ?? effectiveReps);
+              const fatigued1RM = oneRM * Math.pow(0.97, idx + 1);
+              const newEffective = Math.min(
+                completedWeight,
+                Math.round(weightForReps(fatigued1RM, targetReps) / 2.5) * 2.5,
+              );
+              if (isAssisted) {
+                const newAssist = Math.max(0, Math.round((bodyWeightInUnit - newEffective) / 2.5) * 2.5);
+                if (newAssist > (s.weightLbs ?? 0)) s.weightLbs = newAssist;
+              } else {
+                s.weightLbs = Math.max(0, newEffective);
+              }
+            });
+          }
         }
       }
     } catch (e) {
