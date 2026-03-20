@@ -1,0 +1,203 @@
+"""Pydantic schemas for API request/response validation."""
+
+from datetime import date, datetime
+from enum import Enum
+
+from pydantic import BaseModel, Field
+
+
+# Enums (mirroring model enums)
+class MovementType(str, Enum):
+    COMPOUND = "compound"
+    ISOLATION = "isolation"
+
+
+class BodyRegion(str, Enum):
+    UPPER = "upper"
+    LOWER = "lower"
+    FULL_BODY = "full_body"
+
+
+class WorkoutStatusSchema(str, Enum):
+    PLANNED = "planned"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    SKIPPED = "skipped"
+
+
+# User schemas
+class UserCreate(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    email: str
+    password: str = Field(..., min_length=8)
+    height_cm: float | None = None
+    weight_kg: float | None = None
+
+
+class UserResponse(BaseModel):
+    id: int
+    username: str
+    email: str
+    height_cm: float | None
+    weight_kg: float | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Exercise schemas
+class ExerciseCreate(BaseModel):
+    name: str
+    display_name: str
+    movement_type: MovementType = MovementType.COMPOUND
+    body_region: BodyRegion = BodyRegion.UPPER
+    is_unilateral: bool = False
+    is_assisted: bool = False
+    description: str | None = None
+    primary_muscles: list[str] = []
+    secondary_muscles: list[str] = []
+
+
+class ExerciseResponse(BaseModel):
+    id: int
+    name: str
+    display_name: str
+    movement_type: str
+    body_region: str
+    is_unilateral: bool = False
+    is_assisted:   bool = False
+    description: str | None
+    primary_muscles: list[str]
+    secondary_muscles: list[str]
+
+    model_config = {"from_attributes": True}
+
+
+# Set schemas
+class SetCreate(BaseModel):
+    exercise_id: int
+    set_number: int
+    planned_reps: int | None = None
+    planned_weight_kg: float | None = None
+
+
+class SetUpdate(BaseModel):
+    actual_reps: int | None = None
+    actual_weight_kg: float | None = None
+    notes: str | None = None
+    completed_at: datetime | None = None
+    started_at: datetime | None = None
+
+
+class SetResponse(BaseModel):
+    id: int
+    exercise_id: int
+    set_number: int
+    planned_reps: int | None
+    planned_weight_kg: float | None
+    actual_reps: int | None
+    actual_weight_kg: float | None
+    notes: str | None
+
+    model_config = {"from_attributes": True}
+
+
+# Workout session schemas
+class WorkoutSessionCreate(BaseModel):
+    name: str | None = None
+    workout_plan_id: int | None = None
+    date: date
+
+
+class WorkoutSessionStart(BaseModel):
+    session_id: int
+
+
+class WorkoutSessionResponse(BaseModel):
+    id: int
+    name: str | None
+    date: date
+    status: WorkoutStatusSchema
+    workout_plan_id: int | None = None
+    total_volume_kg: float
+    total_sets: int
+    total_reps: int
+    started_at: datetime | None
+    completed_at: datetime | None
+    sets: list[SetResponse] = []
+
+    model_config = {"from_attributes": True}
+
+
+# Workout plan schemas
+class PlannedExercise(BaseModel):
+    exercise_id: int
+    sets: int
+    reps: int
+    starting_weight_kg: float
+    progression_type: str = "linear"
+    rest_seconds: int | None = 90
+    notes: str | None = None
+
+
+class PlannedDay(BaseModel):
+    day_number: int
+    day_name: str
+    exercises: list[PlannedExercise]
+
+
+class BlockType(str, Enum):
+    HYPERTROPHY = "hypertrophy"
+    STRENGTH = "strength"
+    POWERLIFTING = "powerlifting"
+    MAINTENANCE = "maintenance"
+    CUTTING = "cutting"
+    PEAKING = "peaking"
+    DELOAD = "deload"
+    OTHER = "other"
+
+
+class WorkoutPlanCreate(BaseModel):
+    name: str
+    description: str | None = None
+    block_type: BlockType = BlockType.OTHER
+    duration_weeks: int = Field(default=4, ge=1, le=12)
+    number_of_days: int = Field(default=1, ge=1, le=7)
+    days: list[PlannedDay]
+    auto_progression: bool = True
+
+
+class WorkoutPlanResponse(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    block_type: str
+    duration_weeks: int
+    current_week: int
+    number_of_days: int
+    days: list[PlannedDay]
+    auto_progression: bool
+    is_archived: bool = False
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# Progress schemas
+class ProgressResponse(BaseModel):
+    exercise_id: int
+    exercise_name: str
+    date: date
+    estimated_1rm: float | None
+    volume_load: float
+    recommended_weight: float | None
+    progression_notes: str | None
+
+
+class ProgressionRecommendation(BaseModel):
+    exercise_id: int
+    exercise_name: str
+    current_weight: float
+    recommended_weight: float
+    reason: str
+    confidence: float
