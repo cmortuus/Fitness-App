@@ -1,9 +1,23 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { Line } from 'svelte-chartjs';
+  import {
+    Chart,
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    Title,
+    Tooltip,
+    Legend,
+    Filler,
+  } from 'chart.js';
   import { getProgress, getRecommendations } from '$lib/api';
-  import type { ProgressMetric } from '$lib/api';
+  import type { ProgressMetric, ProgressionRecommendation } from '$lib/api';
   import { settings } from '$lib/stores';
+
+  // Register Chart.js components (required by svelte-chartjs)
+  Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
   // Weight conversion
   const KG_TO_LBS = 2.20462;
@@ -17,15 +31,19 @@
   let unit = $derived($settings.weightUnit);
 
   let progressData = $state<ProgressMetric[]>([]);
-  let recommendations = $state<any[]>([]);
+  let recommendations = $state<ProgressionRecommendation[]>([]);
   let selectedExercise = $state<string>('all');
   let timeRange = $state<string>('30d');
+  let loading = $state(true);
+  let error = $state<string | null>(null);
 
   onMount(async () => {
     await loadData();
   });
 
   async function loadData() {
+    loading = true;
+    error = null;
     try {
       const endDate = new Date().toISOString().split('T')[0];
       let startDate: string;
@@ -41,10 +59,18 @@
           startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
       }
 
-      progressData = await getProgress({ start_date: startDate, end_date: endDate });
-      recommendations = await getRecommendations(parseInt(timeRange.replace('d', '')));
-    } catch (error) {
-      console.error('Failed to load progress:', error);
+      const daysBack = parseInt(timeRange.replace('d', ''));
+      const [progress, recs] = await Promise.all([
+        getProgress({ start_date: startDate, end_date: endDate }),
+        getRecommendations(daysBack),
+      ]);
+      progressData = progress;
+      recommendations = recs;
+    } catch (e) {
+      error = 'Failed to load progress data. Please try again.';
+      console.error('Failed to load progress:', e);
+    } finally {
+      loading = false;
     }
   }
 
@@ -53,60 +79,71 @@
     ? progressData
     : progressData.filter(p => p.exercise_name === selectedExercise));
 
-  // Get unique exercises
-  let exercises = $derived([...new Set(progressData.map(p => p.exercise_name))]);
+  // Get unique exercise names across all data (not just filtered)
+  let exercises = $derived([...new Set(progressData.map(p => p.exercise_name))].sort());
 
-  // Chart data - use type assertion for Chart.js compatibility
-  let chartData = $derived({
-    labels: [...new Set(filteredData.map(p => p.date))].sort(),
-    datasets: exercises.length > 0 ? exercises.map((exercise, idx) => {
-      const colors = ['#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6'];
-      const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
-      const dates = [...new Set(filteredData.map(p => p.date))].sort();
+  // Colour palette for chart lines
+  const COLORS = ['#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
-      return {
-        label: exercise,
-        data: dates.map(date => {
-          const point = exerciseData.find(p => p.date === date);
-          return point?.estimated_1rm ? displayWeight(point.estimated_1rm) : null;
-        }) as (number | null)[],
-        borderColor: colors[idx % colors.length],
-        backgroundColor: colors[idx % colors.length] + '20',
-        tension: 0.1,
-      };
-    }) : [],
-  } as any);
+  // Chart data
+  let chartData = $derived(() => {
+    const dates = [...new Set(filteredData.map(p => p.date))].sort();
+    // Which exercises to plot depends on filter
+    const exNames = selectedExercise === 'all'
+      ? [...new Set(filteredData.map(p => p.exercise_name))].sort()
+      : [selectedExercise];
+
+    return {
+      labels: dates,
+      datasets: exNames.map((exercise, idx) => {
+        const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
+        return {
+          label: exercise,
+          data: dates.map(date => {
+            const point = exerciseData.find(p => p.date === date);
+            return point?.estimated_1rm != null ? displayWeight(point.estimated_1rm) : null;
+          }) as (number | null)[],
+          borderColor: COLORS[idx % COLORS.length],
+          backgroundColor: COLORS[idx % COLORS.length] + '20',
+          tension: 0.3,
+          spanGaps: true,
+        };
+      }),
+    };
+  });
 
   let chartOptions = $derived({
     responsive: true,
     plugins: {
-      legend: {
-        position: 'top' as const,
-      },
+      legend: { position: 'top' as const },
       title: {
         display: true,
-        text: 'Estimated 1RM Progress',
+        text: `Estimated 1RM Progress (${unit})`,
+        color: '#d1d5db',
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? '–'} ${unit}`,
+        },
       },
     },
     scales: {
       y: {
         beginAtZero: false,
-        title: {
-          display: true,
-          text: `Weight (${unit})`,
-        },
+        title: { display: true, text: `Weight (${unit})`, color: '#9ca3af' },
+        ticks: { color: '#9ca3af' },
+        grid: { color: '#374151' },
       },
       x: {
-        title: {
-          display: true,
-          text: 'Date',
-        },
+        title: { display: true, text: 'Date', color: '#9ca3af' },
+        ticks: { color: '#9ca3af' },
+        grid: { color: '#374151' },
       },
     },
   });
 </script>
 
-<div class="space-y-6">
+<div class="space-y-6 max-w-4xl">
   <h2 class="text-2xl font-bold">Progress</h2>
 
   <!-- Filters -->
@@ -135,71 +172,90 @@
 
   <!-- Progress Chart -->
   <div class="card">
-    {#if progressData.length > 0}
-      <Line data={chartData} options={chartOptions} />
+    <h3 class="text-lg font-semibold mb-4">Estimated 1RM Over Time</h3>
+    {#if loading}
+      <div class="animate-pulse bg-gray-700 rounded h-48"></div>
+    {:else if error}
+      <p class="text-red-400 text-center py-8">{error}</p>
+    {:else if filteredData.length > 0}
+      <Line data={chartData()} options={chartOptions} />
     {:else}
-      <p class="text-gray-400 text-center py-8">No progress data available. Start a workout to track progress.</p>
+      <p class="text-gray-400 text-center py-8">
+        No data for the selected range. Complete a workout with logged sets to see your progress here.
+      </p>
     {/if}
   </div>
 
   <!-- Recommendations -->
   <div class="card">
     <h3 class="text-lg font-semibold mb-4">Progression Recommendations</h3>
-  {#if recommendations.length > 0}
+    {#if loading}
+      <div class="space-y-2">
+        {#each { length: 3 } as _}
+          <div class="animate-pulse bg-gray-700 rounded h-10"></div>
+        {/each}
+      </div>
+    {:else if recommendations.length > 0}
       <div class="overflow-x-auto">
-        <table class="w-full text-left">
+        <table class="w-full text-left text-sm">
           <thead>
-            <tr class="border-b border-gray-700">
-              <th class="py-2 px-4">Exercise</th>
-              <th class="py-2 px-4">Current</th>
-              <th class="py-2 px-4">Recommended</th>
-              <th class="py-2 px-4">Reason</th>
+            <tr class="border-b border-gray-700 text-gray-400">
+              <th class="py-2 px-3">Exercise</th>
+              <th class="py-2 px-3">Current best</th>
+              <th class="py-2 px-3">Recommended</th>
+              <th class="py-2 px-3">Reason</th>
             </tr>
           </thead>
           <tbody>
             {#each recommendations as rec}
-              <tr class="border-b border-gray-700 hover:bg-gray-700">
-                <td class="py-2 px-4 font-medium">{rec.exercise_name}</td>
-                <td class="py-2 px-4">{displayWeight(rec.current_weight).toFixed(1)} {unit}</td>
-                <td class="py-2 px-4">
-                  <span class="{rec.recommended_weight > rec.current_weight ? 'text-green-400' : rec.recommended_weight < rec.current_weight ? 'text-red-400' : 'text-yellow-400'}">
-                    {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
-                  </span>
+              {@const delta = rec.recommended_weight - rec.current_weight}
+              <tr class="border-b border-gray-700/50 hover:bg-gray-800">
+                <td class="py-2 px-3 font-medium">{rec.exercise_name}</td>
+                <td class="py-2 px-3 font-mono">{displayWeight(rec.current_weight).toFixed(1)} {unit}</td>
+                <td class="py-2 px-3 font-mono {delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-yellow-400'}">
+                  {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
+                  {#if delta > 0}<span class="text-xs ml-1">↑</span>
+                  {:else if delta < 0}<span class="text-xs ml-1">↓</span>
+                  {:else}<span class="text-xs ml-1">→</span>{/if}
                 </td>
-                <td class="py-2 px-4 text-sm text-gray-300">{rec.reason}</td>
+                <td class="py-2 px-3 text-gray-400">{rec.reason}</td>
               </tr>
             {/each}
           </tbody>
         </table>
       </div>
-  {:else}
-    <p class="text-gray-400 text-center py-6">
-      No recommendations yet — complete at least one workout in the selected time range and the engine will suggest next weights based on your performance.
-    </p>
-  {/if}
+    {:else}
+      <p class="text-gray-400 text-center py-6">
+        No recommendations yet — complete at least one workout in the selected time range.
+      </p>
+    {/if}
   </div>
 
   <!-- Detailed Stats -->
   <div class="card">
-    <h3 class="text-lg font-semibold mb-4">Detailed Statistics</h3>
-    {#if filteredData.length > 0}
+    <h3 class="text-lg font-semibold mb-4">Session Log</h3>
+    {#if loading}
+      <div class="animate-pulse bg-gray-700 rounded h-24"></div>
+    {:else if filteredData.length > 0}
       <div class="overflow-x-auto">
-        <table class="w-full text-left">
+        <table class="w-full text-left text-sm">
           <thead>
-            <tr class="border-b border-gray-700">
-              <th class="py-2 px-4">Date</th>
-              <th class="py-2 px-4">Exercise</th>
-              <th class="py-2 px-4">Volume</th>
-              <th class="py-2 px-4">Est. 1RM</th>
+            <tr class="border-b border-gray-700 text-gray-400">
+              <th class="py-2 px-3">Date</th>
+              <th class="py-2 px-3">Exercise</th>
+              <th class="py-2 px-3">Volume</th>
+              <th class="py-2 px-3">Est. 1RM</th>
             </tr>
           </thead>
           <tbody>
-            {#each filteredData as row}
-              <tr class="border-b border-gray-700 hover:bg-gray-700">
-                <td class="py-2 px-4">{row.date}</td>
-                <td class="py-2 px-4">{row.exercise_name}</td>
-                <td class="py-2 px-4">{displayWeight(row.volume_load).toFixed(1)} {unit}</td>
-                <td class="py-2 px-4">{row.estimated_1rm ? displayWeight(row.estimated_1rm).toFixed(1) : '-'} {unit}</td>
+            {#each [...filteredData].reverse() as row}
+              <tr class="border-b border-gray-700/50 hover:bg-gray-800">
+                <td class="py-2 px-3 text-gray-400">{row.date}</td>
+                <td class="py-2 px-3">{row.exercise_name}</td>
+                <td class="py-2 px-3 font-mono">{displayWeight(row.volume_load).toFixed(0)} {unit}</td>
+                <td class="py-2 px-3 font-mono">
+                  {row.estimated_1rm != null ? displayWeight(row.estimated_1rm).toFixed(1) : '—'} {unit}
+                </td>
               </tr>
             {/each}
           </tbody>
