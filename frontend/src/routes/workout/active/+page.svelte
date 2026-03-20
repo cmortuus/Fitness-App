@@ -1343,6 +1343,14 @@
                       >✓</button>
                     {/if}
                   </div>
+                  <!-- High-rep advisory (unilateral) -->
+                  {#if !set.done && ((set.repsLeft ?? 0) > 30 || (set.repsRight ?? 0) > 30)}
+                    <div class="px-1 mt-0.5">
+                      <p class="text-xs text-amber-400 leading-snug">
+                        ⚠ Sets above 30 reps are outside the reliable range for weight progression. Consider increasing the load instead.
+                      </p>
+                    </div>
+                  {/if}
                   <!-- Deviation warning (unilateral) -->
                   {#if deviationWarning(set, set.weightLbs, set.repsLeft ?? set.repsRight)}
                     <div class="px-1 mt-0.5">
@@ -1439,6 +1447,14 @@
                       >✓</button>
                     {/if}
                   </div>
+                  <!-- High-rep advisory (> 30 reps moves outside the Epley range) -->
+                  {#if !set.done && (set.reps ?? 0) > 30}
+                    <div class="col-span-full px-1 mt-0.5">
+                      <p class="text-xs text-amber-400 leading-snug">
+                        ⚠ Sets above 30 reps are outside the reliable range for weight progression. Consider increasing the load instead.
+                      </p>
+                    </div>
+                  {/if}
                   <!-- Deviation warning -->
                   {#if deviationWarning(set, set.weightLbs, set.reps)}
                     <div class="col-span-full px-1 mt-0.5">
