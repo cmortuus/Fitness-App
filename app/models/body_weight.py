@@ -1,6 +1,6 @@
 """Body weight tracking model."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, Float, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -16,6 +16,6 @@ class BodyWeightEntry(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     weight_kg: Mapped[float] = mapped_column(Float, nullable=False)
     recorded_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.utcnow, nullable=False
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

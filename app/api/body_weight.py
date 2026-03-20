@@ -1,6 +1,6 @@
 """Body weight weigh-in API endpoints."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -61,7 +61,7 @@ async def add_entry(
         raise HTTPException(status_code=400, detail="weight_kg must be a positive number")
     entry = BodyWeightEntry(
         weight_kg=float(weight_kg),
-        recorded_at=datetime.fromisoformat(data["recorded_at"]) if data.get("recorded_at") else datetime.utcnow(),
+        recorded_at=datetime.fromisoformat(data["recorded_at"]) if data.get("recorded_at") else datetime.now(timezone.utc),
         notes=data.get("notes"),
     )
     db.add(entry)
