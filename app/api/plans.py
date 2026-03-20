@@ -166,6 +166,24 @@ async def create_plan(
     }
     planned_exercises_json = json.dumps(planned_data)
 
+    # Validate all exercise IDs exist
+    all_exercise_ids = {
+        ex.exercise_id
+        for day in plan_data.days
+        for ex in day.exercises
+    }
+    if all_exercise_ids:
+        result = await db.execute(
+            select(Exercise.id).where(Exercise.id.in_(all_exercise_ids))
+        )
+        found_ids = {row[0] for row in result.all()}
+        missing = all_exercise_ids - found_ids
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Exercise IDs not found: {sorted(missing)}",
+            )
+
     plan = WorkoutPlan(
         name=plan_data.name,
         description=plan_data.description,
