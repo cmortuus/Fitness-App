@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -45,9 +45,9 @@ class Exercise(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     technique_cues: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    # Primary and secondary muscle groups
-    primary_muscles: Mapped[str] = mapped_column(String(255), nullable=True)
-    secondary_muscles: Mapped[str] = mapped_column(String(255), nullable=True)
+    # Primary and secondary muscle groups (stored as JSON array)
+    primary_muscles: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    secondary_muscles: Mapped[list | None] = mapped_column(JSON, nullable=True)
 
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
