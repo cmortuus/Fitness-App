@@ -210,7 +210,7 @@ async def archive_plan(
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Plan {plan_id} not found")
     plan.is_archived = True
-    await db.commit()
+    await db.flush()
     await db.refresh(plan)
     return serialize_plan(plan)
 
@@ -317,6 +317,6 @@ async def update_plan(
 
         plan.planned_exercises = json.dumps(planned_data)
 
-    await db.commit()
+    await db.flush()
     await db.refresh(plan)
     return serialize_plan(plan)

@@ -437,13 +437,28 @@ async def create_session_from_plan(
 
     # Create sets for each exercise
     day_exercises = day.get("exercises", [])
+
+    # Batch-fetch all exercise models needed by this day in one query so we
+    # don't hit the DB once per exercise inside the loop below (N+1).
+    day_exercise_ids = [
+        ex_d.get("exercise_id") for ex_d in day_exercises if ex_d.get("exercise_id")
+    ]
+    if day_exercise_ids:
+        ex_rows = await db.execute(
+            select(Exercise).where(Exercise.id.in_(day_exercise_ids))
+        )
+        exercise_model_map: dict[int, Exercise] = {
+            ex.id: ex for ex in ex_rows.scalars().all()
+        }
+    else:
+        exercise_model_map = {}
+
     for exercise_data in day_exercises:
         exercise_id = exercise_data.get("exercise_id")
         sets = exercise_data.get("sets", 3)
         reps = exercise_data.get("reps", 8)
 
-        # Look up exercise metadata for overload logic
-        ex_model = await db.get(Exercise, exercise_id)
+        ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
         for set_num in range(1, sets + 1):
             # Compute progression individually per set so each set uses

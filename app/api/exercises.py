@@ -222,4 +222,4 @@ async def delete_exercise(
 
     # Delete the exercise
     await db.execute(delete(Exercise).where(Exercise.id == exercise_id))
-    await db.commit()
+    await db.flush()
