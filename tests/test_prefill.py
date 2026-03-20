@@ -372,6 +372,7 @@ class TestWeightOverloadStyle:
         sess1 = await start_session_from_plan(client, plan["id"])
         for s in sess1["sets"]:
             await log_set(client, sess1["id"], s["id"], 100.0, 8)
+        await client.post(f"/api/sessions/{sess1['id']}/complete")
 
         r = await client.post(
             f"/api/sessions/from-plan/{plan['id']}",
