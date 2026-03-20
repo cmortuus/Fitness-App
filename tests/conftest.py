@@ -104,6 +104,14 @@ async def create_plan(client: AsyncClient, exercise_id: int, sets: int = 3,
 
 async def start_session_from_plan(client: AsyncClient, plan_id: int,
                                    day: int = 1, body_weight_kg: float = 0) -> dict:
+    # Complete any in-progress session before creating a new one (mirrors real workflow)
+    r_list = await client.get("/api/sessions/", params={"limit": 500})
+    assert r_list.status_code == 200, r_list.text
+    for s in r_list.json():
+        if s.get("status") == "in_progress":
+            rc = await client.post(f"/api/sessions/{s['id']}/complete")
+            assert rc.status_code == 200, rc.text
+
     r = await client.post(
         f"/api/sessions/from-plan/{plan_id}",
         params={"day_number": day, "overload_style": "rep", "body_weight_kg": body_weight_kg},

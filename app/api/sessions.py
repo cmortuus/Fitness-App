@@ -142,6 +142,19 @@ async def start_session(
             detail=f"Workout session {session_id} not found",
         )
 
+    existing_result = await db.execute(
+        select(WorkoutSession).where(
+            WorkoutSession.status == WorkoutStatus.IN_PROGRESS,
+            WorkoutSession.id != session_id,
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Session '{existing.name}' is already in progress (id={existing.id}). Complete or delete it first.",
+        )
+
     workout_session.status = WorkoutStatus.IN_PROGRESS
     workout_session.started_at = datetime.now(timezone.utc)
     await db.flush()
@@ -327,6 +340,17 @@ async def create_session_from_plan(
         )
 
     day_name = day.get("day_name", f"Day {day_number}")
+
+    # Guard: only one in-progress session at a time
+    existing_result = await db.execute(
+        select(WorkoutSession).where(WorkoutSession.status == WorkoutStatus.IN_PROGRESS)
+    )
+    existing = existing_result.scalar_one_or_none()
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Session '{existing.name}' is already in progress (id={existing.id}). Complete or delete it first.",
+        )
 
     # ── Look up most recent prior session for the same plan + same day ────────
     # Require at least one set with actual_reps filled in — this is the real
