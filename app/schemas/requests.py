@@ -10,6 +10,13 @@ from pydantic import BaseModel, Field
 class MovementType(str, Enum):
     COMPOUND = "compound"
     ISOLATION = "isolation"
+    PUSH = "push"
+    PULL = "pull"
+    HINGE = "hinge"
+    SQUAT = "squat"
+    LUNGE = "lunge"
+    CARRY = "carry"
+    ROTATION = "rotation"
 
 
 class BodyRegion(str, Enum):
