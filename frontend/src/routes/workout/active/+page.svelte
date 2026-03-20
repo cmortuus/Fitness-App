@@ -1555,8 +1555,12 @@
                     <span class="text-sm font-mono text-right {dispW != null ? 'text-white' : 'text-gray-600'}">
                       {dispW != null ? dispW : '—'}
                     </span>
-                    <span class="text-sm font-mono text-right {s.actual_reps != null ? 'text-white' : 'text-gray-600'}">
-                      {s.actual_reps ?? '—'}
+                    <span class="text-sm font-mono text-right {(s.actual_reps != null || s.reps_left != null || s.reps_right != null) ? 'text-white' : 'text-gray-600'}">
+                      {#if s.actual_reps == null && (s.reps_left != null || s.reps_right != null)}
+                        L:{s.reps_left ?? '—'}/R:{s.reps_right ?? '—'}
+                      {:else}
+                        {s.actual_reps ?? '—'}
+                      {/if}
                     </span>
                   </div>
                 {/each}

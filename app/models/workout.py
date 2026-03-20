@@ -45,6 +45,10 @@ class ExerciseSet(Base):
     actual_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     actual_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # Unilateral rep tracking (left/right independently)
+    reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Notes and timestamps
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -230,6 +230,8 @@ export interface ExerciseHistorySession {
   sets: {
     set_number: number;
     actual_reps: number | null;
+    reps_left: number | null;
+    reps_right: number | null;
     actual_weight_kg: number | null;
     notes: string | null;
   }[];
