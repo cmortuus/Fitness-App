@@ -809,6 +809,14 @@
     window.location.href = '/';
   }
 
+  // ─── Exercise notes toggle ────────────────────────────────────────────────
+  let expandedNotes = $state(new Set<string>());
+  function toggleNotes(uiId: string) {
+    const next = new Set(expandedNotes);
+    if (next.has(uiId)) next.delete(uiId); else next.add(uiId);
+    expandedNotes = next;
+  }
+
   // ─── Exercise history modal ───────────────────────────────────────────────
   let historyExerciseId = $state<number | null>(null);
   let historyData = $state<ExerciseHistorySession[]>([]);
@@ -1085,6 +1093,13 @@
                 {/if}
               </div>
               <div class="flex items-center gap-1 ml-3 mt-0.5">
+                {#if exercise?.description}
+                  <button
+                    onclick={() => toggleNotes(ex.uiId)}
+                    class="text-xs px-2 py-0.5 rounded transition-colors hover:bg-gray-700 {expandedNotes.has(ex.uiId) ? 'text-primary-400' : 'text-gray-500 hover:text-primary-400'}"
+                    title="Toggle technique notes"
+                  >📝 Notes</button>
+                {/if}
                 <button
                   onclick={() => openHistory(ex.exerciseId)}
                   class="text-xs text-gray-500 hover:text-primary-400 px-2 py-0.5 rounded transition-colors hover:bg-gray-700"
@@ -1097,6 +1112,13 @@
                 >✕</button>
               </div>
             </div>
+
+            <!-- Collapsible technique notes -->
+            {#if exercise?.description && expandedNotes.has(ex.uiId)}
+              <div class="text-xs text-gray-300 bg-gray-800 rounded-lg p-3 mb-3 leading-relaxed">
+                {exercise.description}
+              </div>
+            {/if}
 
             <!-- Column headers — adapt to unilateral / assisted mode -->
             {#if ex.isUnilateral}
