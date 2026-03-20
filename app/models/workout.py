@@ -119,8 +119,6 @@ class WorkoutPlan(Base):
     block_type: Mapped[str] = mapped_column(String(50), default="other")
     duration_weeks: Mapped[int] = mapped_column(Integer, default=4)
     current_week: Mapped[int] = mapped_column(Integer, default=1)
-    day_of_week: Mapped[str | None] = mapped_column(String(10), nullable=True)
-
     # Planned exercises as JSON
     planned_exercises: Mapped[str] = mapped_column(Text, nullable=False)
 

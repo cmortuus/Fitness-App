@@ -190,7 +190,6 @@ async def create_plan(
         block_type=plan_data.block_type.value,
         duration_weeks=plan_data.duration_weeks,
         current_week=1,  # Start at week 1
-        day_of_week=None,  # Deprecated in favor of multi-day structure
         planned_exercises=planned_exercises_json,
         auto_progression=plan_data.auto_progression,
     )
