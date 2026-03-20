@@ -90,7 +90,16 @@ def compute_overload(
 
     # ── Weighted exercises ─────────────────────────────────────────────────
 
-    # Didn't hit planned reps → retry same weight / same reps
+    # Minimum rep floor: never plan fewer than 4 reps.
+    # If the user got fewer than 4 reps, reduce weight (via Epley) to a load
+    # where they should be able to get 4 reps rather than planning an
+    # unproductive sub-4-rep set at the same load.
+    MIN_REPS = 4
+    if prior_reps < MIN_REPS and prior_weight > 0:
+        weight_for_min = epley_weight_for_reps(prior_weight, prior_reps, MIN_REPS)
+        return weight_for_min, MIN_REPS
+
+    # Didn't hit planned reps (but ≥ floor) → retry same weight / same reps
     if prior_reps < planned_reps:
         return prior_weight, prior_reps
 

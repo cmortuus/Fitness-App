@@ -160,13 +160,13 @@ class TestWeek2Prefill:
                 f"set {s['set_number']}: expected 9 reps (8+1), got {s['planned_reps']}"
 
     async def test_no_progression_if_reps_below_target(self, client: AsyncClient):
-        """If prior reps < planned reps, retry same weight and same reps."""
+        """If prior reps < planned reps (but >= 4 floor), retry same weight and same reps."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
 
         sess1 = await start_session_from_plan(client, plan["id"])
         for s in sess1["sets"]:
-            await log_set(client, sess1["id"], s["id"], 100.0, 6)  # missed target
+            await log_set(client, sess1["id"], s["id"], 100.0, 6)  # missed target, but ≥ 4
 
         sess2 = await start_session_from_plan(client, plan["id"])
         for s in sess2["sets"]:
@@ -174,6 +174,43 @@ class TestWeek2Prefill:
                 f"set {s['set_number']}: expected 6 reps (retry), got {s['planned_reps']}"
             assert abs(s["planned_weight_kg"] - 100.0) < 0.01, \
                 f"set {s['set_number']}: expected same weight 100, got {s['planned_weight_kg']}"
+
+    async def test_reps_floor_deloads_weight_below_four_reps(self, client: AsyncClient):
+        """If prior reps < 4, weight drops (via Epley) to target 4 reps — never plan sub-4."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+
+        sess1 = await start_session_from_plan(client, plan["id"])
+        # Log 3 reps — below the floor
+        await log_set(client, sess1["id"], sess1["sets"][0]["id"], 100.0, 3)
+
+        sess2 = await start_session_from_plan(client, plan["id"])
+        s = sess2["sets"][0]
+        # Reps must be exactly 4 (the floor)
+        assert s["planned_reps"] == 4, \
+            f"Expected planned_reps=4 (floor), got {s['planned_reps']}"
+        # Weight must be LESS than 100 (Epley deload to make 4 reps achievable)
+        assert s["planned_weight_kg"] is not None
+        assert s["planned_weight_kg"] < 100.0, \
+            f"Expected deloaded weight < 100, got {s['planned_weight_kg']}"
+        # Weight must still be a valid 2.5 kg increment
+        assert s["planned_weight_kg"] % 2.5 == 0, \
+            f"Weight {s['planned_weight_kg']} is not a multiple of 2.5"
+
+    async def test_reps_floor_at_exactly_four_is_unchanged(self, client: AsyncClient):
+        """Prior reps = 4 is at the floor — retry same weight, same reps (no deload)."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+
+        sess1 = await start_session_from_plan(client, plan["id"])
+        await log_set(client, sess1["id"], sess1["sets"][0]["id"], 100.0, 4)
+
+        sess2 = await start_session_from_plan(client, plan["id"])
+        s = sess2["sets"][0]
+        # 4 is at the floor, not below it — retry, don't deload
+        assert s["planned_reps"] == 4, f"Expected 4 (retry at floor), got {s['planned_reps']}"
+        assert abs(s["planned_weight_kg"] - 100.0) < 0.01, \
+            f"Expected same weight 100 at floor, got {s['planned_weight_kg']}"
 
 
 # ── Per-set independence ──────────────────────────────────────────────────────
