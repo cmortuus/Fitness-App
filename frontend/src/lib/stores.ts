@@ -89,6 +89,10 @@ export const currentSet = derived(
 // Latest body weight from the server (null = not loaded yet)
 export const latestBodyWeight = writable<BodyWeightEntry | null>(null);
 
+// URL for the next planned workout — set by the home page after resolving the plan
+// Falls back to /workout/active if not yet computed
+export const nextWorkoutUrl = writable<string>('/workout/active');
+
 // Session statistics
 export const sessionStats = derived(
   currentSession,

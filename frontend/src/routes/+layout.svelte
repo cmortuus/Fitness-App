@@ -2,15 +2,14 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { currentSession, exercises, latestBodyWeight, workoutPlans } from '$lib/stores';
+  import { currentSession, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import { getExercises, getLatestBodyWeight, getPlans } from '$lib/api';
 
-  const navItems = [
-    { path: '/',              label: 'Home',    icon: '🏠' },
-    { path: '/workout/active', label: 'Workout', icon: '🏋️' },
-    { path: '/plans',         label: 'Plans',   icon: '📋' },
-    { path: '/progress',      label: 'Progress', icon: '📈' },
-    { path: '/settings',      label: 'Settings', icon: '⚙️' },
+  const staticNavItems = [
+    { path: '/',         label: 'Home',     icon: '🏠' },
+    { path: '/plans',    label: 'Plans',    icon: '📋' },
+    { path: '/progress', label: 'Progress', icon: '📈' },
+    { path: '/settings', label: 'Settings', icon: '⚙️' },
   ];
 
   let { children } = $props<{ children: import('svelte').Snippet }>();
@@ -59,7 +58,15 @@
 
         <!-- Desktop nav links (hidden on mobile) -->
         <nav class="hidden md:flex items-center gap-1">
-          {#each navItems as item}
+          <a href={$nextWorkoutUrl}
+             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors
+                    {isActive('/workout')
+                      ? 'bg-primary-600/20 text-primary-400 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}">
+            <span class="text-base leading-none">🏋️</span>
+            <span>Workout</span>
+          </a>
+          {#each staticNavItems as item}
             <a href={item.path}
                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors
                       {isActive(item.path)
@@ -81,9 +88,16 @@
 
   <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
   <nav class="bottom-nav md:hidden">
-    {#each navItems as item}
-      <a href={item.path}
-         class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
+    <a href="/" class="bottom-nav-item {isActive('/') ? 'active' : ''}">
+      <span class="text-xl leading-none">🏠</span>
+      <span class="text-[10px] font-medium">Home</span>
+    </a>
+    <a href={$nextWorkoutUrl} class="bottom-nav-item {isActive('/workout') ? 'active' : ''}">
+      <span class="text-xl leading-none">🏋️</span>
+      <span class="text-[10px] font-medium">Workout</span>
+    </a>
+    {#each staticNavItems.slice(1) as item}
+      <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
         <span class="text-xl leading-none">{item.icon}</span>
         <span class="text-[10px] font-medium">{item.label}</span>
       </a>

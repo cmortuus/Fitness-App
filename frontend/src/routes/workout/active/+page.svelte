@@ -522,64 +522,78 @@
         if (!s.weightLbs) s.weightLbs = set.weightLbs;
       }
 
-      // ── Epley inter-set weight drop-off ──────────────────────────────
-      // Apply fatigue to weight only (not reps). Each pending set gets 3%
-      // less effective 1RM per position. Reps stay at their planned target
-      // so the user stays in the intended rep range throughout the exercise.
-      function epley1RM(w: number, r: number): number { return w * (1 + r / 30); }
-      function weightForReps(oneRM: number, r: number): number { return oneRM / (1 + r / 30); }
+      // ── Inter-set rep drop-off ────────────────────────────────────────
+      // Weight stays constant each set; reps drop by bracket:
+      //   4–9  reps → −1 per set
+      //   10–16 reps → −2 per set
+      //   17+   reps → −3 per set
+      //
+      // Floor rule: if the natural drop would go below 5 reps, keep reps
+      // at 5 and reduce weight via Epley to maintain equivalent effort.
+      // (Same 1RM as if you'd done the natural lower rep count at full weight.)
+      const REP_FLOOR = 5;
 
-      // Use effective (net) weight for Epley calculations
+      function repDrop(baseReps: number): number {
+        if (baseReps >= 17) return 3;
+        if (baseReps >= 10) return 2;
+        return 1;
+      }
+
+      // Epley: weight to use for targetReps given prior weight × priorReps
+      function epleyWeightForReps(w: number, doneReps: number, targetReps: number): number {
+        const oneRM = w * (1 + doneReps / 30);
+        const raw   = oneRM / (1 + targetReps / 30);
+        return Math.round(raw / 2.5) * 2.5; // nearest 2.5 lb/kg increment
+      }
+
+      function setForPosition(
+        baseWeight: number, baseReps: number, position: number
+      ): { weight: number; reps: number } {
+        const drop        = repDrop(baseReps);
+        const naturalReps = baseReps - drop * position;
+        if (naturalReps >= REP_FLOOR) {
+          return { weight: baseWeight, reps: naturalReps };
+        }
+        // Below the floor → keep 5 reps, reduce weight via Epley
+        const w = epleyWeightForReps(baseWeight, naturalReps, REP_FLOOR);
+        return { weight: Math.max(0, w), reps: REP_FLOOR };
+      }
+
       const completedWeight = isAssisted
         ? Math.max(0, bodyWeightInUnit - assistVal)
         : (set.weightLbs ?? 0);
 
-      if (completedWeight > 0) {
-        if (ex.isUnilateral) {
-          const leftReps  = set.repsLeft  ?? 0;
-          const rightReps = set.repsRight ?? 0;
-          // Weaker side is the limiting factor for 1RM calculation
-          const refReps = leftReps > 0 && rightReps > 0
-            ? Math.min(leftReps, rightReps)
-            : (leftReps || rightReps);
+      if (ex.isUnilateral) {
+        const leftReps  = set.repsLeft  ?? 0;
+        const rightReps = set.repsRight ?? 0;
+        const refReps   = leftReps > 0 && rightReps > 0
+          ? Math.min(leftReps, rightReps)
+          : (leftReps || rightReps);
 
-          if (refReps > 0) {
-            const oneRM = epley1RM(completedWeight, refReps);
-            pendingSets.forEach((s, idx) => {
-              // Target reps: use this set's planned reps; fall back to completed reps
-              const targetReps = Math.max(4, s.initReps ?? refReps);
-              const fatigued1RM = oneRM * Math.pow(0.97, idx + 1);
-              const newEffective = Math.min(
-                completedWeight,
-                Math.round(weightForReps(fatigued1RM, targetReps) / 2.5) * 2.5,
-              );
-              if (isAssisted) {
-                const newAssist = Math.max(0, Math.round((bodyWeightInUnit - newEffective) / 2.5) * 2.5);
-                if (newAssist > (s.weightLbs ?? 0)) s.weightLbs = newAssist;
-              } else {
-                s.weightLbs = Math.max(0, newEffective);
-              }
-            });
-          }
-        } else {
-          if (effectiveReps > 0) {
-            const oneRM = epley1RM(completedWeight, effectiveReps);
-            pendingSets.forEach((s, idx) => {
-              // Target reps: use this set's planned reps; fall back to completed reps
-              const targetReps = Math.max(4, s.initReps ?? effectiveReps);
-              const fatigued1RM = oneRM * Math.pow(0.97, idx + 1);
-              const newEffective = Math.min(
-                completedWeight,
-                Math.round(weightForReps(fatigued1RM, targetReps) / 2.5) * 2.5,
-              );
-              if (isAssisted) {
-                const newAssist = Math.max(0, Math.round((bodyWeightInUnit - newEffective) / 2.5) * 2.5);
-                if (newAssist > (s.weightLbs ?? 0)) s.weightLbs = newAssist;
-              } else {
-                s.weightLbs = Math.max(0, newEffective);
-              }
-            });
-          }
+        if (refReps > 0 && completedWeight > 0) {
+          pendingSets.forEach((s, idx) => {
+            const { weight, reps } = setForPosition(completedWeight, refReps, idx + 1);
+            s.repsLeft  = reps;
+            s.repsRight = reps;
+            if (isAssisted) {
+              // convert net load back to assist amount
+              s.weightLbs = Math.max(0, Math.round((bodyWeightInUnit - weight) / 2.5) * 2.5);
+            } else {
+              s.weightLbs = weight;
+            }
+          });
+        }
+      } else {
+        if (effectiveReps > 0 && completedWeight > 0) {
+          pendingSets.forEach((s, idx) => {
+            const { weight, reps } = setForPosition(completedWeight, effectiveReps, idx + 1);
+            s.reps = reps;
+            if (isAssisted) {
+              s.weightLbs = Math.max(0, Math.round((bodyWeightInUnit - weight) / 2.5) * 2.5);
+            } else {
+              s.weightLbs = weight;
+            }
+          });
         }
       }
     } catch (e) {
@@ -1108,26 +1122,10 @@
               Keep going
             </button>
           </div>
-        {:else if showFinishWarning}
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-xs text-amber-400 hidden sm:block">{incompleteSets} set{incompleteSets !== 1 ? 's' : ''} incomplete</span>
-            <button onclick={doFinish} disabled={finishing}
-                    class="px-3 py-2 bg-green-600 hover:bg-green-500 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50">
-              Finish anyway
-            </button>
-            <button onclick={() => showFinishWarning = false}
-                    class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-xl transition-colors">
-              Keep going
-            </button>
-          </div>
         {:else}
           <button onclick={() => showCancelConfirm = true}
                   class="shrink-0 w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
                   title="Cancel workout">✕</button>
-          <button onclick={requestFinish} disabled={finishing}
-                  class="shrink-0 px-5 py-2 bg-green-600 hover:bg-green-500 text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-50 shadow-sm">
-            {finishing ? 'Saving…' : 'Finish'}
-          </button>
         {/if}
       </div>
     </header>
@@ -1465,6 +1463,22 @@
                        hover:bg-primary-500/5 active:bg-primary-500/10">
           + Add Exercise
         </button>
+
+        <!-- Finish workout button — enabled only when all sets are done -->
+        {#if incompleteSets > 0}
+          <button disabled
+                  class="w-full py-4 bg-zinc-700 text-zinc-500 font-bold text-lg rounded-2xl
+                         cursor-not-allowed opacity-60">
+            {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
+          </button>
+        {:else}
+          <button onclick={doFinish} disabled={finishing}
+                  class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
+                         text-white font-bold text-lg rounded-2xl transition-colors
+                         disabled:opacity-50 shadow-sm">
+            {finishing ? 'Saving…' : '✓ Finish Workout'}
+          </button>
+        {/if}
 
       </div>
     </div><!-- /scrollable -->

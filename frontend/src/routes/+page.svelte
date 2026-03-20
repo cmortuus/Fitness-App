@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { currentSession, workoutPlans } from '$lib/stores';
+  import { currentSession, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import { getSessions, archivePlan, getPlans } from '$lib/api';
   import type { WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
@@ -19,6 +19,18 @@
   let nextWorkout = $derived(
     loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
   );
+
+  // Keep the global nextWorkoutUrl store in sync so the bottom nav Workout
+  // tab deep-links straight to the right plan + day.
+  $effect(() => {
+    if ($currentSession) {
+      nextWorkoutUrl.set('/workout/active');
+    } else if (nextWorkout && !nextWorkout.isComplete) {
+      nextWorkoutUrl.set(`/workout/active?plan=${nextWorkout.plan.id}&day=${nextWorkout.day.day_number}`);
+    } else {
+      nextWorkoutUrl.set('/workout/active');
+    }
+  });
 
   // ── Calendar state ─────────────────────────────────────────────────────
   const today      = new Date();
