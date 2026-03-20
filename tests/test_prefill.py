@@ -12,7 +12,6 @@ Key invariants:
   - Per-set progression: set 1 tracks set 1, set 2 tracks set 2, etc.
 """
 import pytest
-import pytest_asyncio
 from httpx import AsyncClient
 
 from tests.conftest import (
@@ -235,7 +234,7 @@ class TestPerSetIndependence:
         await log_set(client, sess1["id"], sets_by_num[2]["id"], 100.0, 7)
 
         # Week 2: 3 sets (added a set)
-        plan2 = await create_plan(client, ex["id"], sets=3, reps=8, name="Plan v2")
+        await create_plan(client, ex["id"], sets=3, reps=8, name="Plan v2")
         # We need sessions for THIS plan, so create a prior session under plan2
         # (In practice, user stays on same plan — simulate by using same plan but
         # pointing to ex data. Here we just verify no crash and set 3 gets something.)

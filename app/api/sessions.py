@@ -369,8 +369,10 @@ async def create_session_from_plan(
 
     def rep_bracket(reps: int) -> int:
         """Same brackets as the in-workout drop-off."""
-        if reps >= 15: return 3
-        if reps >= 10: return 2
+        if reps >= 15:
+            return 3
+        if reps >= 10:
+            return 2
         return 1
 
     def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> float:
