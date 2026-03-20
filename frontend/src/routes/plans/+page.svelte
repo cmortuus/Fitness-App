@@ -7,6 +7,12 @@
 
   let allExercises = $state<Exercise[]>([]);
   let localPlans   = $state<WorkoutPlan[]>([]);
+  let errorMsg     = $state<string | null>(null);
+
+  function showError(msg: string) {
+    errorMsg = msg;
+    setTimeout(() => { errorMsg = null; }, 5000);
+  }
 
   const saveTimers: Record<number, ReturnType<typeof setTimeout>> = {};
 
@@ -21,6 +27,7 @@
       allExercises = exercisesData;
       localPlans = JSON.parse(JSON.stringify(plansData));
     } catch (error) {
+      showError('Failed to load plans. Please refresh the page.');
       console.error('Failed to load data:', error);
     }
   });
@@ -39,6 +46,7 @@
     try {
       await updatePlan(planId, { number_of_days: plan.number_of_days, days: plan.days });
     } catch (error) {
+      showError('Failed to save plan changes.');
       console.error('Failed to save plan:', error);
     }
   }
@@ -71,6 +79,7 @@
       workoutPlans.set(plansData);
       localPlans = JSON.parse(JSON.stringify(plansData));
     } catch (error) {
+      showError('Failed to delete plan. It may be in use by a workout session.');
       console.error('Failed to delete plan:', error);
     }
   }
@@ -82,6 +91,7 @@
       workoutPlans.set(plansData);
       localPlans = JSON.parse(JSON.stringify(plansData));
     } catch (error) {
+      showError('Failed to archive plan.');
       console.error('Failed to archive plan:', error);
     }
   }
@@ -93,6 +103,7 @@
       workoutPlans.set(plansData);
       localPlans = JSON.parse(JSON.stringify(plansData));
     } catch (error) {
+      showError('Failed to create a copy of this plan.');
       console.error('Failed to reuse plan:', error);
     }
   }
@@ -135,6 +146,14 @@
 </script>
 
 <div class="space-y-6">
+  <!-- Error banner (auto-dismisses after 5 s) -->
+  {#if errorMsg}
+    <div class="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300 flex items-center justify-between gap-3">
+      <span>⚠ {errorMsg}</span>
+      <button onclick={() => errorMsg = null} class="text-red-400 hover:text-red-200 shrink-0">✕</button>
+    </div>
+  {/if}
+
   <div class="flex items-center justify-between">
     <h2 class="text-2xl font-bold">Workout Plans</h2>
     <button onclick={() => goto('/plans/create')} class="btn-primary">
