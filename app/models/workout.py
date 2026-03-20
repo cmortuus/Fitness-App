@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -27,6 +27,11 @@ class ExerciseSet(Base):
     """A single set of an exercise during a workout session."""
 
     __tablename__ = "exercise_sets"
+    __table_args__ = (
+        # History and progress queries filter by session and exercise frequently
+        Index("ix_exercise_sets_session", "workout_session_id"),
+        Index("ix_exercise_sets_exercise", "exercise_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     workout_session_id: Mapped[int] = mapped_column(
@@ -65,6 +70,12 @@ class WorkoutSession(Base):
     """An actual workout session (performed workout)."""
 
     __tablename__ = "workout_sessions"
+    __table_args__ = (
+        # Dashboard and progress queries filter by date and status
+        Index("ix_workout_sessions_date", "date"),
+        Index("ix_workout_sessions_status", "status"),
+        Index("ix_workout_sessions_plan", "workout_plan_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
