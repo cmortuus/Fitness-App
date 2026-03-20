@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models.exercise import Exercise
-from app.models.workout import ExerciseSet, WorkoutSession
+from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession
 from app.schemas.requests import ExerciseCreate, ExerciseResponse
 
 router = APIRouter()
