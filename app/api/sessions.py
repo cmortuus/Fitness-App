@@ -152,7 +152,11 @@ async def start_session(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Session '{existing.name}' is already in progress (id={existing.id}). Complete or delete it first.",
+            detail={
+                "message": f"Session '{existing.name}' is already in progress. Complete or delete it first.",
+                "session_id": existing.id,
+                "session_name": existing.name or "",
+            },
         )
 
     workout_session.status = WorkoutStatus.IN_PROGRESS
@@ -351,7 +355,11 @@ async def create_session_from_plan(
     if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Session '{existing.name}' is already in progress (id={existing.id}). Complete or delete it first.",
+            detail={
+                "message": f"Session '{existing.name}' is already in progress. Complete or delete it first.",
+                "session_id": existing.id,
+                "session_name": existing.name or "",
+            },
         )
 
     # ── Look up most recent prior session for the same plan + same day ────────

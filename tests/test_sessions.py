@@ -60,8 +60,13 @@ class TestSessionLifecycle:
             f"/api/sessions/from-plan/{plan['id']}",
             params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
         )
-        # from-plan also checks for in-progress; expect 409
+        # from-plan also checks for in-progress; expect 409 with structured body
         assert r2.status_code == 409
+        body = r2.json()
+        # detail must be a dict with session_id so the frontend can target the right session
+        assert isinstance(body["detail"], dict)
+        assert "session_id" in body["detail"]
+        assert isinstance(body["detail"]["session_id"], int)
 
     async def test_complete_session(self, client: AsyncClient):
         """POST /sessions/{id}/complete transitions to completed."""

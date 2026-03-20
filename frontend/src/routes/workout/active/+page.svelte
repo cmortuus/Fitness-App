@@ -195,7 +195,7 @@
         raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
       } catch (e: any) {
         if (e?.response?.status === 409) {
-          await handleConflict(() => startFromPlan(planId, dayNumber));
+          await handleConflict(e, () => startFromPlan(planId, dayNumber));
           return;
         }
         throw e;
@@ -280,7 +280,7 @@
         });
       } catch (e: any) {
         if (e?.response?.status === 409) {
-          await handleConflict(startFreeSession);
+          await handleConflict(e, startFreeSession);
           return;
         }
         throw e;
@@ -831,11 +831,20 @@
   let conflictSession = $state<WorkoutSession | null>(null);
   let conflictRetry = $state<(() => Promise<void>) | null>(null); // re-run after abandoning
 
-  async function handleConflict(retry: () => Promise<void>) {
-    // Find the existing in-progress session to show its name in the UI
+  async function handleConflict(err: any, retry: () => Promise<void>) {
+    // Prefer the structured session_id from the 409 response body; fall back
+    // to scanning the sessions list if the backend returns a plain-text detail.
+    const detail = err?.response?.data?.detail;
+    const sessionId409: number | null =
+      detail && typeof detail === 'object' ? detail.session_id ?? null : null;
+
     try {
-      const sessions = await getSessions({ limit: 20 });
-      conflictSession = sessions.find(s => s.status === 'in_progress') ?? null;
+      if (sessionId409 != null) {
+        conflictSession = await getSession(sessionId409);
+      } else {
+        const sessions = await getSessions({ limit: 20 });
+        conflictSession = sessions.find(s => s.status === 'in_progress') ?? null;
+      }
     } catch { conflictSession = null; }
     conflictRetry = retry;
     loading = false;
@@ -853,9 +862,14 @@
   async function abandonAndRetry() {
     if (!conflictSession) return;
     loading = true;
+    // Delete ALL in-progress sessions so one orphaned session can't keep
+    // blocking new starts. (Previously only the displayed session was deleted,
+    // leaving any other orphans intact and causing repeated 409 loops.)
     try {
-      await deleteSession(conflictSession.id);
-    } catch { /* ignore if delete fails */ }
+      const all = await getSessions({ limit: 500 });
+      const inProgress = all.filter(s => s.status === 'in_progress');
+      await Promise.allSettled(inProgress.map(s => deleteSession(s.id)));
+    } catch { /* ignore individual delete failures */ }
     conflictSession = null;
     const retry = conflictRetry;
     conflictRetry = null;
