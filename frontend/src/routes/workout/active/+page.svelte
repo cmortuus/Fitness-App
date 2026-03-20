@@ -235,9 +235,10 @@
               backendId: bset?.id ?? null,
               setNumber: i,
               weightLbs: suggestedWeight,
-              // Reps always start blank — drop-off fills them after set 1 is logged.
-              // initReps is kept for the Epley anchor, deviation warning, and PR detection.
-              reps: null,
+              // Pre-fill reps with the suggested target so the user can see what
+              // they're aiming for.  The Epley drop-off adjusts weight (not reps)
+              // as each set is completed.
+              reps: suggestedReps,
               repsLeft: null,
               repsRight: null,
               done: false,

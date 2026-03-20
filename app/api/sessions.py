@@ -402,18 +402,27 @@ async def create_session_from_plan(
                 "planned_reps": s.planned_reps,
             }
 
-    def _overload_for_set(
-        exercise_id: int, set_number: int, target_reps: int, ex_model
+    def _overload_for_exercise(
+        exercise_id: int, target_reps: int, ex_model
     ) -> tuple[float | None, int | None]:
-        """Resolve prior-session data for this set and delegate to compute_overload()."""
+        """Compute the progressive overload suggestion for an exercise.
+
+        Uses set 1 from the prior session as the baseline (the heaviest set
+        the user actually performed).  All sets in the new session are pre-filled
+        with the same suggested weight so the display doesn't show a stepped-down
+        weight before the user has even started.  The frontend's inter-set
+        Epley drop-off will reduce subsequent sets' weight as each set is
+        completed during the workout.
+        """
         ex_sets = prior_set_data.get(exercise_id)
         if not ex_sets:
             return None, None
 
-        prior_set = ex_sets.get(set_number) or ex_sets[max(ex_sets.keys())]
-        prior_weight = prior_set["weight"]
-        prior_reps = prior_set["reps"]
-        planned_reps = prior_set.get("planned_reps") or target_reps
+        # Prefer set 1 as the baseline; fall back to the lowest-numbered set present.
+        baseline_set = ex_sets.get(1) or ex_sets[min(ex_sets.keys())]
+        prior_weight = baseline_set["weight"]
+        prior_reps = baseline_set["reps"]
+        planned_reps = baseline_set.get("planned_reps") or target_reps
 
         return compute_overload(
             prior_weight=prior_weight,
@@ -460,10 +469,13 @@ async def create_session_from_plan(
 
         ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
+        # Compute progression once per exercise (from set 1 baseline) so that
+        # all sets in the new session share the same suggested weight.  The
+        # frontend's Epley drop-off will step the weight down as sets are
+        # completed during the workout.
+        weight_kg, suggested_reps = _overload_for_exercise(exercise_id, reps, ex_model)
+
         for set_num in range(1, sets + 1):
-            # Compute progression individually per set so each set uses
-            # its own history from the prior session.
-            weight_kg, suggested_reps = _overload_for_set(exercise_id, set_num, reps, ex_model)
             planned_reps_val = suggested_reps if suggested_reps is not None else None
 
             exercise_set = ExerciseSet(
