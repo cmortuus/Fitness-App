@@ -107,10 +107,14 @@ async def get_exercise_history(
     db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[dict]:
     """Get the most recent completed sessions for a given exercise."""
-    # Subquery: sessions that have at least one completed set
+    # Subquery: sessions that have at least one completed set (bilateral or unilateral)
     sessions_with_data = (
         select(ExerciseSet.workout_session_id)
-        .where(ExerciseSet.actual_reps.is_not(None))
+        .where(
+            (ExerciseSet.actual_reps.is_not(None))
+            | (ExerciseSet.reps_left.is_not(None))
+            | (ExerciseSet.reps_right.is_not(None))
+        )
     )
 
     result = await db.execute(
@@ -118,7 +122,10 @@ async def get_exercise_history(
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
         .where(
             ExerciseSet.exercise_id == exercise_id,
-            ExerciseSet.actual_reps.is_not(None),
+            ExerciseSet.workout_session_id.in_(sessions_with_data),
+            (ExerciseSet.actual_reps.is_not(None))
+            | (ExerciseSet.reps_left.is_not(None))
+            | (ExerciseSet.reps_right.is_not(None)),
         )
         .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id), ExerciseSet.set_number)
     )
@@ -139,6 +146,8 @@ async def get_exercise_history(
         sessions_dict[session.id]["sets"].append({
             "set_number": exercise_set.set_number,
             "actual_reps": exercise_set.actual_reps,
+            "reps_left": exercise_set.reps_left,
+            "reps_right": exercise_set.reps_right,
             "actual_weight_kg": exercise_set.actual_weight_kg,
             "notes": exercise_set.notes,
         })
