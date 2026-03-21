@@ -320,7 +320,12 @@
   <!-- ── Recent sessions ─────────────────────────────────────────────── -->
   {#if recentSessions.length > 0}
     <div class="card">
-      <h3 class="font-semibold text-zinc-200 mb-3">Recent Workouts</h3>
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-zinc-200">Recent Workouts</h3>
+        <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">
+          View Progress →
+        </a>
+      </div>
       <div class="space-y-1">
         {#each recentSessions as s}
           <div class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0">
@@ -337,5 +342,15 @@
       </div>
     </div>
   {/if}
+
+  <!-- ── Quick link to Plans ────────────────────────────────────────── -->
+  <a href="/plans" class="card !p-4 flex items-center gap-3 hover:bg-zinc-800/80 transition-colors group">
+    <span class="text-2xl">📋</span>
+    <div class="flex-1">
+      <p class="text-sm font-semibold text-zinc-200 group-hover:text-primary-400 transition-colors">Manage Plans</p>
+      <p class="text-xs text-zinc-500">Create, edit, and archive workout plans</p>
+    </div>
+    <span class="text-zinc-600 text-sm">›</span>
+  </a>
 
 </div>

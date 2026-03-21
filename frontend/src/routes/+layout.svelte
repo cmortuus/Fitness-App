@@ -8,8 +8,6 @@
   const staticNavItems = [
     { path: '/',          label: 'Home',      icon: '🏠' },
     { path: '/nutrition', label: 'Nutrition', icon: '🍽️' },
-    { path: '/plans',     label: 'Plans',     icon: '📋' },
-    { path: '/progress',  label: 'Progress',  icon: '📈' },
     { path: '/settings',  label: 'Settings',  icon: '⚙️' },
   ];
 
