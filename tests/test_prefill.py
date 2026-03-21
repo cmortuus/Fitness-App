@@ -160,7 +160,7 @@ class TestWeek2Prefill:
                 f"set {s['set_number']}: expected 9 reps (8+1), got {s['planned_reps']}"
 
     async def test_no_progression_if_reps_below_target(self, client: AsyncClient):
-        """If prior reps < planned reps (but >= 4 floor), retry same weight and same reps."""
+        """If prior reps < planned reps (but >= 4 floor), retry same weight, re-attempt planned target."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
 
@@ -170,8 +170,8 @@ class TestWeek2Prefill:
 
         sess2 = await start_session_from_plan(client, plan["id"])
         for s in sess2["sets"]:
-            assert s["planned_reps"] == 6, \
-                f"set {s['set_number']}: expected 6 reps (retry), got {s['planned_reps']}"
+            assert s["planned_reps"] == 8, \
+                f"set {s['set_number']}: expected 8 reps (re-attempt target), got {s['planned_reps']}"
             assert abs(s["planned_weight_kg"] - 100.0) < 0.01, \
                 f"set {s['set_number']}: expected same weight 100, got {s['planned_weight_kg']}"
 
@@ -198,7 +198,7 @@ class TestWeek2Prefill:
             f"Weight {s['planned_weight_kg']} is not a multiple of 2.5"
 
     async def test_reps_floor_at_exactly_four_is_unchanged(self, client: AsyncClient):
-        """Prior reps = 4 is at the floor — retry same weight, same reps (no deload)."""
+        """Prior reps = 4 is at the floor — retry same weight, re-attempt planned target (no deload)."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
 
@@ -207,8 +207,8 @@ class TestWeek2Prefill:
 
         sess2 = await start_session_from_plan(client, plan["id"])
         s = sess2["sets"][0]
-        # 4 is at the floor, not below it — retry, don't deload
-        assert s["planned_reps"] == 4, f"Expected 4 (retry at floor), got {s['planned_reps']}"
+        # 4 is at the floor, not below it — retry at planned target, don't deload
+        assert s["planned_reps"] == 8, f"Expected 8 (re-attempt target), got {s['planned_reps']}"
         assert abs(s["planned_weight_kg"] - 100.0) < 0.01, \
             f"Expected same weight 100 at floor, got {s['planned_weight_kg']}"
 
@@ -221,9 +221,8 @@ class TestPerSetIndependence:
 
         e.g. week 1: 100×8 / 100×7 / 100×6
              week 2: set 1 hit target (8) → progress to 9 reps
-                     set 2 missed target (7 < 8) → retry at 100×7
-                     set 3 missed target (6 < 8) → retry at 100×6
-        This preserves per-set weight steps across weeks.
+                     set 2 missed target (7 < 8) → re-attempt at 100×8
+                     set 3 missed target (6 < 8) → re-attempt at 100×8
         """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
@@ -243,12 +242,12 @@ class TestPerSetIndependence:
         assert s2_by_num[1]["planned_reps"] == 9,        f"Set 1: expected 9, got {s2_by_num[1]['planned_reps']}"
         assert s2_by_num[1]["planned_weight_kg"] == 100.0, f"Set 1: expected 100.0 kg"
 
-        # Set 2: missed target (7 < 8) → retry at prior weight/reps
-        assert s2_by_num[2]["planned_reps"] == 7,        f"Set 2: expected 7, got {s2_by_num[2]['planned_reps']}"
+        # Set 2: missed target (7 < 8) → retry at same weight, re-attempt planned target
+        assert s2_by_num[2]["planned_reps"] == 8,        f"Set 2: expected 8, got {s2_by_num[2]['planned_reps']}"
         assert s2_by_num[2]["planned_weight_kg"] == 100.0, f"Set 2: expected 100.0 kg"
 
-        # Set 3: missed target (6 < 8) → retry at prior weight/reps
-        assert s2_by_num[3]["planned_reps"] == 6,        f"Set 3: expected 6, got {s2_by_num[3]['planned_reps']}"
+        # Set 3: missed target (6 < 8) → retry at same weight, re-attempt planned target
+        assert s2_by_num[3]["planned_reps"] == 8,        f"Set 3: expected 8, got {s2_by_num[3]['planned_reps']}"
         assert s2_by_num[3]["planned_weight_kg"] == 100.0, f"Set 3: expected 100.0 kg"
 
     async def test_extra_set_falls_back_gracefully(self, client: AsyncClient):
@@ -312,47 +311,53 @@ class TestAssistedExercises:
 
     async def test_assisted_week2_uses_assist_amount(self, client: AsyncClient):
         """
-        Assisted exercise week 2: planned_weight_kg should be the ASSIST amount,
-        not the net effective weight.
-        Body weight = 80 kg, net effective weight logged = 50 kg
-        → assist = 80 - 50 = 30 kg → planned_weight_kg should be 30 kg
+        Assisted exercise week 2: planned_weight_kg should be the same assist
+        amount (or slightly lower if at a bracket boundary).
+
+        The frontend now stores the ASSIST AMOUNT directly as actual_weight_kg
+        (not the net load).  So if the user logged 30 kg assist and hit their
+        target, the backend should pre-fill the same 30 kg assist next week
+        (rep-style progression adds a rep, keeps assist constant until the
+        bracket boundary).
         """
         ex = await create_exercise(
             client, name="pullup", display_name="Assisted Pull-Up",
             is_assisted=True
         )
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
-        body_weight_kg = 80.0
 
-        # Week 1: log net effective weight = 50 kg
-        sess1 = await start_session_from_plan(client, plan["id"], body_weight_kg=body_weight_kg)
+        # Week 1: log assist amount = 30 kg directly (frontend stores assist, not net)
+        sess1 = await start_session_from_plan(client, plan["id"])
         for s in sess1["sets"]:
-            await log_set(client, sess1["id"], s["id"], 50.0, 8)  # net = 50 kg
+            await log_set(client, sess1["id"], s["id"], 30.0, 8)  # 30 kg assist, 8 reps
 
-        # Week 2: assist amount = 80 - 50 = 30 kg
-        sess2 = await start_session_from_plan(client, plan["id"], body_weight_kg=body_weight_kg)
+        # Week 2: hit target (8 ≥ 8) → rep-style adds rep, keeps same assist.
+        # projected=9, bracket(9)=1=bracket(8) → same assist (30 kg), 9 reps.
+        sess2 = await start_session_from_plan(client, plan["id"])
         for s in sess2["sets"]:
             assert s["planned_weight_kg"] is not None, "Assisted week 2 should have assist pre-fill"
-            # Allow small floating point tolerance
             assert abs(s["planned_weight_kg"] - 30.0) < 1.5, \
-                f"Expected assist ~30 kg, got {s['planned_weight_kg']}"
+                f"Expected assist ~30 kg (same, rep progressed), got {s['planned_weight_kg']}"
 
     async def test_assisted_without_body_weight_no_crash(self, client: AsyncClient):
-        """Assisted exercise with body_weight_kg=0 in week 2 should not crash."""
+        """Assisted exercise progression works without body_weight_kg (assist stored directly)."""
         ex = await create_exercise(
             client, name="pullup", display_name="Assisted Pull-Up",
             is_assisted=True
         )
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
 
-        sess1 = await start_session_from_plan(client, plan["id"], body_weight_kg=80.0)
+        # Week 1: log 30 kg assist, hit target
+        sess1 = await start_session_from_plan(client, plan["id"])
         for s in sess1["sets"]:
-            await log_set(client, sess1["id"], s["id"], 50.0, 8)
+            await log_set(client, sess1["id"], s["id"], 30.0, 8)
 
-        # Week 2 without body weight
+        # Week 2 without body weight — should still work and pre-fill assist amount
         sess2 = await start_session_from_plan(client, plan["id"], body_weight_kg=0)
-        # Should not crash; weight may be None since we can't compute assist without BW
         assert sess2 is not None
+        weights = [s["planned_weight_kg"] for s in sess2["sets"]]
+        assert all(w is not None for w in weights), \
+            f"Assisted week 2 should pre-fill even without body weight: {weights}"
 
 
 # ── Bodyweight exercises ──────────────────────────────────────────────────────

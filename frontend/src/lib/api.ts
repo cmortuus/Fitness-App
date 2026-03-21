@@ -47,9 +47,13 @@ export interface Set {
   exercise_id: number;
   set_number: number;
   planned_reps: number | null;
+  planned_reps_left: number | null;
+  planned_reps_right: number | null;
   planned_weight_kg: number | null;
   actual_reps: number | null;
   actual_weight_kg: number | null;
+  reps_left: number | null;
+  reps_right: number | null;
   notes: string | null;
   started_at: string | null;
   completed_at: string | null;
@@ -216,8 +220,7 @@ export async function createExercise(data: {
 }
 
 export async function deleteExercise(exerciseId: number): Promise<void> {
-  const response = await api.delete(`/exercises/${exerciseId}`);
-  return response.data;
+  await api.delete(`/exercises/${exerciseId}`);
 }
 
 export interface ExerciseHistorySession {

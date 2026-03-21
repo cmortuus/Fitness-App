@@ -56,3 +56,9 @@ recordings/
 *.pt
 *.onnx
 *.pth
+
+# Claude
+.claude/
+
+# Backup files
+*.bak

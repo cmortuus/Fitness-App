@@ -80,9 +80,9 @@ export const currentSet = derived(
   ($currentSession) => {
     if (!$currentSession) return null;
 
-    // Find the active set
+    // Find the next incomplete set (first one without a completed_at)
     const activeSets = $currentSession.sets.filter(s => !s.completed_at);
-    return activeSets[activeSets.length - 1] || null;
+    return activeSets[0] || null;
   }
 );
 

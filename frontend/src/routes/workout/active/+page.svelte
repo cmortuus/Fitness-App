@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy, tick } from 'svelte';
+  import { goto } from '$app/navigation';
   import { beforeNavigate } from '$app/navigation';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
@@ -111,7 +112,7 @@
   let finishing = $state(false);
   let showCancelConfirm = $state(false);
   let cancelling = $state(false);
-  let showFinishWarning = $state(false);
+  // (showFinishWarning removed — finish button is disabled until all sets done)
 
   // Workout clock
   let startedAt = $state<number>(0);
@@ -263,7 +264,7 @@
 
       startedAt = Date.now();
       clockInterval = setInterval(() => {
-        elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       }, 1000);
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
@@ -296,7 +297,7 @@
 
       startedAt = Date.now();
       clockInterval = setInterval(() => {
-        elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       }, 1000);
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
@@ -314,15 +315,16 @@
       workoutName = sess.name ?? 'Workout';
       currentSession.set(sess);
 
-      // Restore elapsed time from when the session started
+      // Restore elapsed time from when the session started.
+      // Use parseUtcMs so the naive datetime from the backend is treated as UTC.
       if (sess.started_at) {
-        startedAt = new Date(sess.started_at).getTime();
-        elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        startedAt = parseUtcMs(sess.started_at);
+        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       } else {
         startedAt = Date.now();
       }
       clockInterval = setInterval(() => {
-        elapsed = Math.floor((Date.now() - startedAt) / 1000);
+        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       }, 1000);
 
       // Group sets by exercise, preserving insertion order
@@ -349,13 +351,10 @@
           let weightVal: number | null = null;
           const srcWeightKg = isDone ? bset.actual_weight_kg : bset.planned_weight_kg;
           if (srcWeightKg != null && srcWeightKg > 0) {
-            if (isAss) {
-              // Convert net effective weight back to assist amount
-              const assistKg = Math.max(0, bwKg - srcWeightKg);
-              weightVal = assistKg > 0 ? fromKg(assistKg) : null;
-            } else {
-              weightVal = fromKg(srcWeightKg);
-            }
+            // Assisted exercises store the assist amount directly in kg.
+            // All other exercises store the bilateral weight in kg.
+            // Both cases: just convert from kg to display unit.
+            weightVal = fromKg(srcWeightKg);
           }
           const repsVal = isDone ? bset.actual_reps : (bset.planned_reps ?? null);
 
@@ -369,8 +368,9 @@
             if (rm) repsRight = parseInt(rm[1]);
           }
 
+          // Assisted exercises store the assist amount directly — no BW math needed.
           const sugW = bset.planned_weight_kg != null && bset.planned_weight_kg > 0
-            ? (isAss ? fromKg(Math.max(0, bwKg - bset.planned_weight_kg)) : fromKg(bset.planned_weight_kg))
+            ? fromKg(bset.planned_weight_kg)
             : null;
           const sugR = bset.planned_reps ?? null;
           const oneRM = sugW && sugW > 0 && sugR && sugR > 0 ? sugW * (1 + sugR / 30) : null;
@@ -409,6 +409,18 @@
   // ─── Helpers ──────────────────────────────────────────────────────────────
   function getEx(id: number) { return allExercises.find(e => e.id === id); }
 
+  /**
+   * Parse a datetime string from the backend as UTC.
+   * The backend stores naive datetimes (no tz suffix) that are always UTC.
+   * JS's Date() treats strings without a tz suffix as LOCAL time, so we
+   * must append 'Z' if no offset is already present.
+   */
+  function parseUtcMs(ts: string): number {
+    if (!ts) return Date.now();
+    const hasOffset = ts.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(ts);
+    return new Date(hasOffset ? ts : ts + 'Z').getTime();
+  }
+
   function formatClock(s: number) {
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
@@ -434,7 +446,7 @@
 
   // Returns a warning string if the current values deviate significantly from
   // the initial Epley suggestion, null otherwise.
-  function deviationWarning(set: UISet, currentWeight: number | null, currentReps: number | null): string | null {
+  function deviationWarning(set: UISet, currentWeight: number | null, currentReps: number | null, isAssisted = false): string | null {
     if (!set.oneRM || set.done) return null;
     const w = currentWeight ?? set.weightLbs;
     const r = currentReps ?? set.reps;
@@ -442,6 +454,14 @@
     const sugW = set.initWeight;
     const sugR = set.initReps;
     if (sugW == null || sugR == null) return null;
+    if (isAssisted) {
+      // For assisted exercises, lower assist = harder. Warn only when assist
+      // drops dramatically (>20%), which would be a large difficulty spike.
+      if (w < sugW && (sugW - w) / sugW > 0.20) {
+        return `Large assist reduction — difficulty spike may be too aggressive.`;
+      }
+      return null;
+    }
     // Only warn when weight is being pushed UP by more than 20%
     if (w > sugW && (w - sugW) / sugW > 0.20) {
       return `Large weight increase from last session — Epley estimate is less precise this far from baseline. Jumping weight rapidly increases injury risk.`;
@@ -484,9 +504,9 @@
       const exercise    = getEx(ex.exerciseId);
       const isAssisted  = exercise?.is_assisted ?? false;
       const assistVal   = set.weightLbs ?? 0;
-      const weightKg    = isAssisted
-        ? effectiveWeightKg(assistVal)   // body weight − assist
-        : toKg(assistVal);
+      // Store the assist amount directly (not net load) so the backend can
+      // read it back without needing body weight, and progression reduces it.
+      const weightKg    = toKg(assistVal);
 
       if (bId === null) {
         const created = await addSet(sessionId, {
@@ -544,9 +564,10 @@
 
       // Epley: weight to use for targetReps given prior weight × priorReps
       function epleyWeightForReps(w: number, doneReps: number, targetReps: number): number {
+        if (doneReps <= 0) doneReps = 1; // guard: Epley invalid for 0/negative reps
         const oneRM = w * (1 + doneReps / 30);
         const raw   = oneRM / (1 + targetReps / 30);
-        return Math.round(raw / 5) * 5; // nearest 5 lb/kg increment
+        return roundWeight(raw); // respects lbs (nearest 5) vs kg (nearest 2.5)
       }
 
       function setForPosition(
@@ -557,8 +578,10 @@
         if (naturalReps >= REP_FLOOR) {
           return { weight: baseWeight, reps: naturalReps };
         }
-        // Below the floor → keep 5 reps, reduce weight via Epley
-        const w = epleyWeightForReps(baseWeight, naturalReps, REP_FLOOR);
+        // Below the floor → keep 5 reps, reduce weight via Epley.
+        // Clamp to at least 1 rep for valid Epley input.
+        const clampedReps = Math.max(1, naturalReps);
+        const w = epleyWeightForReps(baseWeight, clampedReps, REP_FLOOR);
         return { weight: Math.max(0, w), reps: REP_FLOOR };
       }
 
@@ -603,6 +626,8 @@
           });
         }
       }
+      // Start rest timer only on successful save
+      startRestTimer(exUiId);
     } catch (e) {
       console.error('Failed to complete set:', e);
       alert('Failed to save set. Please try again.');
@@ -610,8 +635,6 @@
       set.saving = false;
       uiExercises = [...uiExercises];
     }
-
-    startRestTimer(exUiId);
   }
 
   async function removeSet(exUiId: string, localId: string) {
@@ -649,7 +672,13 @@
     uiExercises = [...uiExercises];
   }
 
-  function removeExercise(exUiId: string) {
+  async function removeExercise(exUiId: string) {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (ex && sessionId) {
+      // Delete any saved backend sets so they don't pollute history
+      const backendIds = ex.sets.filter(s => s.backendId !== null).map(s => s.backendId!);
+      await Promise.allSettled(backendIds.map(id => deleteSet(sessionId!, id)));
+    }
     uiExercises = uiExercises.filter(e => e.uiId !== exUiId);
   }
 
@@ -755,18 +784,8 @@
   }
 
   // ─── Finish workout ───────────────────────────────────────────────────────
-  function requestFinish() {
-    if (incompleteSets > 0) {
-      showFinishWarning = true;
-      showCancelConfirm = false;
-    } else {
-      doFinish();
-    }
-  }
-
   async function doFinish() {
-    showFinishWarning = false;
-    if (!sessionId) { window.location.href = '/'; return; }
+    if (!sessionId) { goto('/'); return; }
     finishing = true;
     try {
       await completeSession(sessionId);
@@ -791,29 +810,24 @@
     for (const ex of uiExercises) {
       const exercise = getEx(ex.exerciseId);
       if (!exercise) continue;
+      const isAsst = exercise.is_assisted ?? false;
       const doneSetsEx = ex.sets.filter(s => s.done);
       if (doneSetsEx.length === 0) continue;
+      let foundWeight = false;
+      let foundReps = false;
       for (const s of doneSetsEx) {
         const w = s.weightLbs ?? 0;
         const r = s.reps ?? (ex.isUnilateral ? Math.min(s.repsLeft ?? 0, s.repsRight ?? 0) : 0);
         if (!s.initWeight || !s.initReps) continue;
-        // Weight PR: beat the suggested weight
-        if (w > (s.initWeight ?? 0) && !(getEx(ex.exerciseId)?.is_assisted ?? false)) {
-          results.push({
-            exerciseName: exercise.display_name,
-            type: 'weight',
-            value: `${w} ${unit}`,
-          });
-          break;
+        // Weight PR: beat the suggested weight (not applicable for assisted)
+        if (!foundWeight && !isAsst && w > (s.initWeight ?? 0)) {
+          results.push({ exerciseName: exercise.display_name, type: 'weight', value: `${w} ${unit}` });
+          foundWeight = true;
         }
         // Rep PR: beat the suggested reps
-        if (r > (s.initReps ?? 0)) {
-          results.push({
-            exerciseName: exercise.display_name,
-            type: 'reps',
-            value: `${r} reps`,
-          });
-          break;
+        if (!foundReps && r > (s.initReps ?? 0)) {
+          results.push({ exerciseName: exercise.display_name, type: 'reps', value: `${r} reps` });
+          foundReps = true;
         }
       }
     }
@@ -823,7 +837,7 @@
 
   // ─── Cancel workout ───────────────────────────────────────────────────────
   async function cancelWorkout() {
-    if (!sessionId) { window.location.href = '/'; return; }
+    if (!sessionId) { goto('/'); return; }
     cancelling = true;
     try {
       await deleteSession(sessionId);
@@ -833,7 +847,7 @@
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
-    window.location.href = '/';
+    goto('/');
   }
 
   // ─── Conflict state (existing in-progress session blocks starting a new one) ──
@@ -938,9 +952,19 @@
   }
 
   let summaryVolumeLbs = $derived(
-    uiExercises.reduce((total, ex) =>
-      total + ex.sets.filter(s => s.done).reduce((s, set) => s + (set.weightLbs ?? 0) * (set.reps ?? 0), 0)
-    , 0)
+    uiExercises.reduce((total, ex) => {
+      const exercise = getEx(ex.exerciseId);
+      const isAsst = exercise?.is_assisted ?? false;
+      return total + ex.sets.filter(s => s.done).reduce((s, set) => {
+        const w = isAsst
+          ? Math.max(0, bodyWeightInUnit - (set.weightLbs ?? 0)) // net load for assisted
+          : (set.weightLbs ?? 0);
+        const r = set.reps ?? 0;
+        // Unilateral exercises work both sides
+        const multiplier = ex.isUnilateral ? 2 : 1;
+        return s + w * r * multiplier;
+      }, 0);
+    }, 0)
   );
   let summaryDoneSets = $derived(
     uiExercises.reduce((n, ex) => n + ex.sets.filter(s => s.done).length, 0)
@@ -1266,8 +1290,8 @@
                         const v = (e.target as HTMLInputElement).value;
                         const r = v === '' ? null : parseInt(v);
                         set.repsLeft = r;
-                        // Epley: auto-fill weight only if currently blank
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null && set.weightLbs == null) {
+                        // Epley: auto-adjust weight when reps change
+                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
                           const newW = epleyWeight(set.oneRM, r);
                           set.weightLbs = newW;
                           const idx = ex.sets.indexOf(set);
@@ -1289,8 +1313,8 @@
                         const v = (e.target as HTMLInputElement).value;
                         const r = v === '' ? null : parseInt(v);
                         set.repsRight = r;
-                        // Epley: auto-fill weight only if currently blank
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null && set.weightLbs == null) {
+                        // Epley: auto-adjust weight when reps change
+                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
                           const newW = epleyWeight(set.oneRM, r);
                           set.weightLbs = newW;
                           const idx = ex.sets.indexOf(set);
@@ -1332,10 +1356,11 @@
                     </div>
                   {/if}
                   <!-- Deviation warning (unilateral) -->
-                  {#if deviationWarning(set, set.weightLbs, set.repsLeft ?? set.repsRight)}
+                  {@const devWarnUni = deviationWarning(set, set.weightLbs, set.repsLeft ?? set.repsRight, isAssistedEx)}
+                  {#if devWarnUni}
                     <div class="px-1 mt-0.5">
                       <p class="text-xs text-amber-400 leading-snug">
-                        ⚠ {deviationWarning(set, set.weightLbs, set.repsLeft ?? set.repsRight)}
+                        ⚠ {devWarnUni}
                       </p>
                     </div>
                   {/if}
@@ -1393,8 +1418,8 @@
                         const v = (e.target as HTMLInputElement).value;
                         const r = v === '' ? null : parseInt(v);
                         set.reps = r;
-                        // Epley: auto-fill weight only if currently blank
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null && set.weightLbs == null) {
+                        // Epley: auto-adjust weight when reps change
+                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
                           const newW = epleyWeight(set.oneRM, r);
                           set.weightLbs = newW;
                           const idx = ex.sets.indexOf(set);
@@ -1436,10 +1461,11 @@
                     </div>
                   {/if}
                   <!-- Deviation warning -->
-                  {#if deviationWarning(set, set.weightLbs, set.reps)}
+                  {@const devWarnBi = deviationWarning(set, set.weightLbs, set.reps, isAssistedEx)}
+                  {#if devWarnBi}
                     <div class="col-span-full px-1 mt-0.5">
                       <p class="text-xs text-amber-400 leading-snug">
-                        ⚠ {deviationWarning(set, set.weightLbs, set.reps)}
+                        ⚠ {devWarnBi}
                       </p>
                     </div>
                   {/if}
@@ -1665,7 +1691,7 @@
                 {#each session.sets as s}
                   {@const dispW = s.actual_weight_kg != null
                     ? (histEx?.is_assisted
-                        ? -fromKg(Math.max(0, ($latestBodyWeight?.weight_kg ?? 0) - s.actual_weight_kg))
+                        ? -fromKg(s.actual_weight_kg)   // assist amount stored directly; show as negative
                         : fromKg(s.actual_weight_kg))
                     : null}
                   <div class="grid px-3 py-1.5 border-b border-gray-800 last:border-0" style="grid-template-columns: 2rem 1fr 1fr">
