@@ -355,4 +355,144 @@ export async function deleteBodyWeight(entryId: number): Promise<void> {
   await api.delete(`/body-weight/${entryId}`);
 }
 
+// ── Nutrition ────────────────────────────────────────────────────────────────
+
+export interface FoodSearchResult {
+  name: string;
+  brand: string | null;
+  source: 'openfoodfacts' | 'usda' | 'custom';
+  source_id: string | null;
+  barcode: string | null;
+  calories_per_100g: number | null;
+  protein_per_100g: number | null;
+  carbs_per_100g: number | null;
+  fat_per_100g: number | null;
+  serving_size_g: number;
+  serving_label: string | null;
+}
+
+export interface FoodItem extends FoodSearchResult {
+  id: number;
+  is_custom: boolean;
+}
+
+export interface NutritionEntry {
+  id: number;
+  food_item_id: number | null;
+  name: string;
+  date: string;
+  meal: 'breakfast' | 'lunch' | 'dinner' | 'snack';
+  quantity_g: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  logged_at: string;
+}
+
+export interface MacroGoals {
+  id: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  effective_from: string;
+}
+
+export interface DailySummary {
+  date: string;
+  totals: { calories: number; protein: number; carbs: number; fat: number };
+  goals: MacroGoals | null;
+  remaining: { calories: number; protein: number; carbs: number; fat: number } | null;
+}
+
+export interface DailyEntries {
+  date: string;
+  meals: Record<string, NutritionEntry[]>;
+  totals: { calories: number; protein: number; carbs: number; fat: number };
+}
+
+// Food search
+export async function searchFoods(q: string, page: number = 1): Promise<FoodSearchResult[]> {
+  const response = await api.get('/nutrition/search', { params: { q, page } });
+  return response.data;
+}
+
+export async function lookupBarcode(code: string): Promise<FoodSearchResult> {
+  const response = await api.get(`/nutrition/barcode/${code}`);
+  return response.data;
+}
+
+// Custom foods
+export async function getCustomFoods(q: string = ''): Promise<FoodItem[]> {
+  const response = await api.get('/nutrition/foods', { params: { q } });
+  return response.data;
+}
+
+export async function createCustomFood(data: {
+  name: string;
+  brand?: string;
+  barcode?: string;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+  serving_size_g?: number;
+  serving_label?: string;
+}): Promise<FoodItem> {
+  const response = await api.post('/nutrition/foods', data);
+  return response.data;
+}
+
+export async function deleteCustomFood(id: number): Promise<void> {
+  await api.delete(`/nutrition/foods/${id}`);
+}
+
+// Nutrition entries
+export async function getNutritionEntries(date: string): Promise<DailyEntries> {
+  const response = await api.get('/nutrition/entries', { params: { date } });
+  return response.data;
+}
+
+export async function addNutritionEntry(data: {
+  food_item_id?: number;
+  name: string;
+  date: string;
+  meal?: string;
+  quantity_g: number;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}): Promise<NutritionEntry> {
+  const response = await api.post('/nutrition/entries', data);
+  return response.data;
+}
+
+export async function deleteNutritionEntry(id: number): Promise<void> {
+  await api.delete(`/nutrition/entries/${id}`);
+}
+
+// Summary & goals
+export async function getDailySummary(date: string): Promise<DailySummary> {
+  const response = await api.get('/nutrition/summary', { params: { date } });
+  return response.data;
+}
+
+export async function getMacroGoals(): Promise<MacroGoals | null> {
+  const response = await api.get('/nutrition/goals');
+  return response.data;
+}
+
+export async function setMacroGoals(data: {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  effective_from?: string;
+}): Promise<MacroGoals> {
+  const response = await api.put('/nutrition/goals', data);
+  return response.data;
+}
+
 export default api;

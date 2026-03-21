@@ -231,3 +231,44 @@ class BodyWeightCreate(BaseModel):
 class BodyWeightUpdate(BaseModel):
     weight_kg: float | None = None
     notes: str | None = None
+
+
+# ── Nutrition schemas ─────────────────────────────────────────────────────────
+
+class MealType(str, Enum):
+    BREAKFAST = "breakfast"
+    LUNCH = "lunch"
+    DINNER = "dinner"
+    SNACK = "snack"
+
+
+class FoodItemCreate(BaseModel):
+    name: str
+    brand: str | None = None
+    barcode: str | None = None
+    calories_per_100g: float = Field(ge=0)
+    protein_per_100g: float = Field(ge=0)
+    carbs_per_100g: float = Field(ge=0)
+    fat_per_100g: float = Field(ge=0)
+    serving_size_g: float = Field(default=100, gt=0)
+    serving_label: str | None = None
+
+
+class NutritionEntryCreate(BaseModel):
+    food_item_id: int | None = None
+    name: str
+    date: date
+    meal: MealType = MealType.SNACK
+    quantity_g: float = Field(gt=0)
+    calories: float = Field(ge=0)
+    protein: float = Field(ge=0)
+    carbs: float = Field(ge=0)
+    fat: float = Field(ge=0)
+
+
+class MacroGoalsUpdate(BaseModel):
+    calories: float = Field(gt=0)
+    protein: float = Field(ge=0)
+    carbs: float = Field(ge=0)
+    fat: float = Field(ge=0)
+    effective_from: date | None = None

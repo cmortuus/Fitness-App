@@ -15,6 +15,7 @@ from alembic import context
 # Import all models so that Base.metadata includes every table.
 import app.models.body_weight  # noqa: F401
 import app.models.exercise  # noqa: F401
+import app.models.nutrition  # noqa: F401
 import app.models.user  # noqa: F401
 import app.models.workout  # noqa: F401
 from app.database import Base

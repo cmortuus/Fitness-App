@@ -6,10 +6,11 @@
   import { getExercises, getLatestBodyWeight, getPlans } from '$lib/api';
 
   const staticNavItems = [
-    { path: '/',         label: 'Home',     icon: '🏠' },
-    { path: '/plans',    label: 'Plans',    icon: '📋' },
-    { path: '/progress', label: 'Progress', icon: '📈' },
-    { path: '/settings', label: 'Settings', icon: '⚙️' },
+    { path: '/',          label: 'Home',      icon: '🏠' },
+    { path: '/nutrition', label: 'Nutrition', icon: '🍽️' },
+    { path: '/plans',     label: 'Plans',     icon: '📋' },
+    { path: '/progress',  label: 'Progress',  icon: '📈' },
+    { path: '/settings',  label: 'Settings',  icon: '⚙️' },
   ];
 
   let { children } = $props<{ children: import('svelte').Snippet }>();

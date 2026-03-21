@@ -21,6 +21,9 @@ class Settings(BaseSettings):
     debug: bool = False
     environment: Literal["development", "production"] = "development"
 
+    # External APIs
+    usda_api_key: str = "DEMO_KEY"
+
     # Database
     database_url: str = "sqlite+aiosqlite:///./homegym.db"
     database_sync_url: str = "sqlite:///./homegym.db"
