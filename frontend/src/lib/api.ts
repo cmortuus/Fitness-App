@@ -495,4 +495,53 @@ export async function setMacroGoals(data: {
   return response.data;
 }
 
+// ── Diet Phases ──────────────────────────────────────────────────────────────
+
+export interface DietPhase {
+  id: number;
+  phase_type: 'cut' | 'bulk' | 'maintenance';
+  started_on: string;
+  duration_weeks: number;
+  current_week: number;
+  weeks_remaining: number;
+  starting_weight_kg: number;
+  current_weight_kg: number | null;
+  target_weight_kg: number;
+  weight_change_kg: number;
+  target_rate_pct: number;
+  actual_rate_pct: number | null;
+  status: 'on_track' | 'behind' | 'ahead' | 'no_data';
+  suggestion: string | null;
+  current_goals: { calories: number; protein: number; carbs: number; fat: number };
+  carb_preset: 'high' | 'moderate' | 'low';
+  tdee_estimate: number;
+  is_active: boolean;
+}
+
+export async function getActivePhase(): Promise<DietPhase | null> {
+  const response = await api.get('/nutrition/phases/active');
+  return response.data;
+}
+
+export async function createPhase(data: {
+  phase_type: 'cut' | 'bulk' | 'maintenance';
+  duration_weeks?: number;
+  target_rate_pct?: number;
+  activity_multiplier?: number;
+  tdee_override?: number | null;
+  carb_preset?: 'high' | 'moderate' | 'low';
+}): Promise<DietPhase> {
+  const response = await api.post('/nutrition/phases/', data);
+  return response.data;
+}
+
+export async function recalculatePhase(apply: boolean = false): Promise<DietPhase> {
+  const response = await api.post('/nutrition/phases/active/recalculate', null, { params: { apply } });
+  return response.data;
+}
+
+export async function endPhase(): Promise<void> {
+  await api.delete('/nutrition/phases/active');
+}
+
 export default api;

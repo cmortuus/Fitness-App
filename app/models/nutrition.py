@@ -68,3 +68,24 @@ class MacroGoal(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
+
+
+class DietPhase(Base):
+    """A diet phase (cut/bulk/maintenance) with auto-calculated periodized macros."""
+
+    __tablename__ = "diet_phases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phase_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    started_on: Mapped[date_type] = mapped_column(Date, nullable=False)
+    duration_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
+    starting_weight_kg: Mapped[float] = mapped_column(Float, nullable=False)
+    target_rate_pct: Mapped[float] = mapped_column(Float, nullable=False)
+    activity_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.4)
+    tdee_override: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carb_preset: Mapped[str] = mapped_column(String(20), nullable=False, default="moderate")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    ended_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+    )

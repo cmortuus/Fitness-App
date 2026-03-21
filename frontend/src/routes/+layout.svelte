@@ -2,8 +2,8 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { currentSession, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
-  import { getExercises, getLatestBodyWeight, getPlans } from '$lib/api';
+  import { activeDietPhase, currentSession, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
+  import { getExercises, getLatestBodyWeight, getPlans, getActivePhase } from '$lib/api';
 
   const staticNavItems = [
     { path: '/',          label: 'Home',      icon: '🏠' },
@@ -15,14 +15,16 @@
 
   onMount(async () => {
     try {
-      const [exercisesData, plansData, latestBW] = await Promise.all([
+      const [exercisesData, plansData, latestBW, phase] = await Promise.all([
         getExercises(),
         getPlans(),
         getLatestBodyWeight(),
+        getActivePhase(),
       ]);
       exercises.set(exercisesData);
       workoutPlans.set(plansData);
       latestBodyWeight.set(latestBW);
+      activeDietPhase.set(phase);
     } catch (error) {
       console.error('Failed to load initial data:', error);
     }

@@ -1,12 +1,14 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { activeDietPhase } from '$lib/stores';
   import {
     getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
     getDailySummary, setMacroGoals,
     searchFoods, lookupBarcode, getCustomFoods, createCustomFood,
+    getActivePhase, createPhase, endPhase, recalculatePhase,
   } from '$lib/api';
   import type {
-    NutritionEntry, DailySummary, DailyEntries,
+    NutritionEntry, DietPhase, DailySummary, DailyEntries,
     FoodSearchResult, FoodItem,
   } from '$lib/api';
 
@@ -54,6 +56,19 @@
   // Barcode scanner
   let scannerActive = $state(false);
   let scanError = $state('');
+
+  // Phase wizard
+  let showPhaseWizard = $state(false);
+  let wizardStep = $state(1);
+  let wizPhaseType = $state<'cut' | 'bulk' | 'maintenance'>('cut');
+  let wizRate = $state(0.7);
+  let wizDuration = $state(8);
+  let wizActivity = $state(1.4);
+  let wizTdeeOverride = $state<number | null>(null);
+  let wizShowTdee = $state(false);
+  let wizCarb = $state<'high' | 'moderate' | 'low'>('moderate');
+  let wizPreview = $state<DietPhase | null>(null);
+  let wizCreating = $state(false);
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(() => { loadDay(); });
@@ -215,6 +230,62 @@
     await loadDay();
   }
 
+  // ─── Phase wizard ──────────────────────────────────────────────────────
+  function openPhaseWizard() {
+    wizardStep = 1;
+    wizPhaseType = 'cut';
+    wizRate = 0.7;
+    wizDuration = 8;
+    wizActivity = 1.4;
+    wizTdeeOverride = null;
+    wizShowTdee = false;
+    wizCarb = 'moderate';
+    wizPreview = null;
+    showPhaseWizard = true;
+  }
+
+  async function startPhase() {
+    wizCreating = true;
+    try {
+      const phase = await createPhase({
+        phase_type: wizPhaseType,
+        duration_weeks: wizDuration,
+        target_rate_pct: wizRate,
+        activity_multiplier: wizActivity,
+        tdee_override: wizTdeeOverride,
+        carb_preset: wizCarb,
+      });
+      activeDietPhase.set(phase);
+      showPhaseWizard = false;
+      await loadDay();
+    } catch (e) {
+      alert('Failed to start phase. Make sure you have a body weight logged.');
+    }
+    wizCreating = false;
+  }
+
+  async function handleEndPhase() {
+    if (!confirm('End the current diet phase?')) return;
+    await endPhase();
+    activeDietPhase.set(null);
+    await loadDay();
+  }
+
+  async function handleRecalculate() {
+    const phase = await recalculatePhase(true);
+    activeDietPhase.set(phase);
+    await loadDay();
+  }
+
+  const PHASE_ICONS: Record<string, string> = { cut: '✂️', bulk: '📈', maintenance: '⚖️' };
+  const ACTIVITY_LABELS: [number, string][] = [
+    [1.0, 'Sedentary'],
+    [1.2, 'Light (1-2x/wk)'],
+    [1.4, 'Moderate (3-4x/wk)'],
+    [1.6, 'Active (5-6x/wk)'],
+    [1.8, 'Very Active'],
+  ];
+
   // Barcode scanning
   async function startScanner() {
     scannerActive = true;
@@ -266,13 +337,53 @@
     </div>
   {:else}
 
+    <!-- ─── Phase status card ────────────────────────────────────────────── -->
+    {#if $activeDietPhase}
+      <div class="card !py-3">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-2">
+            <span class="text-lg">{PHASE_ICONS[$activeDietPhase.phase_type] ?? '🎯'}</span>
+            <span class="font-semibold text-white capitalize">{$activeDietPhase.phase_type}</span>
+            <span class="text-xs text-zinc-500">Week {$activeDietPhase.current_week} of {$activeDietPhase.duration_weeks}</span>
+          </div>
+          <button onclick={handleEndPhase}
+                  class="text-xs text-zinc-600 hover:text-red-400 transition-colors">End Phase</button>
+        </div>
+        <!-- Progress bar -->
+        <div class="relative h-1.5 bg-zinc-800 rounded-full mb-2">
+          <div class="absolute h-full bg-primary-500 rounded-full transition-all duration-500"
+               style="width: {($activeDietPhase.current_week / $activeDietPhase.duration_weeks) * 100}%"></div>
+        </div>
+        <div class="flex items-center justify-between text-xs text-zinc-500">
+          <span>{$activeDietPhase.starting_weight_kg.toFixed(1)} kg</span>
+          {#if $activeDietPhase.current_weight_kg}
+            <span class="text-white font-medium">{$activeDietPhase.current_weight_kg.toFixed(1)} kg</span>
+          {/if}
+          <span>{$activeDietPhase.target_weight_kg.toFixed(1)} kg</span>
+        </div>
+        {#if $activeDietPhase.suggestion}
+          <div class="mt-2 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+            <p class="text-xs text-amber-400 flex-1">{$activeDietPhase.suggestion}</p>
+            <button onclick={handleRecalculate}
+                    class="text-xs text-primary-400 hover:text-primary-300 font-medium ml-2 shrink-0">Adjust</button>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      <button onclick={openPhaseWizard}
+              class="card !py-4 w-full text-center hover:bg-zinc-800/60 transition-colors">
+        <p class="text-sm text-zinc-400">No active diet phase</p>
+        <p class="text-primary-400 font-semibold mt-1">Start a Cut, Bulk, or Maintenance</p>
+      </button>
+    {/if}
+
     <!-- ─── Progress rings ───────────────────────────────────────────────── -->
     <div class="card">
       {#if !summary?.goals}
-        <button onclick={() => showGoalsModal = true}
+        <button onclick={$activeDietPhase ? () => showGoalsModal = true : openPhaseWizard}
                 class="w-full py-6 text-center text-zinc-400 hover:text-primary-400 transition-colors">
           <p class="text-sm">No macro goals set</p>
-          <p class="text-primary-400 font-semibold mt-1">Tap to set daily targets</p>
+          <p class="text-primary-400 font-semibold mt-1">{$activeDietPhase ? 'Set manual goals' : 'Start a diet phase to auto-calculate'}</p>
         </button>
       {:else}
         <div class="flex items-center justify-around py-2">
@@ -604,6 +715,130 @@
       <div class="flex gap-2">
         <button onclick={() => showGoalsModal = false} class="btn-ghost flex-1">Cancel</button>
         <button onclick={saveGoals} class="btn-primary flex-1">Save</button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- ─── Phase Setup Wizard ───────────────────────────────────────────────── -->
+{#if showPhaseWizard}
+  <div class="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50">
+    <div class="bg-zinc-900 w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] flex flex-col border border-zinc-800 shadow-2xl">
+
+      <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+        <h3 class="font-semibold text-white">
+          {wizardStep === 1 ? 'Choose Phase' : wizardStep === 2 ? 'Settings' : 'Preview'}
+        </h3>
+        <button onclick={() => showPhaseWizard = false} class="text-zinc-400 hover:text-white text-xl">✕</button>
+      </div>
+
+      <div class="p-4 overflow-y-auto space-y-4">
+        {#if wizardStep === 1}
+          <!-- Step 1: Phase type -->
+          {#each [['cut', '✂️', 'Lose fat, preserve muscle'], ['bulk', '📈', 'Build muscle with controlled surplus'], ['maintenance', '⚖️', 'Maintain current weight']] as [type, icon, desc]}
+            <button onclick={() => { wizPhaseType = type as any; wizRate = type === 'cut' ? 0.7 : type === 'bulk' ? 0.3 : 0; wizDuration = type === 'bulk' ? 12 : 8; wizardStep = 2; }}
+                    class="w-full text-left p-4 rounded-xl border transition-colors
+                           {wizPhaseType === type ? 'border-primary-500 bg-primary-500/10' : 'border-zinc-800 hover:border-zinc-700 hover:bg-zinc-800/50'}">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl">{icon}</span>
+                <div>
+                  <p class="font-semibold text-white capitalize">{type}</p>
+                  <p class="text-xs text-zinc-500">{desc}</p>
+                </div>
+              </div>
+            </button>
+          {/each}
+
+        {:else if wizardStep === 2}
+          <!-- Step 2: Settings -->
+          {#if wizPhaseType !== 'maintenance'}
+            <div>
+              <label class="text-xs text-zinc-400 block mb-2">
+                Rate: {wizRate}% body weight / week
+                <span class="text-zinc-600">
+                  ({wizPhaseType === 'cut' ? '0.5% conservative – 1.0% aggressive' : '0.25% lean – 0.5% standard'})
+                </span>
+              </label>
+              <input type="range" bind:value={wizRate}
+                     min={wizPhaseType === 'cut' ? 0.5 : 0.25} max={wizPhaseType === 'cut' ? 1.0 : 0.5} step="0.05"
+                     class="w-full accent-primary-500" />
+            </div>
+          {/if}
+
+          <div>
+            <label class="text-xs text-zinc-400 block mb-2">Duration</label>
+            <div class="flex gap-2">
+              {#each [4, 8, 12, 16] as w}
+                <button onclick={() => wizDuration = w}
+                        class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors
+                               {wizDuration === w ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                  {w} wk
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs text-zinc-400 block mb-2">Activity Level</label>
+            <div class="space-y-1">
+              {#each ACTIVITY_LABELS as [val, label]}
+                <button onclick={() => wizActivity = val}
+                        class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+                               {wizActivity === val ? 'bg-primary-600/20 text-primary-400 font-medium' : 'text-zinc-400 hover:bg-zinc-800'}">
+                  {label}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div>
+            <button onclick={() => wizShowTdee = !wizShowTdee}
+                    class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+              {wizShowTdee ? '▾ Hide' : '▸'} I know my maintenance calories
+            </button>
+            {#if wizShowTdee}
+              <input type="number" bind:value={wizTdeeOverride} placeholder="e.g. 2500" class="input mt-2" />
+            {/if}
+          </div>
+
+          <div>
+            <label class="text-xs text-zinc-400 block mb-2">Carb Preference</label>
+            <div class="flex gap-2">
+              {#each [['high', 'High Carb'], ['moderate', 'Moderate'], ['low', 'Low Carb']] as [val, label]}
+                <button onclick={() => wizCarb = val as any}
+                        class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors
+                               {wizCarb === val ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                  {label}
+                </button>
+              {/each}
+            </div>
+          </div>
+
+          <div class="flex gap-2 pt-2">
+            <button onclick={() => wizardStep = 1} class="btn-ghost flex-1">Back</button>
+            <button onclick={() => wizardStep = 3} class="btn-primary flex-1">Preview</button>
+          </div>
+
+        {:else}
+          <!-- Step 3: Preview -->
+          <div class="text-center mb-2">
+            <span class="text-3xl">{PHASE_ICONS[wizPhaseType]}</span>
+            <h4 class="font-semibold text-white capitalize mt-1">{wizPhaseType} Phase</h4>
+            <p class="text-xs text-zinc-500">{wizDuration} weeks · {wizRate}%/wk · {wizCarb} carb</p>
+          </div>
+
+          <p class="text-xs text-zinc-500 text-center">
+            Macros will be auto-calculated from your body weight and adjusted weekly based on weigh-in trends.
+          </p>
+
+          <div class="flex gap-2 pt-2">
+            <button onclick={() => wizardStep = 2} class="btn-ghost flex-1">Back</button>
+            <button onclick={startPhase} disabled={wizCreating}
+                    class="btn-primary flex-1 disabled:opacity-50">
+              {wizCreating ? 'Starting…' : 'Start Phase'}
+            </button>
+          </div>
+        {/if}
       </div>
     </div>
   </div>
