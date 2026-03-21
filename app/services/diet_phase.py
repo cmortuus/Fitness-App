@@ -30,13 +30,20 @@ CARB_SPLITS = {
 def estimate_tdee(weight_kg: float, activity_multiplier: float, tdee_override: float | None = None) -> float:
     """Estimate total daily energy expenditure.
 
-    Uses weight_lbs × 15 × activity_multiplier as a rough heuristic.
+    Uses weight_lbs × cal_per_lb where activity_multiplier maps to cal/lb:
+      1.0 Sedentary   → 12 cal/lb
+      1.2 Light       → 13 cal/lb
+      1.4 Moderate    → 14 cal/lb
+      1.6 Active      → 15 cal/lb
+      1.8 Very Active → 16 cal/lb
     Returns tdee_override if provided (user knows their maintenance).
     """
     if tdee_override and tdee_override > 0:
         return tdee_override
     weight_lbs = weight_kg * KG_TO_LBS
-    return round(weight_lbs * 15 * activity_multiplier)
+    # Map activity multiplier (1.0-1.8) to cal/lb (12-16)
+    cal_per_lb = 12 + (activity_multiplier - 1.0) * 5  # 1.0→12, 1.4→14, 1.8→16
+    return round(weight_lbs * cal_per_lb)
 
 
 def calculate_macros(
