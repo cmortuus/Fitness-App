@@ -533,6 +533,7 @@
         actual_reps: effectiveReps,
         actual_weight_kg: weightKg,
         completed_at: new Date().toISOString(),
+        ...(ex.isUnilateral && { reps_left: set.repsLeft ?? 0, reps_right: set.repsRight ?? 0 }),
         ...(notes && { notes }),
       });
 
