@@ -145,7 +145,7 @@
   }
 </script>
 
-<div class="space-y-6">
+<div class="page-content space-y-5">
   <!-- Error banner (auto-dismisses after 5 s) -->
   {#if errorMsg}
     <div class="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300 flex items-center justify-between gap-3">
@@ -172,9 +172,9 @@
             <div>
               <h3 class="text-lg font-semibold">{plan.name}</h3>
               {#if plan.description}
-                <p class="text-gray-400 mt-1">{plan.description}</p>
+                <p class="text-zinc-400 mt-1">{plan.description}</p>
               {/if}
-              <div class="mt-2 flex items-center gap-4 text-sm text-gray-400">
+              <div class="mt-2 flex items-center gap-4 text-sm text-zinc-400">
                 <span>{plan.number_of_days} {plan.number_of_days === 1 ? 'day' : 'days'}</span>
                 {#if plan.block_type}
                   <span class="capitalize">{plan.block_type}</span>
@@ -187,7 +187,7 @@
             <div class="flex items-center gap-3 shrink-0">
               <button
                 onclick={() => handleArchivePlan(plan.id)}
-                class="text-gray-400 hover:text-amber-400 text-sm transition-colors"
+                class="text-zinc-400 hover:text-amber-400 text-sm transition-colors"
                 title="Archive this plan"
               >Archive</button>
               <button
@@ -200,10 +200,10 @@
           <!-- Days -->
           <div class="mt-4 space-y-3">
             <div class="flex items-center justify-between">
-              <h4 class="font-medium text-gray-300 text-sm">Days ({localPlan.days.length})</h4>
+              <h4 class="font-medium text-zinc-300 text-sm">Days ({localPlan.days.length})</h4>
               <button
                 onclick={() => addDayToPlan(plan.id)}
-                class="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-white rounded transition-colors"
+                class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded transition-colors"
               >
                 + Add Day
               </button>
@@ -211,7 +211,7 @@
 
             <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
               {#each localPlan.days as day (day.day_number)}
-                <div class="bg-gray-700/50 rounded-lg p-3">
+                <div class="bg-zinc-800/50 rounded-xl p-3">
                   <div class="flex items-center justify-between mb-3">
                     <span class="font-medium text-sm text-gray-200">{day.day_name}</span>
                     <button
@@ -222,11 +222,11 @@
                   </div>
 
                   {#if day.exercises.length === 0}
-                    <p class="text-gray-500 text-xs text-center py-4">No exercises</p>
+                    <p class="text-zinc-500 text-xs text-center py-4">No exercises</p>
                   {:else}
                     <div class="space-y-2">
                       {#each day.exercises as ex, exIdx (exIdx)}
-                        <div class="bg-gray-800 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+                        <div class="bg-zinc-900 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
                           <span class="text-xs text-white truncate flex-1">{getExerciseName(ex.exercise_id)}</span>
                           <div class="flex items-center gap-1.5 shrink-0">
                             <input
@@ -238,9 +238,9 @@
                                 const v = parseInt((e.target as HTMLInputElement).value);
                                 if (!isNaN(v) && v > 0) updateSets(plan.id, day.day_number, exIdx, v);
                               }}
-                              class="w-12 bg-gray-700 border border-gray-600 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-primary-500"
+                              class="w-12 bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-primary-500"
                             />
-                            <span class="text-[10px] text-gray-500">sets</span>
+                            <span class="text-[10px] text-zinc-500">sets</span>
                             <button
                               onclick={() => removeExercise(plan.id, day.day_number, exIdx)}
                               class="text-red-400 hover:text-red-300 text-xs ml-1"
@@ -266,7 +266,7 @@
     </div>
   {:else}
     <div class="card text-center py-12">
-      <p class="text-gray-400">No active plans. Create one or reuse an archived plan below.</p>
+      <p class="text-zinc-400">No active plans. Create one or reuse an archived plan below.</p>
       <button onclick={() => goto('/plans/create')} class="btn-primary mt-4">Create Plan</button>
     </div>
   {/if}
@@ -274,14 +274,14 @@
   <!-- ── Archived Plans ───────────────────────────────────────────────── -->
   {#if archivedPlans.length > 0}
     <div>
-      <h3 class="text-lg font-semibold text-gray-400 mb-3">Archived</h3>
+      <h3 class="text-lg font-semibold text-zinc-400 mb-3">Archived</h3>
       <div class="grid gap-4">
         {#each archivedPlans as plan (plan.id)}
-          <div class="card border border-gray-700 opacity-80">
+          <div class="card border border-zinc-800 opacity-80">
             <div class="flex items-center justify-between gap-4">
               <div class="min-w-0">
                 <h4 class="font-semibold truncate">{plan.name}</h4>
-                <div class="mt-1 flex items-center gap-3 text-xs text-gray-500">
+                <div class="mt-1 flex items-center gap-3 text-xs text-zinc-500">
                   <span>{plan.number_of_days} {plan.number_of_days === 1 ? 'day' : 'days'}</span>
                   <span class="capitalize">{plan.block_type}</span>
                   <span>{plan.duration_weeks} weeks</span>

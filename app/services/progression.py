@@ -31,6 +31,11 @@ def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> fl
 
     Result is rounded to the nearest 2.5 kg (~5 lb plate increment).
     """
+    # Guard: Epley is invalid for non-positive reps or dangerous target values
+    if done_reps <= 0:
+        done_reps = 1
+    if target_reps <= 0:
+        target_reps = 1
     one_rm = weight * (1 + done_reps / 30)
     new_w = one_rm / (1 + target_reps / 30)
     return round(new_w / 2.5) * 2.5
@@ -50,37 +55,54 @@ def compute_overload(
 
     Args:
         prior_weight:   Actual weight used in the previous session's set.
-                        For assisted exercises this is the *net* load
-                        (body_weight − assist_amount).
+                        For assisted exercises this is the *assist amount*
+                        (positive kg).  "Progress" means reducing the assist.
         prior_reps:     Actual reps completed in the previous session's set.
         planned_reps:   The target rep count from the programme.
-        overload_style: ``"rep"`` (default) — add a rep first, bump weight
-                        at bracket boundary.  ``"weight"`` — immediately
-                        convert the extra rep into equivalent weight via Epley.
+        overload_style: ``"rep"`` (default) — add a rep first, reduce assist
+                        at bracket boundary.  ``"weight"`` — immediately reduce
+                        assist by one rep's worth via Epley on the net load.
         is_assisted:    True for exercises where the machine *reduces* the load
-                        (e.g. assisted pull-up/dip).  The returned weight is
-                        the *assist amount* (not the net load) so the frontend
-                        can pre-fill directly.
+                        (e.g. assisted pull-up/dip).  prior_weight is the assist
+                        amount; returned weight is a new (lower) assist amount.
         is_bodyweight:  True for pure bodyweight moves (weight == 0 / not tracked).
-        body_weight_kg: Required when *is_assisted* is True to back-calculate
-                        the assist amount.
+        body_weight_kg: User body weight, used for Epley on net load when
+                        overload_style="weight" and is_assisted=True.
 
     Returns:
         A ``(weight, reps)`` tuple.  Either component may be ``None`` when
         there is no meaningful suggestion (e.g. first session, bodyweight with
         no weight tracked).
     """
-    if prior_reps <= 0:
+    if prior_reps is None or prior_reps <= 0:
+        return None, None
+    if prior_weight is None:
         return None, None
 
     # ── Assisted exercises ─────────────────────────────────────────────────
+    # prior_weight = assist amount (positive).  Progress = less assist.
     if is_assisted:
-        new_reps = prior_reps + 1 if prior_reps >= planned_reps else prior_reps
-        if body_weight_kg > 0 and prior_weight > 0:
-            # prior_weight is the net load; convert back to assist amount
-            assist_kg = max(0.0, round((body_weight_kg - prior_weight) / 1.25) * 1.25)
-            return assist_kg, new_reps
-        return None, new_reps
+        if prior_reps < planned_reps:
+            # Didn't hit target — retry same assist, re-attempt planned target
+            return prior_weight, planned_reps
+
+        # Hit target — apply progression
+        if overload_style == "weight" and body_weight_kg > 0 and prior_weight > 0:
+            # Use Epley on the net load to find the equivalent harder net,
+            # then convert back to assist amount.
+            prior_net = body_weight_kg - prior_weight
+            new_net = epley_weight_for_reps(prior_net, prior_reps + 1, prior_reps)
+            new_assist = max(0.0, round((body_weight_kg - new_net) / 2.5) * 2.5)
+            return new_assist, prior_reps
+
+        # Rep-style (default): add a rep; reduce assist at bracket boundary
+        projected = prior_reps + 1
+        if rep_bracket(projected) <= rep_bracket(prior_reps):
+            return prior_weight, projected          # same assist, more reps
+        else:
+            # Bracket boundary — reduce assist by 2.5 kg (≈5 lbs) and hold reps
+            new_assist = max(0.0, round((prior_weight - 2.5) / 2.5) * 2.5)
+            return new_assist, prior_reps
 
     # ── Pure bodyweight ────────────────────────────────────────────────────
     if is_bodyweight:
@@ -99,9 +121,9 @@ def compute_overload(
         weight_for_min = epley_weight_for_reps(prior_weight, prior_reps, MIN_REPS)
         return weight_for_min, MIN_REPS
 
-    # Didn't hit planned reps (but ≥ floor) → retry same weight / same reps
+    # Didn't hit planned reps (but ≥ floor) → retry same weight, re-attempt planned target
     if prior_reps < planned_reps:
-        return prior_weight, prior_reps
+        return prior_weight, planned_reps
 
     # Hit target: apply progression
     if overload_style == "weight":

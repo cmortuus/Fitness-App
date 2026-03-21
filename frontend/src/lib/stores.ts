@@ -80,14 +80,18 @@ export const currentSet = derived(
   ($currentSession) => {
     if (!$currentSession) return null;
 
-    // Find the active set
+    // Find the next incomplete set (first one without a completed_at)
     const activeSets = $currentSession.sets.filter(s => !s.completed_at);
-    return activeSets[activeSets.length - 1] || null;
+    return activeSets[0] || null;
   }
 );
 
 // Latest body weight from the server (null = not loaded yet)
 export const latestBodyWeight = writable<BodyWeightEntry | null>(null);
+
+// URL for the next planned workout — set by the home page after resolving the plan
+// Falls back to /workout/active if not yet computed
+export const nextWorkoutUrl = writable<string>('/workout/active');
 
 // Session statistics
 export const sessionStats = derived(

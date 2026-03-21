@@ -100,6 +100,8 @@ class SetCreate(BaseModel):
 class SetUpdate(BaseModel):
     actual_reps: int | None = None
     actual_weight_kg: float | None = None
+    reps_left: int | None = None
+    reps_right: int | None = None
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None

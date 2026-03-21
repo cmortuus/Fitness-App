@@ -2,13 +2,12 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { currentSession, exercises, latestBodyWeight, workoutPlans } from '$lib/stores';
+  import { currentSession, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import { getExercises, getLatestBodyWeight, getPlans } from '$lib/api';
 
-  const navItems = [
-    { path: '/', label: 'Dashboard', icon: '📊' },
-    { path: '/workout/active', label: 'Workout', icon: '🏋️' },
-    { path: '/plans', label: 'Plans', icon: '📋' },
+  const staticNavItems = [
+    { path: '/',         label: 'Home',     icon: '🏠' },
+    { path: '/plans',    label: 'Plans',    icon: '📋' },
     { path: '/progress', label: 'Progress', icon: '📈' },
     { path: '/settings', label: 'Settings', icon: '⚙️' },
   ];
@@ -29,53 +28,79 @@
       console.error('Failed to load initial data:', error);
     }
   });
+
+  function isActive(path: string) {
+    if (path === '/') return $page.url.pathname === '/';
+    return $page.url.pathname.startsWith(path);
+  }
 </script>
 
-<!-- Full-height flex column so the content row can fill remaining space -->
-<div class="h-screen flex flex-col bg-gray-900">
-  <!-- Header -->
-  <header class="shrink-0 bg-gray-800 border-b border-gray-700">
-    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-      <h1 class="text-xl font-bold text-primary-400">Home Gym Tracker</h1>
-      <div class="flex items-center gap-4">
+<!-- ── Full-height shell ──────────────────────────────────────────────── -->
+<div class="min-h-screen flex flex-col bg-zinc-950">
+
+  <!-- ── Top header bar ────────────────────────────────────────────────── -->
+  <header class="shrink-0 sticky top-0 z-30 bg-zinc-950/90 border-b border-white/5"
+          style="padding-top: env(safe-area-inset-top);"
+  >
+    <div class="flex items-center justify-between px-4 h-14">
+      <span class="text-lg font-bold gradient-text tracking-tight">GymTracker</span>
+
+      <div class="flex items-center gap-3">
         {#if $currentSession}
-          <a
-            href="/workout/active"
-            class="text-sm text-primary-400 hover:text-primary-300 font-medium animate-pulse"
-          >
-            ● Active workout
+          <a href="/workout/active"
+             class="flex items-center gap-1.5 text-xs font-semibold text-primary-400
+                    bg-primary-500/10 border border-primary-500/30 rounded-full px-3 py-1.5
+                    animate-pulse hover:bg-primary-500/20 transition-colors">
+            <span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>
+            Active
           </a>
         {/if}
+
+        <!-- Desktop nav links (hidden on mobile) -->
+        <nav class="hidden md:flex items-center gap-1">
+          <a href={$nextWorkoutUrl}
+             class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors
+                    {isActive('/workout')
+                      ? 'bg-primary-600/20 text-primary-400 font-semibold'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}">
+            <span class="text-base leading-none">🏋️</span>
+            <span>Workout</span>
+          </a>
+          {#each staticNavItems as item}
+            <a href={item.path}
+               class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors
+                      {isActive(item.path)
+                        ? 'bg-primary-600/20 text-primary-400 font-semibold'
+                        : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800'}">
+              <span class="text-base leading-none">{item.icon}</span>
+              <span>{item.label}</span>
+            </a>
+          {/each}
+        </nav>
       </div>
     </div>
   </header>
 
-  <!-- Sidebar + main — fills all remaining height, no overflow at this level -->
-  <div class="flex flex-1 overflow-hidden">
-    <!-- Sidebar nav -->
-    <nav class="w-56 bg-gray-800 shrink-0 overflow-y-auto p-4">
-      <ul class="space-y-1">
-        {#each navItems as item}
-          <li>
-            <a
-              href={item.path}
-              class="flex items-center gap-3 px-3 py-2 rounded-lg transition-colors {
-                $page.url.pathname === item.path || ($page.url.pathname.startsWith(item.path) && item.path !== '/')
-                  ? 'bg-primary-600 text-white'
-                  : 'hover:bg-gray-700 text-gray-300'
-              }"
-            >
-              <span>{item.icon}</span>
-              <span class="text-sm">{item.label}</span>
-            </a>
-          </li>
-        {/each}
-      </ul>
-    </nav>
+  <!-- ── Main content ────────────────────────────────────────────────────── -->
+  <main class="flex-1 w-full max-w-2xl mx-auto md:max-w-4xl">
+    {@render children()}
+  </main>
 
-    <!-- Main content — scrolls normally for regular pages, flex-col for workout -->
-    <main class="flex-1 min-w-0 overflow-y-auto flex flex-col">
-      {@render children()}
-    </main>
-  </div>
+  <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
+  <nav class="bottom-nav md:hidden">
+    <a href="/" class="bottom-nav-item {isActive('/') ? 'active' : ''}">
+      <span class="text-xl leading-none">🏠</span>
+      <span class="text-[10px] font-medium">Home</span>
+    </a>
+    <a href={$nextWorkoutUrl} class="bottom-nav-item {isActive('/workout') ? 'active' : ''}">
+      <span class="text-xl leading-none">🏋️</span>
+      <span class="text-[10px] font-medium">Workout</span>
+    </a>
+    {#each staticNavItems.slice(1) as item}
+      <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
+        <span class="text-xl leading-none">{item.icon}</span>
+        <span class="text-[10px] font-medium">{item.label}</span>
+      </a>
+    {/each}
+  </nav>
 </div>

@@ -103,7 +103,7 @@
   <div class="card space-y-4">
     <div>
       <h3 class="text-lg font-semibold">Weight Unit</h3>
-      <p class="text-sm text-gray-400 mt-1">Unit used for all weight inputs during workouts.</p>
+      <p class="text-sm text-zinc-400 mt-1">Unit used for all weight inputs during workouts.</p>
     </div>
     <div class="flex gap-3">
       {#each [['lbs', 'Pounds (lbs)'], ['kg', 'Kilograms (kg)']] as [val, label]}
@@ -112,7 +112,7 @@
           class="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors {
             $settings.weightUnit === val
               ? 'bg-primary-600 text-white'
-              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+              : 'bg-zinc-800 hover:bg-gray-600 text-gray-300'
           }"
         >{label}</button>
       {/each}
@@ -123,7 +123,7 @@
   <div class="card space-y-4">
     <div>
       <h3 class="text-lg font-semibold">Body Weight</h3>
-      <p class="text-sm text-gray-400 mt-1">
+      <p class="text-sm text-zinc-400 mt-1">
         Track your body weight over time. The most recent entry is used to calculate
         load for bodyweight and assisted exercises.
       </p>
@@ -131,23 +131,23 @@
 
     <!-- Current body weight display -->
     {#if $latestBodyWeight}
-      <div class="flex items-center gap-3 bg-gray-800 rounded-lg px-4 py-3">
+      <div class="flex items-center gap-3 bg-zinc-900 rounded-lg px-4 py-3">
         <div class="flex-1">
-          <p class="text-xs text-gray-500">Most recent</p>
+          <p class="text-xs text-zinc-500">Most recent</p>
           <p class="text-xl font-bold font-mono text-primary-400">
             {toDisplayWeight($latestBodyWeight.weight_kg)}
-            <span class="text-sm font-normal text-gray-400">{$settings.weightUnit}</span>
+            <span class="text-sm font-normal text-zinc-400">{$settings.weightUnit}</span>
           </p>
         </div>
-        <p class="text-xs text-gray-500">{fmtDate($latestBodyWeight.recorded_at)}</p>
+        <p class="text-xs text-zinc-500">{fmtDate($latestBodyWeight.recorded_at)}</p>
       </div>
     {:else}
-      <p class="text-sm text-gray-500 italic">No weigh-ins logged yet.</p>
+      <p class="text-sm text-zinc-500 italic">No weigh-ins logged yet.</p>
     {/if}
 
     <!-- Log new weigh-in -->
     <div class="space-y-2">
-      <p class="text-xs text-gray-500 font-medium uppercase tracking-wide">Log weigh-in</p>
+      <p class="text-xs text-zinc-500 font-medium uppercase tracking-wide">Log weigh-in</p>
       <div class="flex items-center gap-2 flex-wrap">
         <div class="flex items-center gap-1.5">
           <input
@@ -156,9 +156,9 @@
             min="0"
             placeholder="Weight"
             style="width:7rem"
-            class="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-center font-mono placeholder-gray-400 focus:outline-none focus:border-primary-500"
+            class="bg-zinc-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-center font-mono placeholder-gray-400 focus:outline-none focus:border-primary-500"
           />
-          <span class="text-sm text-gray-400 shrink-0">{$settings.weightUnit}</span>
+          <span class="text-sm text-zinc-400 shrink-0">{$settings.weightUnit}</span>
         </div>
         <button
           onclick={logWeighIn}
@@ -172,12 +172,12 @@
     {#if weighIns.length > 0}
       <div class="space-y-1 max-h-52 overflow-y-auto">
         {#each weighIns as entry}
-          <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-gray-800 group">
+          <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-zinc-900 group">
             <div class="flex items-center gap-3">
               <span class="font-mono text-sm font-medium">
                 {toDisplayWeight(entry.weight_kg)} {$settings.weightUnit}
               </span>
-              <span class="text-xs text-gray-500">{fmtDate(entry.recorded_at)}</span>
+              <span class="text-xs text-zinc-500">{fmtDate(entry.recorded_at)}</span>
               {#if entry.notes}
                 <span class="text-xs text-gray-600 italic">{entry.notes}</span>
               {/if}
@@ -197,7 +197,7 @@
   <div class="card space-y-4">
     <div>
       <h3 class="text-lg font-semibold">Progression Style</h3>
-      <p class="text-sm text-gray-400 mt-1">
+      <p class="text-sm text-zinc-400 mt-1">
         How to apply progressive overload when you hit your target reps.
         Both use the Epley 1RM formula — the difference is <em>when</em> weight increases.
       </p>
@@ -212,7 +212,7 @@
           class="flex items-start gap-3 p-3 rounded-lg text-left transition-colors border {
             $settings.progressionStyle === val
               ? 'border-primary-500 bg-primary-600/10'
-              : 'border-gray-700 bg-gray-800 hover:bg-gray-700'
+              : 'border-zinc-800 bg-zinc-900 hover:bg-zinc-800'
           }"
         >
           <div class="mt-0.5 w-4 h-4 rounded-full border-2 shrink-0 {
@@ -220,7 +220,7 @@
           }"></div>
           <div>
             <div class="text-sm font-medium">{label}</div>
-            <div class="text-xs text-gray-400 mt-0.5">{desc}</div>
+            <div class="text-xs text-zinc-400 mt-0.5">{desc}</div>
           </div>
         </button>
       {/each}
@@ -228,7 +228,7 @@
 
     <!-- Rep bracket explanation — shown when "Rep first" style is active -->
     {#if $settings.progressionStyle === 'rep'}
-      <div class="text-xs text-gray-400 bg-gray-800 rounded-lg p-3 space-y-1">
+      <div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 space-y-1">
         <p class="font-medium text-gray-300">How rep brackets work</p>
         <p>Your rep range is split into three brackets:</p>
         <ul class="list-disc list-inside space-y-0.5 pl-1">
@@ -249,7 +249,7 @@
   <div class="card space-y-5">
     <div>
       <h3 class="text-lg font-semibold">Rest Timer</h3>
-      <p class="text-sm text-gray-400 mt-1">
+      <p class="text-sm text-zinc-400 mt-1">
         Default rest durations by movement category. You can also override per-exercise
         during a workout.
       </p>
@@ -263,7 +263,7 @@
         <div class="flex items-center justify-between">
           <div>
             <span class="text-sm font-medium">{cat.label}</span>
-            <span class="ml-2 text-xs px-1.5 py-0.5 rounded bg-gray-700 text-gray-300">{cat.sub}</span>
+            <span class="ml-2 text-xs px-1.5 py-0.5 rounded bg-zinc-800 text-gray-300">{cat.sub}</span>
           </div>
           <span class="text-sm font-mono text-primary-400">{fmtSecs(current)}</span>
         </div>
@@ -276,7 +276,7 @@
               class="px-2.5 py-1 rounded text-xs font-medium transition-colors {
                 current === p
                   ? 'bg-primary-600 text-white'
-                  : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+                  : 'bg-zinc-800 hover:bg-gray-600 text-gray-300'
               }"
             >{fmtSecs(p)}</button>
           {/each}
@@ -284,7 +284,7 @@
 
         <!-- Custom input -->
         <div class="flex items-center gap-2">
-          <span class="text-xs text-gray-500 w-14 shrink-0">Custom:</span>
+          <span class="text-xs text-zinc-500 w-14 shrink-0">Custom:</span>
           <input
             type="number"
             bind:value={customMins[cat.key]}
@@ -292,7 +292,7 @@
             class="input w-14 text-center text-sm font-mono py-1"
             placeholder="0"
           />
-          <span class="text-xs text-gray-500">m</span>
+          <span class="text-xs text-zinc-500">m</span>
           <input
             type="number"
             bind:value={customSecs[cat.key]}
@@ -300,16 +300,16 @@
             class="input w-14 text-center text-sm font-mono py-1"
             placeholder="0"
           />
-          <span class="text-xs text-gray-500">s</span>
+          <span class="text-xs text-zinc-500">s</span>
           <button
             onclick={() => applyCustom(cat.key)}
-            class="text-xs px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 rounded transition-colors"
+            class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-gray-600 text-gray-300 rounded transition-colors"
           >Set</button>
         </div>
       </div>
 
       {#if cat.key !== 'lowerIsolation'}
-        <div class="border-t border-gray-700"></div>
+        <div class="border-t border-zinc-800"></div>
       {/if}
     {/each}
   </div>
