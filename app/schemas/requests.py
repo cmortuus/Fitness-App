@@ -293,3 +293,5 @@ class DietPhaseCreate(BaseModel):
     activity_multiplier: float = Field(ge=1.0, le=2.0, default=1.4)
     tdee_override: float | None = None
     carb_preset: CarbPreset = CarbPreset.MODERATE
+    body_fat_pct: float | None = Field(default=None, ge=5, le=60)
+    protein_per_lb: float | None = Field(default=None, ge=0.5, le=1.5)

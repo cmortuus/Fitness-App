@@ -530,6 +530,8 @@ export async function createPhase(data: {
   activity_multiplier?: number;
   tdee_override?: number | null;
   carb_preset?: 'high' | 'moderate' | 'low';
+  body_fat_pct?: number | null;
+  protein_per_lb?: number | null;
 }): Promise<DietPhase> {
   const response = await api.post('/nutrition/phases/', data);
   return response.data;

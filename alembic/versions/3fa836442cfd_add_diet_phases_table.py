@@ -27,6 +27,8 @@ def upgrade() -> None:
         sa.Column('activity_multiplier', sa.Float, nullable=False, server_default='1.4'),
         sa.Column('tdee_override', sa.Float, nullable=True),
         sa.Column('carb_preset', sa.String(20), nullable=False, server_default='moderate'),
+        sa.Column('body_fat_pct', sa.Float, nullable=True),
+        sa.Column('protein_per_lb', sa.Float, nullable=True),
         sa.Column('is_active', sa.Boolean, nullable=False, server_default='1'),
         sa.Column('ended_on', sa.Date, nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),

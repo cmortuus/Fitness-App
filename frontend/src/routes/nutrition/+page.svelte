@@ -67,6 +67,8 @@
   let wizTdeeOverride = $state<number | null>(null);
   let wizShowTdee = $state(false);
   let wizCarb = $state<'high' | 'moderate' | 'low'>('moderate');
+  let wizBodyFat = $state<number | null>(null);
+  let wizProtein = $state<number | null>(null);  // g per lb
   let wizPreview = $state<DietPhase | null>(null);
   let wizCreating = $state(false);
 
@@ -240,6 +242,8 @@
     wizTdeeOverride = null;
     wizShowTdee = false;
     wizCarb = 'moderate';
+    wizBodyFat = null;
+    wizProtein = null;
     wizPreview = null;
     showPhaseWizard = true;
   }
@@ -254,6 +258,8 @@
         activity_multiplier: wizActivity,
         tdee_override: wizTdeeOverride,
         carb_preset: wizCarb,
+        body_fat_pct: wizBodyFat,
+        protein_per_lb: wizProtein,
       });
       activeDietPhase.set(phase);
       showPhaseWizard = false;
@@ -811,6 +817,36 @@
                   {label}
                 </button>
               {/each}
+            </div>
+          </div>
+
+          <!-- Body composition & protein -->
+          <div>
+            <label class="text-xs text-zinc-400 block mb-2">
+              Estimated Body Fat %
+              <span class="text-zinc-600">(optional — used for lean mass protein calc)</span>
+            </label>
+            <input type="number" bind:value={wizBodyFat}
+                   placeholder="e.g. 25" min="5" max="60" step="1" class="input" />
+          </div>
+
+          <div>
+            <label class="text-xs text-zinc-400 block mb-2">
+              Protein: {wizProtein ? `${wizProtein} g/lb` : 'auto'}
+              <span class="text-zinc-600">
+                ({wizPhaseType === 'cut'
+                  ? wizBodyFat ? '1.2 g/lb lean mass' : '1.0 g/lb total'
+                  : wizBodyFat ? '1.0 g/lb lean mass' : '0.8 g/lb total'} default)
+              </span>
+            </label>
+            <input type="range" bind:value={wizProtein}
+                   min="0.6" max="1.4" step="0.05"
+                   class="w-full accent-primary-500" />
+            <div class="flex justify-between text-[10px] text-zinc-600 mt-1">
+              <span>0.6 g/lb</span>
+              <button onclick={() => wizProtein = null}
+                      class="text-primary-500 hover:text-primary-400">Reset to auto</button>
+              <span>1.4 g/lb</span>
             </div>
           </div>
 

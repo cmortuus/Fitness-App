@@ -84,6 +84,8 @@ class DietPhase(Base):
     activity_multiplier: Mapped[float] = mapped_column(Float, nullable=False, default=1.4)
     tdee_override: Mapped[float | None] = mapped_column(Float, nullable=True)
     carb_preset: Mapped[str] = mapped_column(String(20), nullable=False, default="moderate")
+    body_fat_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protein_per_lb: Mapped[float | None] = mapped_column(Float, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ended_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

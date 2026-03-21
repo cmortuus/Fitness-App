@@ -34,6 +34,8 @@ def serialize_phase(phase: DietPhase, extra: dict | None = None) -> dict:
         "activity_multiplier": phase.activity_multiplier,
         "tdee_override": phase.tdee_override,
         "carb_preset": phase.carb_preset,
+        "body_fat_pct": phase.body_fat_pct,
+        "protein_per_lb": phase.protein_per_lb,
         "is_active": phase.is_active,
         "ended_on": phase.ended_on.isoformat() if phase.ended_on else None,
     }
@@ -81,6 +83,8 @@ async def _build_phase_status(phase: DietPhase, db: AsyncSession) -> dict:
         activity_multiplier=phase.activity_multiplier,
         tdee_override=phase.tdee_override,
         carb_preset=phase.carb_preset,
+        body_fat_pct=phase.body_fat_pct,
+        protein_per_lb=phase.protein_per_lb,
     )
 
     target_wt = target_end_weight(
@@ -165,6 +169,8 @@ async def create_phase(
         activity_multiplier=data.activity_multiplier,
         tdee_override=data.tdee_override,
         carb_preset=data.carb_preset.value,
+        body_fat_pct=data.body_fat_pct,
+        protein_per_lb=data.protein_per_lb,
         is_active=True,
     )
     db.add(phase)
@@ -178,6 +184,8 @@ async def create_phase(
         activity_multiplier=data.activity_multiplier,
         tdee_override=data.tdee_override,
         carb_preset=data.carb_preset.value,
+        body_fat_pct=data.body_fat_pct,
+        protein_per_lb=data.protein_per_lb,
     )
     await _upsert_goal(db, macros, today)
 
@@ -233,6 +241,8 @@ async def recalculate_phase(
             activity_multiplier=phase.activity_multiplier,
             tdee_override=phase.tdee_override,
             carb_preset=phase.carb_preset,
+            body_fat_pct=phase.body_fat_pct,
+            protein_per_lb=phase.protein_per_lb,
         )
         # Apply calorie adjustment if suggested
         cal_adj = status_data.get("cal_adjustment", 0)

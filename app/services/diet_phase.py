@@ -1,8 +1,9 @@
 """Diet phase calculation helpers — TDEE, macro splits, weekly adjustments.
 
 All pure functions, no DB access. Science-based defaults:
-  - Cuts: 0.5-1% BW loss/week, protein 1.0-1.2 g/lb
-  - Bulks: 0.25-0.5% BW gain/week, protein 0.8-1.0 g/lb
+  - Protein based on lean body mass when body fat % is known
+  - Cuts: 0.5-1% BW loss/week
+  - Bulks: 0.25-0.5% BW gain/week
   - 7700 kcal ≈ 1 kg of body fat
 """
 
@@ -11,10 +12,19 @@ from __future__ import annotations
 KG_TO_LBS = 2.20462
 CAL_PER_KG_FAT = 7700  # approximate kcal energy in 1 kg body fat
 
-# Protein targets (g per lb of body weight)
-PROTEIN_CUT = 1.1    # midpoint of 1.0-1.2 range
-PROTEIN_BULK = 0.9   # midpoint of 0.8-1.0 range
-PROTEIN_MAINT = 0.9
+# Default protein targets (g per lb) — used when no body fat estimate given
+DEFAULT_PROTEIN = {
+    "cut": 1.0,
+    "bulk": 0.8,
+    "maintenance": 0.8,
+}
+
+# Protein per lb of LEAN mass — used when body fat % is known
+LEAN_PROTEIN = {
+    "cut": 1.2,       # higher per lb of lean mass to preserve muscle
+    "bulk": 1.0,
+    "maintenance": 1.0,
+}
 
 # Minimum fat floor (g per lb of body weight) for hormonal health
 MIN_FAT_PER_LB = 0.3
@@ -53,8 +63,15 @@ def calculate_macros(
     activity_multiplier: float = 1.4,
     tdee_override: float | None = None,
     carb_preset: str = "moderate",
+    body_fat_pct: float | None = None,
+    protein_per_lb: float | None = None,
 ) -> dict:
     """Calculate daily macro targets for a given phase.
+
+    Protein priority:
+      1. protein_per_lb if explicitly set by user (g per lb of body weight)
+      2. body_fat_pct → lean mass × lean protein factor
+      3. fallback: total body weight × default factor
 
     Returns dict with calories, protein, carbs, fat (all rounded).
     """
@@ -67,15 +84,26 @@ def calculate_macros(
 
     if phase_type == "cut":
         target_calories = tdee - daily_change_cal
-        protein_g = round(weight_lbs * PROTEIN_CUT)
     elif phase_type == "bulk":
         target_calories = tdee + daily_change_cal
-        protein_g = round(weight_lbs * PROTEIN_BULK)
     else:  # maintenance
         target_calories = tdee
-        protein_g = round(weight_lbs * PROTEIN_MAINT)
 
     target_calories = round(max(1200, target_calories))  # safety floor
+
+    # Protein calculation
+    if protein_per_lb is not None and protein_per_lb > 0:
+        # User explicitly set their protein target
+        protein_g = round(weight_lbs * protein_per_lb)
+    elif body_fat_pct is not None and 5 <= body_fat_pct <= 60:
+        # Calculate from lean body mass
+        lean_lbs = weight_lbs * (1 - body_fat_pct / 100)
+        factor = LEAN_PROTEIN.get(phase_type, 1.0)
+        protein_g = round(lean_lbs * factor)
+    else:
+        # Fallback: total body weight × conservative default
+        factor = DEFAULT_PROTEIN.get(phase_type, 0.8)
+        protein_g = round(weight_lbs * factor)
 
     # Carb/fat split
     protein_cals = protein_g * 4
