@@ -80,7 +80,7 @@ rollback() {
   log "Rebuilding after rollback..."
   source "$VENV_DIR/bin/activate"
   pip install -e . --quiet
-  cd "$FRONTEND_DIR" && npm install --silent && npm run build
+  cd "$FRONTEND_DIR" && npm install --silent && NODE_OPTIONS="--max-old-space-size=256" npm run build
   cd "$APP_DIR"
 
   start_services
@@ -212,7 +212,7 @@ ENVEOF
     npm install --silent
   fi
 
-  npm run build || {
+  NODE_OPTIONS="--max-old-space-size=256" npm run build || {
     err "Frontend build failed — rolling back"
     cd "$APP_DIR"
     rollback
