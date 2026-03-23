@@ -147,16 +147,67 @@
 
     <div>
       <label class="text-xs text-zinc-400 block mb-1">Height</label>
-      <div class="flex gap-2 items-center">
-        <input type="number" min="48" max="96" placeholder="—"
-               value={$settings.profile.heightIn ?? ''}
-               onchange={(e) => settings.update(s => ({ ...s, profile: { ...s.profile, heightIn: e.currentTarget.value ? Number(e.currentTarget.value) : null } }))}
-               class="input text-center w-24" />
-        <span class="text-sm text-zinc-500">inches</span>
-        {#if $settings.profile.heightIn}
-          <span class="text-xs text-zinc-600">({Math.floor($settings.profile.heightIn / 12)}'{$settings.profile.heightIn % 12}")</span>
-        {/if}
+      <!-- Unit selector -->
+      <div class="flex gap-1 mb-2">
+        {#each [['in', 'Inches'], ['ft', 'Feet + In'], ['cm', 'cm']] as [val, label]}
+          <button onclick={() => settings.update(s => ({ ...s, heightUnit: val as any }))}
+                  class="flex-1 py-1.5 rounded-lg text-xs font-medium transition-colors
+                         {$settings.heightUnit === val ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {label}
+          </button>
+        {/each}
       </div>
+      <!-- Input based on unit -->
+      {#if $settings.heightUnit === 'cm'}
+        <div class="flex gap-2 items-center">
+          <input type="number" min="120" max="250" step="0.5" placeholder="—"
+                 value={$settings.profile.heightIn ? Math.round($settings.profile.heightIn * 2.54 * 10) / 10 : ''}
+                 onchange={(e) => {
+                   const cm = e.currentTarget.value ? Number(e.currentTarget.value) : null;
+                   settings.update(s => ({ ...s, profile: { ...s.profile, heightIn: cm ? Math.round(cm / 2.54) : null } }));
+                 }}
+                 class="input text-center w-24" />
+          <span class="text-sm text-zinc-500">cm</span>
+          {#if $settings.profile.heightIn}
+            <span class="text-xs text-zinc-600">({Math.round($settings.profile.heightIn * 2.54)} cm)</span>
+          {/if}
+        </div>
+      {:else if $settings.heightUnit === 'ft'}
+        {@const totalIn = $settings.profile.heightIn ?? 0}
+        {@const ft = Math.floor(totalIn / 12)}
+        {@const inPart = totalIn % 12}
+        <div class="flex gap-2 items-center">
+          <input type="number" min="3" max="8" placeholder="—"
+                 value={totalIn > 0 ? ft : ''}
+                 onchange={(e) => {
+                   const newFt = e.currentTarget.value ? Number(e.currentTarget.value) : 0;
+                   const curIn = ($settings.profile.heightIn ?? 0) % 12;
+                   settings.update(s => ({ ...s, profile: { ...s.profile, heightIn: newFt * 12 + curIn || null } }));
+                 }}
+                 class="input text-center w-16" />
+          <span class="text-sm text-zinc-500">ft</span>
+          <input type="number" min="0" max="11" placeholder="—"
+                 value={totalIn > 0 ? inPart : ''}
+                 onchange={(e) => {
+                   const newIn = e.currentTarget.value ? Number(e.currentTarget.value) : 0;
+                   const curFt = Math.floor(($settings.profile.heightIn ?? 0) / 12);
+                   settings.update(s => ({ ...s, profile: { ...s.profile, heightIn: curFt * 12 + newIn || null } }));
+                 }}
+                 class="input text-center w-16" />
+          <span class="text-sm text-zinc-500">in</span>
+        </div>
+      {:else}
+        <div class="flex gap-2 items-center">
+          <input type="number" min="48" max="96" placeholder="—"
+                 value={$settings.profile.heightIn ?? ''}
+                 onchange={(e) => settings.update(s => ({ ...s, profile: { ...s.profile, heightIn: e.currentTarget.value ? Number(e.currentTarget.value) : null } }))}
+                 class="input text-center w-24" />
+          <span class="text-sm text-zinc-500">inches</span>
+          {#if $settings.profile.heightIn}
+            <span class="text-xs text-zinc-600">({Math.floor($settings.profile.heightIn / 12)}'{$settings.profile.heightIn % 12}")</span>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <div>

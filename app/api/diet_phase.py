@@ -157,7 +157,7 @@ async def create_phase(
 
     # Deactivate any existing active phase
     active_result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True, DietPhase.user_id == user.id)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     for p in active_result.scalars().all():
         p.is_active = False
@@ -204,7 +204,7 @@ async def get_active_phase(
 ) -> dict | None:
     """Get the active diet phase with current status."""
     result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True, DietPhase.user_id == user.id)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     phase = result.scalar_one_or_none()
     if not phase:
@@ -232,7 +232,7 @@ async def recalculate_phase(
 ) -> dict:
     """Recalculate weekly targets based on current weight trend."""
     result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True, DietPhase.user_id == user.id)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     phase = result.scalar_one_or_none()
     if not phase:
@@ -271,7 +271,7 @@ async def end_phase(
 ) -> None:
     """End the active phase."""
     result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True, DietPhase.user_id == user.id)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     phase = result.scalar_one_or_none()
     if not phase:
