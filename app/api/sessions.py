@@ -221,6 +221,24 @@ async def add_set(
     )
     db.add(exercise_set)
     await db.flush()
+
+    # Update session totals
+    session_result = await db.execute(
+        select(WorkoutSession).where(WorkoutSession.id == session_id)
+    )
+    session = session_result.scalar_one_or_none()
+    if session:
+        all_sets_result = await db.execute(
+            select(ExerciseSet).where(ExerciseSet.workout_session_id == session_id)
+        )
+        all_sets = all_sets_result.scalars().all()
+        session.total_sets = len(all_sets)
+        session.total_reps = sum(s.actual_reps or 0 for s in all_sets)
+        session.total_volume_kg = sum(
+            (s.actual_reps or 0) * (s.actual_weight_kg or 0) for s in all_sets
+        )
+        await db.flush()
+
     await db.refresh(exercise_set)
     return serialize_set(exercise_set)
 

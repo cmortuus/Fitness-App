@@ -18,7 +18,10 @@ router = APIRouter()
 
 def serialize_plan(plan: WorkoutPlan) -> dict:
     """Serialize a WorkoutPlan to a dictionary."""
-    planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    try:
+        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    except (json.JSONDecodeError, TypeError):
+        planned_data = {}
 
     # Handle both old format (list of exercises) and new format (days structure)
     if isinstance(planned_data, list):
@@ -301,7 +304,10 @@ async def update_plan(
     # Handle days update
     if plan_data.days is not None or plan_data.number_of_days is not None:
         # Get current planned exercises
-        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+        try:
+            planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+        except (json.JSONDecodeError, TypeError):
+            planned_data = {}
 
         if isinstance(planned_data, list):
             # Old format - convert to new days structure
