@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
 from app.models.nutrition import FoodItem, MacroGoal, NutritionEntry
+from app.models.user import User
 from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate
 
 router = APIRouter()
@@ -85,12 +87,13 @@ async def barcode_lookup(code: str) -> dict:
 
 @router.get("/foods")
 async def list_foods(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     q: str = "",
     limit: int = 50,
 ) -> list[dict]:
     """List saved foods, optionally filtered by name substring."""
-    stmt = select(FoodItem).order_by(desc(FoodItem.created_at)).limit(limit)
+    stmt = select(FoodItem).where(FoodItem.user_id == user.id).order_by(desc(FoodItem.created_at)).limit(limit)
     if q.strip():
         stmt = stmt.where(FoodItem.name.ilike(f"%{q.strip()}%"))
     result = await db.execute(stmt)
@@ -100,6 +103,7 @@ async def list_foods(
 @router.post("/foods", status_code=status.HTTP_201_CREATED)
 async def create_food(
     data: FoodItemCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Save a custom food to the library."""
@@ -115,6 +119,7 @@ async def create_food(
         serving_size_g=data.serving_size_g,
         serving_label=data.serving_label,
         is_custom=True,
+        user_id=user.id,
     )
     db.add(food)
     await db.flush()
@@ -125,10 +130,11 @@ async def create_food(
 @router.delete("/foods/{food_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_food(
     food_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a saved food."""
-    result = await db.execute(select(FoodItem).where(FoodItem.id == food_id))
+    result = await db.execute(select(FoodItem).where(FoodItem.id == food_id, FoodItem.user_id == user.id))
     food = result.scalar_one_or_none()
     if not food:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food not found")
@@ -140,6 +146,7 @@ async def delete_food(
 
 @router.get("/entries")
 async def list_entries(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     date: date = Query(default=None),
 ) -> dict:
@@ -147,7 +154,7 @@ async def list_entries(
     target_date = date or datetime.now(timezone.utc).date()
     result = await db.execute(
         select(NutritionEntry)
-        .where(NutritionEntry.date == target_date)
+        .where(NutritionEntry.date == target_date, NutritionEntry.user_id == user.id)
         .order_by(NutritionEntry.logged_at)
     )
     entries = result.scalars().all()
@@ -168,6 +175,7 @@ async def list_entries(
 @router.post("/entries", status_code=status.HTTP_201_CREATED)
 async def add_entry(
     data: NutritionEntryCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Log a food entry."""
@@ -181,6 +189,7 @@ async def add_entry(
         protein=data.protein,
         carbs=data.carbs,
         fat=data.fat,
+        user_id=user.id,
     )
     db.add(entry)
     await db.flush()
@@ -191,10 +200,11 @@ async def add_entry(
 @router.delete("/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entry(
     entry_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a nutrition entry."""
-    result = await db.execute(select(NutritionEntry).where(NutritionEntry.id == entry_id))
+    result = await db.execute(select(NutritionEntry).where(NutritionEntry.id == entry_id, NutritionEntry.user_id == user.id))
     entry = result.scalar_one_or_none()
     if not entry:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
@@ -206,6 +216,7 @@ async def delete_entry(
 
 @router.get("/summary")
 async def daily_summary(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     date: date = Query(default=None),
 ) -> dict:
@@ -219,7 +230,7 @@ async def daily_summary(
             func.coalesce(func.sum(NutritionEntry.protein), 0),
             func.coalesce(func.sum(NutritionEntry.carbs), 0),
             func.coalesce(func.sum(NutritionEntry.fat), 0),
-        ).where(NutritionEntry.date == target_date)
+        ).where(NutritionEntry.date == target_date, NutritionEntry.user_id == user.id)
     )
     row = result.one()
     totals = {"calories": row[0], "protein": row[1], "carbs": row[2], "fat": row[3]}
@@ -227,7 +238,7 @@ async def daily_summary(
     # Goals (most recent effective_from <= target_date)
     goal_result = await db.execute(
         select(MacroGoal)
-        .where(MacroGoal.effective_from <= target_date)
+        .where(MacroGoal.effective_from <= target_date, MacroGoal.user_id == user.id)
         .order_by(desc(MacroGoal.effective_from))
         .limit(1)
     )
@@ -248,6 +259,7 @@ async def daily_summary(
 
 @router.get("/weekly-report")
 async def weekly_report(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Aggregate last 7 days of nutrition, body weight, and workouts."""
@@ -267,7 +279,7 @@ async def weekly_report(
                 func.sum(NutritionEntry.protein).label("protein"),
                 func.sum(NutritionEntry.carbs).label("carbs"),
                 func.sum(NutritionEntry.fat).label("fat"),
-            ).where(NutritionEntry.date == d)
+            ).where(NutritionEntry.date == d, NutritionEntry.user_id == user.id)
         )
         row = result.one()
         days.append({
@@ -292,6 +304,7 @@ async def weekly_report(
     bw_result = await db.execute(
         select(BodyWeightEntry)
         .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(BodyWeightEntry.user_id == user.id)
         .order_by(BodyWeightEntry.recorded_at)
     )
     bw_entries = bw_result.scalars().all()
@@ -312,12 +325,13 @@ async def weekly_report(
         select(func.count(WorkoutSession.id))
         .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
         .where(WorkoutSession.completed_at.isnot(None))
+        .where(WorkoutSession.user_id == user.id)
     )
     workout_count = ws_result.scalar() or 0
 
     # Current goals for comparison
     goal_result = await db.execute(
-        select(MacroGoal).where(MacroGoal.effective_from <= today).order_by(desc(MacroGoal.effective_from)).limit(1)
+        select(MacroGoal).where(MacroGoal.effective_from <= today, MacroGoal.user_id == user.id).order_by(desc(MacroGoal.effective_from)).limit(1)
     )
     goal = goal_result.scalar_one_or_none()
     goals = {
@@ -341,13 +355,14 @@ async def weekly_report(
 
 @router.get("/goals")
 async def get_goals(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict | None:
     """Get current active macro goals."""
     today = datetime.now(timezone.utc).date()
     result = await db.execute(
         select(MacroGoal)
-        .where(MacroGoal.effective_from <= today)
+        .where(MacroGoal.effective_from <= today, MacroGoal.user_id == user.id)
         .order_by(desc(MacroGoal.effective_from))
         .limit(1)
     )
@@ -358,6 +373,7 @@ async def get_goals(
 @router.put("/goals")
 async def set_goals(
     data: MacroGoalsUpdate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Set or update daily macro goals (upserts on effective_from)."""
@@ -365,7 +381,7 @@ async def set_goals(
 
     # Upsert: check if a goal already exists for this date
     result = await db.execute(
-        select(MacroGoal).where(MacroGoal.effective_from == effective)
+        select(MacroGoal).where(MacroGoal.effective_from == effective, MacroGoal.user_id == user.id)
     )
     goal = result.scalar_one_or_none()
 
@@ -381,6 +397,7 @@ async def set_goals(
             carbs=data.carbs,
             fat=data.fat,
             effective_from=effective,
+            user_id=user.id,
         )
         db.add(goal)
 

@@ -8,7 +8,9 @@ from pydantic import BaseModel
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_current_user
 from app.database import get_db
+from app.models.user import User
 from app.models.workout import WorkoutPlan, WorkoutSession, ExerciseSet
 from app.models.exercise import Exercise
 from app.schemas.requests import WorkoutPlanCreate, WorkoutPlanResponse
@@ -54,18 +56,19 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
 
 @router.get("/", response_model=list[WorkoutPlanResponse])
 async def list_plans(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """List all workout plans."""
-    result = await db.execute(select(WorkoutPlan).order_by(WorkoutPlan.created_at.desc()))
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.user_id == user.id).order_by(WorkoutPlan.created_at.desc()))
     plans = result.scalars().all()
     return [serialize_plan(p) for p in plans]
 
 
 @router.get("/exercises/recent", response_model=list[dict])
 async def get_recent_exercises(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
-    user_id: int | None = Query(None, description="Filter by user ID"),
     limit: int = Query(10, ge=1, le=50),
 ) -> list[dict]:
     """Get recently used exercises with frequency count.
@@ -90,8 +93,7 @@ async def get_recent_exercises(
         .limit(limit)
     )
 
-    if user_id:
-        query = query.where(WorkoutSession.user_id == user_id)
+    query = query.where(WorkoutSession.user_id == user.id)
 
     result = await db.execute(query)
     exercises = result.all()
@@ -112,6 +114,7 @@ async def get_recent_exercises(
 
 @router.get("/exercises/grouped", response_model=dict[str, list[dict]])
 async def get_exercises_grouped(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, list[dict]]:
     """Get all exercises grouped by primary muscle group."""
@@ -143,10 +146,11 @@ async def get_exercises_grouped(
 @router.get("/{plan_id}", response_model=WorkoutPlanResponse)
 async def get_plan(
     plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get a workout plan by ID."""
-    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id))
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(
@@ -159,6 +163,7 @@ async def get_plan(
 @router.post("/", response_model=WorkoutPlanResponse, status_code=status.HTTP_201_CREATED)
 async def create_plan(
     plan_data: WorkoutPlanCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a new workout plan."""
@@ -195,6 +200,7 @@ async def create_plan(
         current_week=1,  # Start at week 1
         planned_exercises=planned_exercises_json,
         auto_progression=plan_data.auto_progression,
+        user_id=user.id,
     )
     db.add(plan)
     await db.flush()
@@ -205,10 +211,11 @@ async def create_plan(
 @router.post("/{plan_id}/archive", response_model=WorkoutPlanResponse)
 async def archive_plan(
     plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Mark a completed plan as archived. It stays in history but moves out of the active list."""
-    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id))
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Plan {plan_id} not found")
@@ -221,10 +228,11 @@ async def archive_plan(
 @router.post("/{plan_id}/reuse", response_model=WorkoutPlanResponse, status_code=status.HTTP_201_CREATED)
 async def reuse_plan(
     plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a fresh active copy of an archived plan so you can run the block again."""
-    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id))
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
     source = result.scalar_one_or_none()
     if not source:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Plan {plan_id} not found")
@@ -239,6 +247,7 @@ async def reuse_plan(
         auto_progression=source.auto_progression,
         min_technique_score=source.min_technique_score,
         is_archived=False,
+        user_id=user.id,
     )
     db.add(new_plan)
     await db.flush()
@@ -249,10 +258,11 @@ async def reuse_plan(
 @router.delete("/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_plan(
     plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a workout plan."""
-    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id))
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(
@@ -278,10 +288,11 @@ class PlanUpdate(BaseModel):
 async def update_plan(
     plan_id: int,
     plan_data: PlanUpdate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Update a workout plan."""
-    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id))
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
     plan = result.scalar_one_or_none()
     if not plan:
         raise HTTPException(

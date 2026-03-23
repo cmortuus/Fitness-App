@@ -7,8 +7,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
+from app.models.user import User
 from app.schemas.requests import BodyWeightCreate
 
 router = APIRouter()
@@ -31,12 +33,14 @@ def serialize_entry(entry: BodyWeightEntry) -> dict:
 
 @router.get("/", response_model=list[dict])
 async def list_entries(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 50,
 ) -> list[dict]:
     """Return weigh-in history, most recent first."""
     result = await db.execute(
         select(BodyWeightEntry)
+        .where(BodyWeightEntry.user_id == user.id)
         .order_by(desc(BodyWeightEntry.recorded_at))
         .limit(limit)
     )
@@ -45,11 +49,13 @@ async def list_entries(
 
 @router.get("/latest", response_model=dict)
 async def get_latest(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Return the most recent weigh-in, or 404 if none exists."""
     result = await db.execute(
         select(BodyWeightEntry)
+        .where(BodyWeightEntry.user_id == user.id)
         .order_by(desc(BodyWeightEntry.recorded_at))
         .limit(1)
     )
@@ -62,6 +68,7 @@ async def get_latest(
 @router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
 async def add_entry(
     data: BodyWeightCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Log a new weigh-in."""
@@ -70,6 +77,7 @@ async def add_entry(
         body_fat_pct=data.body_fat_pct,
         recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.now(timezone.utc),
         notes=data.notes,
+        user_id=user.id,
     )
     db.add(entry)
     await db.flush()
@@ -80,11 +88,12 @@ async def add_entry(
 @router.delete("/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entry(
     entry_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a weigh-in entry."""
     result = await db.execute(
-        select(BodyWeightEntry).where(BodyWeightEntry.id == entry_id)
+        select(BodyWeightEntry).where(BodyWeightEntry.id == entry_id, BodyWeightEntry.user_id == user.id)
     )
     entry = result.scalar_one_or_none()
     if not entry:
