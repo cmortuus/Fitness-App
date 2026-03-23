@@ -15,12 +15,18 @@ router = APIRouter()
 
 
 def serialize_entry(entry: BodyWeightEntry) -> dict:
-    return {
+    d = {
         "id": entry.id,
         "weight_kg": entry.weight_kg,
+        "body_fat_pct": entry.body_fat_pct,
         "recorded_at": entry.recorded_at.isoformat(),
         "notes": entry.notes,
     }
+    # Derived lean/fat mass when body fat is known
+    if entry.body_fat_pct is not None:
+        d["fat_mass_kg"] = round(entry.weight_kg * entry.body_fat_pct / 100, 2)
+        d["lean_mass_kg"] = round(entry.weight_kg * (1 - entry.body_fat_pct / 100), 2)
+    return d
 
 
 @router.get("/", response_model=list[dict])
@@ -61,6 +67,7 @@ async def add_entry(
     """Log a new weigh-in."""
     entry = BodyWeightEntry(
         weight_kg=data.weight_kg,
+        body_fat_pct=data.body_fat_pct,
         recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.now(timezone.utc),
         notes=data.notes,
     )

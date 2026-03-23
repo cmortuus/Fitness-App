@@ -452,10 +452,16 @@
           </div>
         </div>
 
-        <button onclick={() => showGoalsModal = true}
-                class="w-full mt-3 text-center text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
-          Edit goals
-        </button>
+        <div class="flex items-center justify-center gap-4 mt-3">
+          <button onclick={() => showGoalsModal = true}
+                  class="text-xs text-zinc-600 hover:text-zinc-400 transition-colors">
+            Edit goals
+          </button>
+          <a href="/nutrition/report"
+             class="text-xs text-primary-500 hover:text-primary-400 transition-colors">
+            Weekly Report →
+          </a>
+        </div>
       {/if}
     </div>
 

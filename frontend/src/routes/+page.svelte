@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { currentSession, workoutPlans, nextWorkoutUrl } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans } from '$lib/api';
-  import type { WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
+  import { activeDietPhase, currentSession, workoutPlans, nextWorkoutUrl } from '$lib/stores';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights } from '$lib/api';
+  import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
   interface NextWorkout {
     plan: WorkoutPlan;
@@ -15,6 +15,8 @@
   let allSessions    = $state<WorkoutSession[]>([]);
   let loading        = $state(true);
   let archiving      = $state(false);
+  let nutritionSummary = $state<DailySummary | null>(null);
+  let insights = $state<Insight[]>([]);
 
   let nextWorkout = $derived(
     loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
@@ -43,12 +45,16 @@
 
   onMount(async () => {
     try {
-      const [sessions, plans] = await Promise.all([
+      const [sessions, plans, nutrition, insightData] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
+        getDailySummary(new Date().toISOString().slice(0, 10)).catch(() => null),
+        getInsights().catch(() => []),
       ]);
       allSessions = sessions;
       workoutPlans.set(plans);
+      nutritionSummary = nutrition;
+      insights = insightData;
     } catch (e) {
       console.error('Failed to load dashboard:', e);
     } finally {
@@ -174,6 +180,83 @@
         </p>
         <p class="text-xs text-zinc-500 mt-0.5">kg volume this week</p>
       </div>
+    </div>
+  {/if}
+
+  <!-- ── Nutrition at-a-glance ──────────────────────────────────────── -->
+  {#if nutritionSummary?.goals}
+    {@const g = nutritionSummary.goals}
+    {@const t = nutritionSummary.totals}
+    {@const calPct = g.calories > 0 ? Math.min(t.calories / g.calories, 1) : 0}
+    {@const proPct = g.protein > 0 ? Math.min(t.protein / g.protein, 1) : 0}
+    <a href="/nutrition" class="card !py-3 block hover:bg-zinc-800/40 transition-colors">
+      <div class="flex items-center justify-between mb-2">
+        <span class="text-xs font-semibold text-zinc-400 uppercase tracking-wide">Today's Nutrition</span>
+        {#if $activeDietPhase}
+          <span class="text-[10px] text-primary-400 capitalize">{$activeDietPhase.phase_type} · Wk {$activeDietPhase.current_week}</span>
+        {/if}
+      </div>
+      <div class="grid grid-cols-4 gap-2">
+        <!-- Calories -->
+        <div class="text-center">
+          <div class="relative w-14 h-14 mx-auto">
+            <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8" />
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#3b82f6" stroke-width="8"
+                      stroke-dasharray={2 * Math.PI * 50} stroke-dashoffset={2 * Math.PI * 50 * (1 - calPct)}
+                      stroke-linecap="round" />
+            </svg>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <span class="text-[10px] font-bold text-white">{Math.round(t.calories)}</span>
+            </div>
+          </div>
+          <p class="text-[9px] text-zinc-500 mt-0.5">Cal</p>
+        </div>
+        <!-- Protein -->
+        <div class="text-center">
+          <div class="relative w-14 h-14 mx-auto">
+            <svg viewBox="0 0 120 120" class="w-full h-full -rotate-90">
+              <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="8" />
+              <circle cx="60" cy="60" r="50" fill="none" stroke="#a855f7" stroke-width="8"
+                      stroke-dasharray={2 * Math.PI * 50} stroke-dashoffset={2 * Math.PI * 50 * (1 - proPct)}
+                      stroke-linecap="round" />
+            </svg>
+            <div class="absolute inset-0 flex items-center justify-center">
+              <span class="text-[10px] font-bold text-white">{Math.round(t.protein)}g</span>
+            </div>
+          </div>
+          <p class="text-[9px] text-zinc-500 mt-0.5">Protein</p>
+        </div>
+        <!-- Carbs bar -->
+        <div class="flex flex-col items-center justify-center">
+          <span class="text-xs font-semibold text-white">{Math.round(t.carbs)}g</span>
+          <div class="w-full h-1.5 bg-zinc-800 rounded-full mt-1">
+            <div class="h-full bg-emerald-500 rounded-full" style="width: {g.carbs > 0 ? Math.min(t.carbs / g.carbs * 100, 100) : 0}%"></div>
+          </div>
+          <p class="text-[9px] text-zinc-500 mt-0.5">Carbs</p>
+        </div>
+        <!-- Fat bar -->
+        <div class="flex flex-col items-center justify-center">
+          <span class="text-xs font-semibold text-white">{Math.round(t.fat)}g</span>
+          <div class="w-full h-1.5 bg-zinc-800 rounded-full mt-1">
+            <div class="h-full bg-amber-500 rounded-full" style="width: {g.fat > 0 ? Math.min(t.fat / g.fat * 100, 100) : 0}%"></div>
+          </div>
+          <p class="text-[9px] text-zinc-500 mt-0.5">Fat</p>
+        </div>
+      </div>
+    </a>
+  {/if}
+
+  <!-- ── Insights ─────────────────────────────────────────────────────── -->
+  {#if insights.length > 0}
+    <div class="space-y-1.5">
+      {#each insights as insight}
+        <div class="flex items-center gap-2.5 px-3 py-2 rounded-xl transition-colors
+                    {insight.type === 'success' ? 'bg-green-500/10' : insight.type === 'warning' ? 'bg-amber-500/10' : 'bg-zinc-800/60'}">
+          <span class="text-base shrink-0">{insight.icon}</span>
+          <p class="text-xs text-zinc-300">{insight.text}</p>
+        </div>
+      {/each}
     </div>
   {/if}
 

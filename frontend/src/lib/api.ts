@@ -328,6 +328,9 @@ export async function updatePlan(planId: number, data: {
 export interface BodyWeightEntry {
   id: number;
   weight_kg: number;
+  body_fat_pct: number | null;
+  fat_mass_kg?: number;
+  lean_mass_kg?: number;
   recorded_at: string;
   notes: string | null;
 }
@@ -344,6 +347,7 @@ export async function getLatestBodyWeight(): Promise<BodyWeightEntry | null> {
 
 export async function addBodyWeight(data: {
   weight_kg: number;
+  body_fat_pct?: number | null;
   recorded_at?: string;
   notes?: string;
 }): Promise<BodyWeightEntry> {
@@ -492,6 +496,35 @@ export async function setMacroGoals(data: {
   effective_from?: string;
 }): Promise<MacroGoals> {
   const response = await api.put('/nutrition/goals', data);
+  return response.data;
+}
+
+// Insights
+export interface Insight {
+  type: 'success' | 'warning' | 'info';
+  icon: string;
+  text: string;
+}
+
+export async function getInsights(): Promise<Insight[]> {
+  const response = await api.get('/progress/insights');
+  return response.data;
+}
+
+// Weekly report
+export interface WeeklyReport {
+  period: { start: string; end: string };
+  days: { date: string; calories: number; protein: number; carbs: number; fat: number }[];
+  averages: { calories: number; protein: number; carbs: number; fat: number };
+  days_logged: number;
+  goals: { calories: number; protein: number; carbs: number; fat: number } | null;
+  weight_data: { date: string; weight_kg: number; body_fat_pct: number | null; lean_mass_kg: number | null }[];
+  weight_change_kg: number | null;
+  workout_count: number;
+}
+
+export async function getWeeklyReport(): Promise<WeeklyReport> {
+  const response = await api.get('/nutrition/weekly-report');
   return response.data;
 }
 

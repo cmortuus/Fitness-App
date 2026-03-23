@@ -1,6 +1,6 @@
 """Nutrition tracking API endpoints — food log, custom foods, goals, and search."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -244,6 +244,97 @@ async def daily_summary(
         }
 
     return {"date": target_date.isoformat(), "totals": totals, "goals": goals, "remaining": remaining}
+
+
+@router.get("/weekly-report")
+async def weekly_report(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Aggregate last 7 days of nutrition, body weight, and workouts."""
+    from app.models.body_weight import BodyWeightEntry
+    from app.models.workout import WorkoutSession
+
+    today = datetime.now(timezone.utc).date()
+    week_ago = today - timedelta(days=7)
+
+    # Daily nutrition totals for each of the last 7 days
+    days = []
+    for i in range(7):
+        d = today - timedelta(days=6 - i)
+        result = await db.execute(
+            select(
+                func.sum(NutritionEntry.calories).label("calories"),
+                func.sum(NutritionEntry.protein).label("protein"),
+                func.sum(NutritionEntry.carbs).label("carbs"),
+                func.sum(NutritionEntry.fat).label("fat"),
+            ).where(NutritionEntry.date == d)
+        )
+        row = result.one()
+        days.append({
+            "date": d.isoformat(),
+            "calories": round(row.calories or 0),
+            "protein": round(row.protein or 0),
+            "carbs": round(row.carbs or 0),
+            "fat": round(row.fat or 0),
+        })
+
+    # Weekly averages
+    logged_days = [d for d in days if d["calories"] > 0]
+    n = max(len(logged_days), 1)
+    avg = {
+        "calories": round(sum(d["calories"] for d in logged_days) / n),
+        "protein": round(sum(d["protein"] for d in logged_days) / n),
+        "carbs": round(sum(d["carbs"] for d in logged_days) / n),
+        "fat": round(sum(d["fat"] for d in logged_days) / n),
+    }
+
+    # Body weight entries this week
+    bw_result = await db.execute(
+        select(BodyWeightEntry)
+        .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .order_by(BodyWeightEntry.recorded_at)
+    )
+    bw_entries = bw_result.scalars().all()
+    weight_data = [{
+        "date": e.recorded_at.date().isoformat(),
+        "weight_kg": e.weight_kg,
+        "body_fat_pct": e.body_fat_pct,
+        "lean_mass_kg": round(e.weight_kg * (1 - e.body_fat_pct / 100), 2) if e.body_fat_pct else None,
+    } for e in bw_entries]
+
+    # Weight change
+    weight_change = None
+    if len(bw_entries) >= 2:
+        weight_change = round(bw_entries[-1].weight_kg - bw_entries[0].weight_kg, 2)
+
+    # Workout count this week
+    ws_result = await db.execute(
+        select(func.count(WorkoutSession.id))
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.completed_at.isnot(None))
+    )
+    workout_count = ws_result.scalar() or 0
+
+    # Current goals for comparison
+    goal_result = await db.execute(
+        select(MacroGoal).where(MacroGoal.effective_from <= today).order_by(desc(MacroGoal.effective_from)).limit(1)
+    )
+    goal = goal_result.scalar_one_or_none()
+    goals = {
+        "calories": goal.calories, "protein": goal.protein,
+        "carbs": goal.carbs, "fat": goal.fat,
+    } if goal else None
+
+    return {
+        "period": {"start": week_ago.isoformat(), "end": today.isoformat()},
+        "days": days,
+        "averages": avg,
+        "days_logged": len(logged_days),
+        "goals": goals,
+        "weight_data": weight_data,
+        "weight_change_kg": weight_change,
+        "workout_count": workout_count,
+    }
 
 
 # ── Goals ─────────────────────────────────────────────────────────────────────
