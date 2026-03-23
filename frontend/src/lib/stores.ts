@@ -1,5 +1,5 @@
 import { writable, derived } from 'svelte/store';
-import type { BodyWeightEntry, Exercise, WorkoutSession, WorkoutPlan } from '$lib/api';
+import type { BodyWeightEntry, DietPhase, Exercise, WorkoutSession, WorkoutPlan } from '$lib/api';
 
 // ─── Persistent settings ──────────────────────────────────────────────────────
 export interface RestDurations {
@@ -88,6 +88,9 @@ export const currentSet = derived(
 
 // Latest body weight from the server (null = not loaded yet)
 export const latestBodyWeight = writable<BodyWeightEntry | null>(null);
+
+// Active diet phase
+export const activeDietPhase = writable<DietPhase | null>(null);
 
 // URL for the next planned workout — set by the home page after resolving the plan
 // Falls back to /workout/active if not yet computed

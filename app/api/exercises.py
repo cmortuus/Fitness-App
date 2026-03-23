@@ -104,8 +104,8 @@ async def create_exercise(
 @router.get("/{exercise_id}/history")
 async def get_exercise_history(
     exercise_id: int,
+    db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 10,
-    db: Annotated[AsyncSession, Depends(get_db)] = None,
 ) -> list[dict]:
     """Get the most recent completed sessions for a given exercise."""
     # Subquery: sessions that have at least one completed set (bilateral or unilateral)

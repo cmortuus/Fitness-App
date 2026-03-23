@@ -231,3 +231,67 @@ class BodyWeightCreate(BaseModel):
 class BodyWeightUpdate(BaseModel):
     weight_kg: float | None = None
     notes: str | None = None
+
+
+# ── Nutrition schemas ─────────────────────────────────────────────────────────
+
+class MealType(str, Enum):
+    BREAKFAST = "breakfast"
+    LUNCH = "lunch"
+    DINNER = "dinner"
+    SNACK = "snack"
+
+
+class FoodItemCreate(BaseModel):
+    name: str
+    brand: str | None = None
+    barcode: str | None = None
+    calories_per_100g: float = Field(ge=0)
+    protein_per_100g: float = Field(ge=0)
+    carbs_per_100g: float = Field(ge=0)
+    fat_per_100g: float = Field(ge=0)
+    serving_size_g: float = Field(default=100, gt=0)
+    serving_label: str | None = None
+
+
+class NutritionEntryCreate(BaseModel):
+    food_item_id: int | None = None
+    name: str
+    date: date
+    meal: MealType = MealType.SNACK
+    quantity_g: float = Field(gt=0)
+    calories: float = Field(ge=0)
+    protein: float = Field(ge=0)
+    carbs: float = Field(ge=0)
+    fat: float = Field(ge=0)
+
+
+class MacroGoalsUpdate(BaseModel):
+    calories: float = Field(gt=0)
+    protein: float = Field(ge=0)
+    carbs: float = Field(ge=0)
+    fat: float = Field(ge=0)
+    effective_from: date | None = None
+
+
+class PhaseType(str, Enum):
+    CUT = "cut"
+    BULK = "bulk"
+    MAINTENANCE = "maintenance"
+
+
+class CarbPreset(str, Enum):
+    HIGH = "high"
+    MODERATE = "moderate"
+    LOW = "low"
+
+
+class DietPhaseCreate(BaseModel):
+    phase_type: PhaseType
+    duration_weeks: int = Field(ge=4, le=24, default=8)
+    target_rate_pct: float = Field(ge=0.1, le=1.5, default=0.7)
+    activity_multiplier: float = Field(ge=1.0, le=2.0, default=1.4)
+    tdee_override: float | None = None
+    carb_preset: CarbPreset = CarbPreset.MODERATE
+    body_fat_pct: float | None = Field(default=None, ge=5, le=60)
+    protein_per_lb: float | None = Field(default=None, ge=0.5, le=1.5)

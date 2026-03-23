@@ -79,19 +79,26 @@
       latestBodyWeight.set(entry);
       newWeight = null;
       newNotes = '';
+    } catch (e) {
+      console.error('Failed to log weigh-in:', e);
+      alert('Failed to save weigh-in. Please try again.');
     } finally {
       savingWeighIn = false;
     }
   }
 
   async function removeWeighIn(id: number) {
-    await deleteBodyWeight(id);
-    weighIns = weighIns.filter(e => e.id !== id);
-    // If we deleted the most recent, update the store
-    if (weighIns.length > 0) {
-      latestBodyWeight.set(weighIns[0]);
-    } else {
-      latestBodyWeight.set(null);
+    try {
+      await deleteBodyWeight(id);
+      weighIns = weighIns.filter(e => e.id !== id);
+      if (weighIns.length > 0) {
+        latestBodyWeight.set(weighIns[0]);
+      } else {
+        latestBodyWeight.set(null);
+      }
+    } catch (e) {
+      console.error('Failed to delete weigh-in:', e);
+      alert('Failed to delete weigh-in. Please try again.');
     }
   }
 </script>
