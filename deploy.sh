@@ -16,6 +16,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$APP_DIR"  # All commands expect to run from project root
 BACKUP_DIR="$APP_DIR/backups"
 DB_FILE="$APP_DIR/homegym.db"
 VENV_DIR="$APP_DIR/venv"
@@ -168,7 +169,17 @@ main() {
     exit 1
   }
 
-  # 5. Python venv + deps
+  # 5. Ensure .env exists with a secure JWT secret
+  if [ ! -f "$APP_DIR/.env" ]; then
+    log "Creating .env with random JWT secret..."
+    local jwt_secret
+    jwt_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
+    cat > "$APP_DIR/.env" <<ENVEOF
+JWT_SECRET_KEY=${jwt_secret}
+ENVEOF
+  fi
+
+  # 6. Python venv + deps
   if [ ! -d "$VENV_DIR" ]; then
     log "Creating virtual environment..."
     python3 -m venv "$VENV_DIR"
