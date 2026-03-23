@@ -56,8 +56,11 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Seed with default exercises
-    await seed_exercises()
+    # Seed with default exercises — never let this crash startup
+    try:
+        await seed_exercises()
+    except Exception as e:
+        print(f"⚠️ Exercise seeding failed (non-fatal): {e}")
 
 
 async def seed_exercises() -> None:
