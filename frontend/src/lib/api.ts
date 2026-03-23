@@ -499,6 +499,18 @@ export async function setMacroGoals(data: {
   return response.data;
 }
 
+// Insights
+export interface Insight {
+  type: 'success' | 'warning' | 'info';
+  icon: string;
+  text: string;
+}
+
+export async function getInsights(): Promise<Insight[]> {
+  const response = await api.get('/progress/insights');
+  return response.data;
+}
+
 // Weekly report
 export interface WeeklyReport {
   period: { start: string; end: string };

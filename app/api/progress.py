@@ -1,14 +1,16 @@
 """Progress tracking API endpoints."""
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import select
+from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+from app.models.body_weight import BodyWeightEntry
 from app.models.exercise import Exercise
+from app.models.nutrition import MacroGoal, NutritionEntry
 from app.models.workout import ExerciseSet, WorkoutSession, WorkoutStatus
 
 router = APIRouter()
@@ -214,3 +216,124 @@ async def get_recommendations(
         })
 
     return sorted(recommendations, key=lambda r: r["exercise_name"])
+
+
+@router.get("/insights")
+async def get_insights(
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    """Generate actionable fitness + nutrition insights for the past 7 days."""
+    today = date.today()
+    week_ago = today - timedelta(days=7)
+    insights: list[dict] = []
+
+    # 1. Protein adherence
+    goal_result = await db.execute(
+        select(MacroGoal).where(MacroGoal.effective_from <= today)
+        .order_by(desc(MacroGoal.effective_from)).limit(1)
+    )
+    goal = goal_result.scalar_one_or_none()
+    if goal and goal.protein > 0:
+        days_hit = 0
+        for i in range(7):
+            d = today - timedelta(days=i)
+            result = await db.execute(
+                select(func.sum(NutritionEntry.protein)).where(NutritionEntry.date == d)
+            )
+            total = result.scalar() or 0
+            if total >= goal.protein * 0.9:  # within 90% of target
+                days_hit += 1
+        if days_hit >= 5:
+            insights.append({"type": "success", "icon": "💪", "text": f"Hit protein target {days_hit}/7 days this week"})
+        elif days_hit <= 2:
+            insights.append({"type": "warning", "icon": "⚠️", "text": f"Protein target met only {days_hit}/7 days — aim for {round(goal.protein)}g daily"})
+
+    # 2. Calorie adherence
+    if goal and goal.calories > 0:
+        days_on = 0
+        for i in range(7):
+            d = today - timedelta(days=i)
+            result = await db.execute(
+                select(func.sum(NutritionEntry.calories)).where(NutritionEntry.date == d)
+            )
+            total = result.scalar() or 0
+            if total > 0 and abs(total - goal.calories) <= goal.calories * 0.1:
+                days_on += 1
+        if days_on >= 5:
+            insights.append({"type": "success", "icon": "🎯", "text": f"Calories within 10% of target {days_on}/7 days"})
+
+    # 3. Workout frequency
+    ws_result = await db.execute(
+        select(func.count(WorkoutSession.id))
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.completed_at.isnot(None))
+    )
+    workout_count = ws_result.scalar() or 0
+    if workout_count >= 4:
+        insights.append({"type": "success", "icon": "🔥", "text": f"{workout_count} workouts this week — great consistency"})
+    elif workout_count == 0:
+        insights.append({"type": "warning", "icon": "🏋️", "text": "No workouts logged this week"})
+
+    # 4. Weight trend
+    bw_result = await db.execute(
+        select(BodyWeightEntry)
+        .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .order_by(BodyWeightEntry.recorded_at)
+    )
+    bw_entries = bw_result.scalars().all()
+    if len(bw_entries) >= 2:
+        change = bw_entries[-1].weight_kg - bw_entries[0].weight_kg
+        change_lbs = change * 2.205
+        if abs(change_lbs) >= 0.5:
+            direction = "down" if change < 0 else "up"
+            insights.append({
+                "type": "info",
+                "icon": "📉" if change < 0 else "📈",
+                "text": f"Weight trending {direction} {abs(change_lbs):.1f} lbs this week",
+            })
+
+    # 5. PR detection (estimate 1RM improvement)
+    recent_sets = await db.execute(
+        select(ExerciseSet, Exercise.name)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(ExerciseSet.actual_reps.isnot(None))
+        .where(ExerciseSet.actual_weight_kg > 0)
+    )
+    # Group by exercise, find max estimated 1RM
+    exercise_maxes: dict[str, float] = {}
+    for s, name in recent_sets.all():
+        e1rm = s.actual_weight_kg * (1 + (s.actual_reps or 0) / 30)
+        if name not in exercise_maxes or e1rm > exercise_maxes[name]:
+            exercise_maxes[name] = e1rm
+
+    # Compare to previous week
+    prev_week_ago = week_ago - timedelta(days=7)
+    prev_sets = await db.execute(
+        select(ExerciseSet, Exercise.name)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
+        .where(WorkoutSession.started_at >= datetime.combine(prev_week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at < datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(ExerciseSet.actual_reps.isnot(None))
+        .where(ExerciseSet.actual_weight_kg > 0)
+    )
+    prev_maxes: dict[str, float] = {}
+    for s, name in prev_sets.all():
+        e1rm = s.actual_weight_kg * (1 + (s.actual_reps or 0) / 30)
+        if name not in prev_maxes or e1rm > prev_maxes[name]:
+            prev_maxes[name] = e1rm
+
+    prs = []
+    for name, e1rm in exercise_maxes.items():
+        prev = prev_maxes.get(name)
+        if prev and e1rm > prev * 1.02:  # >2% improvement
+            prs.append(name)
+    if prs:
+        if len(prs) == 1:
+            insights.append({"type": "success", "icon": "🏆", "text": f"New estimated PR on {prs[0]}"})
+        else:
+            insights.append({"type": "success", "icon": "🏆", "text": f"PRs on {len(prs)} exercises this week"})
+
+    return insights

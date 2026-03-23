@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { activeDietPhase, currentSession, workoutPlans, nextWorkoutUrl } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans, getDailySummary } from '$lib/api';
-  import type { DailySummary, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights } from '$lib/api';
+  import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
   interface NextWorkout {
     plan: WorkoutPlan;
@@ -16,6 +16,7 @@
   let loading        = $state(true);
   let archiving      = $state(false);
   let nutritionSummary = $state<DailySummary | null>(null);
+  let insights = $state<Insight[]>([]);
 
   let nextWorkout = $derived(
     loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
@@ -44,14 +45,16 @@
 
   onMount(async () => {
     try {
-      const [sessions, plans, nutrition] = await Promise.all([
+      const [sessions, plans, nutrition, insightData] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
         getDailySummary(new Date().toISOString().slice(0, 10)).catch(() => null),
+        getInsights().catch(() => []),
       ]);
       allSessions = sessions;
       workoutPlans.set(plans);
       nutritionSummary = nutrition;
+      insights = insightData;
     } catch (e) {
       console.error('Failed to load dashboard:', e);
     } finally {
@@ -242,6 +245,19 @@
         </div>
       </div>
     </a>
+  {/if}
+
+  <!-- ── Insights ─────────────────────────────────────────────────────── -->
+  {#if insights.length > 0}
+    <div class="space-y-1.5">
+      {#each insights as insight}
+        <div class="flex items-center gap-2.5 px-3 py-2 rounded-xl transition-colors
+                    {insight.type === 'success' ? 'bg-green-500/10' : insight.type === 'warning' ? 'bg-amber-500/10' : 'bg-zinc-800/60'}">
+          <span class="text-base shrink-0">{insight.icon}</span>
+          <p class="text-xs text-zinc-300">{insight.text}</p>
+        </div>
+      {/each}
+    </div>
   {/if}
 
   <!-- ── Next / Active workout hero ─────────────────────────────────── -->
