@@ -328,6 +328,9 @@ export async function updatePlan(planId: number, data: {
 export interface BodyWeightEntry {
   id: number;
   weight_kg: number;
+  body_fat_pct: number | null;
+  fat_mass_kg?: number;
+  lean_mass_kg?: number;
   recorded_at: string;
   notes: string | null;
 }
@@ -344,6 +347,7 @@ export async function getLatestBodyWeight(): Promise<BodyWeightEntry | null> {
 
 export async function addBodyWeight(data: {
   weight_kg: number;
+  body_fat_pct?: number | null;
   recorded_at?: string;
   notes?: string;
 }): Promise<BodyWeightEntry> {

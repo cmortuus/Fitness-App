@@ -44,6 +44,7 @@
   // ── Body weight weigh-in ──────────────────────────────────────────────
   let weighIns = $state<BodyWeightEntry[]>([]);
   let newWeight = $state<number | null>(null);
+  let newBodyFat = $state<number | null>(null);
   let newNotes = $state('');
   let savingWeighIn = $state(false);
 
@@ -73,11 +74,13 @@
         : newWeight;
       const entry = await addBodyWeight({
         weight_kg: kg,
+        body_fat_pct: newBodyFat || undefined,
         notes: newNotes || undefined,
       });
       weighIns = [entry, ...weighIns];
       latestBodyWeight.set(entry);
       newWeight = null;
+      newBodyFat = null;
       newNotes = '';
     } catch (e) {
       console.error('Failed to log weigh-in:', e);
@@ -224,6 +227,17 @@
           />
           <span class="text-sm text-zinc-400 shrink-0">{$settings.weightUnit}</span>
         </div>
+        <div class="flex items-center gap-1.5">
+          <input
+            type="number"
+            bind:value={newBodyFat}
+            min="3" max="60" step="0.1"
+            placeholder="BF%"
+            style="width:5rem"
+            class="bg-zinc-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-center font-mono placeholder-gray-400 focus:outline-none focus:border-primary-500"
+          />
+          <span class="text-sm text-zinc-400 shrink-0">%</span>
+        </div>
         <button
           onclick={logWeighIn}
           disabled={savingWeighIn || !newWeight}
@@ -237,14 +251,19 @@
       <div class="space-y-1 max-h-52 overflow-y-auto">
         {#each weighIns as entry}
           <div class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-zinc-900 group">
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-3 flex-wrap">
               <span class="font-mono text-sm font-medium">
                 {toDisplayWeight(entry.weight_kg)} {$settings.weightUnit}
               </span>
-              <span class="text-xs text-zinc-500">{fmtDate(entry.recorded_at)}</span>
-              {#if entry.notes}
-                <span class="text-xs text-gray-600 italic">{entry.notes}</span>
+              {#if entry.body_fat_pct}
+                <span class="text-xs text-primary-400">{entry.body_fat_pct}% BF</span>
+                {#if entry.lean_mass_kg}
+                  <span class="text-[10px] text-zinc-600">
+                    lean {toDisplayWeight(entry.lean_mass_kg)} · fat {toDisplayWeight(entry.fat_mass_kg ?? 0)}
+                  </span>
+                {/if}
               {/if}
+              <span class="text-xs text-zinc-500">{fmtDate(entry.recorded_at)}</span>
             </div>
             <button
               onclick={() => removeWeighIn(entry.id)}
