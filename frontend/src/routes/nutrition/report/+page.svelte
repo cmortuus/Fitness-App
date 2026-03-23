@@ -87,6 +87,7 @@
     <!-- Daily calorie chart (bars) -->
     <div class="card space-y-3">
       <h3 class="text-sm font-semibold text-zinc-300">Daily Calories</h3>
+      {#if report.days.length > 0}
       {@const maxCal = Math.max(...report.days.map(d => d.calories), report.goals?.calories ?? 0, 1)}
       <div class="flex items-end gap-1" style="height: 120px">
         {#each report.days as day}
@@ -103,6 +104,7 @@
       </div>
       {#if report.goals}
         <p class="text-[10px] text-zinc-600 text-right">Goal: {report.goals.calories} cal</p>
+      {/if}
       {/if}
     </div>
 
