@@ -499,6 +499,23 @@ export async function setMacroGoals(data: {
   return response.data;
 }
 
+// Weekly report
+export interface WeeklyReport {
+  period: { start: string; end: string };
+  days: { date: string; calories: number; protein: number; carbs: number; fat: number }[];
+  averages: { calories: number; protein: number; carbs: number; fat: number };
+  days_logged: number;
+  goals: { calories: number; protein: number; carbs: number; fat: number } | null;
+  weight_data: { date: string; weight_kg: number; body_fat_pct: number | null; lean_mass_kg: number | null }[];
+  weight_change_kg: number | null;
+  workout_count: number;
+}
+
+export async function getWeeklyReport(): Promise<WeeklyReport> {
+  const response = await api.get('/nutrition/weekly-report');
+  return response.data;
+}
+
 // ── Diet Phases ──────────────────────────────────────────────────────────────
 
 export interface DietPhase {
