@@ -77,7 +77,7 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
-export async function authRegister(data: { username: string; email: string; password: string }): Promise<AuthResponse> {
+export async function authRegister(data: { username: string; password: string; email?: string }): Promise<AuthResponse> {
   const response = await api.post('/auth/register', data);
   return response.data;
 }

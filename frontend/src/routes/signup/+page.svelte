@@ -3,7 +3,6 @@
   import { onMount } from 'svelte';
 
   let username = $state('');
-  let email = $state('');
   let password = $state('');
   let confirmPassword = $state('');
   let error = $state('');
@@ -25,7 +24,7 @@
     }
     loading = true;
     try {
-      const auth = await authRegister({ username, email, password });
+      const auth = await authRegister({ username, password });
       saveAuthTokens(auth);
       window.location.href = '/';
     } catch (e: any) {
@@ -48,32 +47,25 @@
       {/if}
 
       <div>
-        <label class="text-xs text-zinc-400 block mb-1">Username</label>
-        <input type="text" bind:value={username} required autocomplete="username"
-               minlength="3" maxlength="50"
+        <label for="signup-username" class="text-xs text-zinc-400 block mb-1">Username</label>
+        <input id="signup-username" type="text" bind:value={username} required autocomplete="username"
                class="input" placeholder="Choose a username" />
       </div>
 
       <div>
-        <label class="text-xs text-zinc-400 block mb-1">Email</label>
-        <input type="email" bind:value={email} required autocomplete="email"
-               class="input" placeholder="you@example.com" />
-      </div>
-
-      <div>
-        <label class="text-xs text-zinc-400 block mb-1">Password</label>
-        <input type="password" bind:value={password} required autocomplete="new-password"
+        <label for="signup-password" class="text-xs text-zinc-400 block mb-1">Password</label>
+        <input id="signup-password" type="password" bind:value={password} required autocomplete="new-password"
                minlength="6"
                class="input" placeholder="At least 6 characters" />
       </div>
 
       <div>
-        <label class="text-xs text-zinc-400 block mb-1">Confirm Password</label>
-        <input type="password" bind:value={confirmPassword} required autocomplete="new-password"
+        <label for="signup-confirm" class="text-xs text-zinc-400 block mb-1">Confirm Password</label>
+        <input id="signup-confirm" type="password" bind:value={confirmPassword} required autocomplete="new-password"
                class="input" placeholder="Repeat password" />
       </div>
 
-      <button type="submit" disabled={loading || !username || !email || !password || !confirmPassword}
+      <button type="submit" disabled={loading || !username || !password || !confirmPassword}
               class="btn-primary w-full !py-3 disabled:opacity-50">
         {loading ? 'Creating account...' : 'Create Account'}
       </button>

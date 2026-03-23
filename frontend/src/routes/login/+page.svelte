@@ -38,14 +38,14 @@
       {/if}
 
       <div>
-        <label class="text-xs text-zinc-400 block mb-1">Username</label>
-        <input type="text" bind:value={username} required autocomplete="username"
+        <label for="login-username" class="text-xs text-zinc-400 block mb-1">Username</label>
+        <input id="login-username" type="text" bind:value={username} required autocomplete="username"
                class="input" placeholder="Enter username" />
       </div>
 
       <div>
-        <label class="text-xs text-zinc-400 block mb-1">Password</label>
-        <input type="password" bind:value={password} required autocomplete="current-password"
+        <label for="login-password" class="text-xs text-zinc-400 block mb-1">Password</label>
+        <input id="login-password" type="password" bind:value={password} required autocomplete="current-password"
                class="input" placeholder="Enter password" />
       </div>
 

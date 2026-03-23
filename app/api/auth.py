@@ -26,8 +26,8 @@ security = HTTPBearer(auto_error=False)
 # ── Schemas ───────────────────────────────────────────────────────────────────
 
 class RegisterRequest(BaseModel):
-    username: str = Field(min_length=3, max_length=50)
-    email: EmailStr
+    username: str = Field(min_length=1)
+    email: str | None = None
     password: str = Field(min_length=6)
 
 
@@ -106,14 +106,14 @@ async def register(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a new user account."""
-    # Check for duplicates
+    # Check for duplicate username
     existing = await db.execute(
-        select(User).where((User.username == data.username) | (User.email == data.email))
+        select(User).where(User.username == data.username)
     )
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Username or email already taken",
+            detail="Username already taken",
         )
 
     user = User(
