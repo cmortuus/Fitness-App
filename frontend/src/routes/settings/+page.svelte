@@ -2,8 +2,15 @@
   import { onMount } from 'svelte';
   import { settings, latestBodyWeight } from '$lib/stores';
   import type { RestDurations } from '$lib/stores';
-  import { addBodyWeight, deleteBodyWeight, getBodyWeights } from '$lib/api';
+  import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser } from '$lib/api';
   import type { BodyWeightEntry } from '$lib/api';
+
+  const currentUser = getStoredUser();
+
+  function logout() {
+    clearAuthTokens();
+    window.location.href = '/login';
+  }
 
   // ── Rest timer ────────────────────────────────────────────────────────
   const restCategories: {
@@ -395,5 +402,17 @@
         <div class="border-t border-zinc-800"></div>
       {/if}
     {/each}
+  </div>
+
+  <!-- ── Account ──────────────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Account</h3>
+    {#if currentUser}
+      <p class="text-sm text-zinc-400">Signed in as <span class="text-white font-medium">{currentUser.username}</span></p>
+    {/if}
+    <button onclick={logout}
+            class="w-full py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+      Sign Out
+    </button>
   </div>
 </div>

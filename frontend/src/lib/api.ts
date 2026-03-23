@@ -8,11 +8,49 @@ const api = axios.create({
   timeout: 10000,
 });
 
-// Add response interceptor for error handling
+// Attach auth token to every request
+api.interceptors.request.use((config) => {
+  if (typeof localStorage !== 'undefined') {
+    const token = localStorage.getItem('hgt_access_token');
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`;
+    }
+  }
+  return config;
+});
+
+// Handle responses — redirect to login on 401
 api.interceptors.response.use(
   (response) => response,
-  (error: AxiosError) => {
-    if (error.response) {
+  async (error: AxiosError) => {
+    if (error.response?.status === 401 && typeof window !== 'undefined') {
+      // Try refresh token
+      const refreshToken = localStorage.getItem('hgt_refresh_token');
+      if (refreshToken && error.config && !error.config.url?.includes('/auth/')) {
+        try {
+          const r = await axios.post('/api/auth/refresh', { refresh_token: refreshToken });
+          localStorage.setItem('hgt_access_token', r.data.access_token);
+          localStorage.setItem('hgt_refresh_token', r.data.refresh_token);
+          // Retry original request
+          error.config.headers.Authorization = `Bearer ${r.data.access_token}`;
+          return api.request(error.config);
+        } catch {
+          // Refresh failed — clear tokens and redirect
+          localStorage.removeItem('hgt_access_token');
+          localStorage.removeItem('hgt_refresh_token');
+          localStorage.removeItem('hgt_user');
+          window.location.href = '/login';
+          return Promise.reject(error);
+        }
+      }
+      // No refresh token — redirect to login
+      if (!window.location.pathname.startsWith('/login') && !window.location.pathname.startsWith('/signup')) {
+        localStorage.removeItem('hgt_access_token');
+        localStorage.removeItem('hgt_refresh_token');
+        localStorage.removeItem('hgt_user');
+        window.location.href = '/login';
+      }
+    } else if (error.response) {
       console.error('API Error:', error.response.status, error.response.data);
     } else if (error.request) {
       console.error('Network Error: No response received');
@@ -22,6 +60,60 @@ api.interceptors.response.use(
     return Promise.reject(error);
   }
 );
+
+// ── Auth API ─────────────────────────────────────────────────────────────────
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  email: string;
+  created_at: string;
+}
+
+export interface AuthResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  user: AuthUser;
+}
+
+export async function authRegister(data: { username: string; email: string; password: string }): Promise<AuthResponse> {
+  const response = await api.post('/auth/register', data);
+  return response.data;
+}
+
+export async function authLogin(data: { username: string; password: string }): Promise<AuthResponse> {
+  const response = await api.post('/auth/login', data);
+  return response.data;
+}
+
+export async function authGetMe(): Promise<AuthUser> {
+  const response = await api.get('/auth/me');
+  return response.data;
+}
+
+export function saveAuthTokens(auth: AuthResponse): void {
+  localStorage.setItem('hgt_access_token', auth.access_token);
+  localStorage.setItem('hgt_refresh_token', auth.refresh_token);
+  localStorage.setItem('hgt_user', JSON.stringify(auth.user));
+}
+
+export function clearAuthTokens(): void {
+  localStorage.removeItem('hgt_access_token');
+  localStorage.removeItem('hgt_refresh_token');
+  localStorage.removeItem('hgt_user');
+}
+
+export function getStoredUser(): AuthUser | null {
+  if (typeof localStorage === 'undefined') return null;
+  const raw = localStorage.getItem('hgt_user');
+  return raw ? JSON.parse(raw) : null;
+}
+
+export function isAuthenticated(): boolean {
+  if (typeof localStorage === 'undefined') return false;
+  return !!localStorage.getItem('hgt_access_token');
+}
 
 // Types
 export interface Exercise {

@@ -3,7 +3,8 @@
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
   import { activeDietPhase, currentSession, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
-  import { getExercises, getLatestBodyWeight, getPlans, getActivePhase } from '$lib/api';
+  import { getExercises, getLatestBodyWeight, getPlans, getActivePhase, isAuthenticated, getStoredUser, clearAuthTokens } from '$lib/api';
+  import type { AuthUser } from '$lib/api';
 
   const staticNavItems = [
     { path: '/',          label: 'Home',      icon: '🏠' },
@@ -12,8 +13,25 @@
   ];
 
   let { children } = $props<{ children: import('svelte').Snippet }>();
+  let authUser = $state<AuthUser | null>(null);
+  let authChecked = $state(false);
+
+  const PUBLIC_PATHS = ['/login', '/signup'];
 
   onMount(async () => {
+    // Auth check
+    const path = window.location.pathname;
+    if (PUBLIC_PATHS.some(p => path.startsWith(p))) {
+      authChecked = true;
+      return; // Don't load data on auth pages
+    }
+    if (!isAuthenticated()) {
+      window.location.href = '/login';
+      return;
+    }
+    authUser = getStoredUser();
+    authChecked = true;
+
     try {
       const [exercisesData, plansData, latestBW, phase] = await Promise.all([
         getExercises(),
@@ -30,12 +48,27 @@
     }
   });
 
+  function logout() {
+    clearAuthTokens();
+    window.location.href = '/login';
+  }
+
   function isActive(path: string) {
     if (path === '/') return $page.url.pathname === '/';
     return $page.url.pathname.startsWith(path);
   }
 </script>
 
+{#if !authChecked}
+  <div class="min-h-screen flex items-center justify-center bg-zinc-950">
+    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
+  </div>
+{:else if PUBLIC_PATHS.some(p => $page.url.pathname.startsWith(p))}
+  <!-- Auth pages — no nav shell -->
+  <div class="min-h-screen bg-zinc-950">
+    {@render children()}
+  </div>
+{:else}
 <!-- ── Full-height shell ──────────────────────────────────────────────── -->
 <div class="min-h-screen flex flex-col bg-zinc-950">
 
@@ -105,3 +138,4 @@
     {/each}
   </nav>
 </div>
+{/if}
