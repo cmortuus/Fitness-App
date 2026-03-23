@@ -450,5 +450,31 @@ async def seed_exercises() -> None:
             session.add(exercise)
             seeded_count += 1
 
-        await session.commit()
-        print(f"✅ Seeded {seeded_count} default exercises (skipped {skipped_count} duplicates)")
+        try:
+            await session.commit()
+            print(f"✅ Seeded {seeded_count} default exercises (skipped {skipped_count} duplicates)")
+        except Exception:
+            await session.rollback()
+            # Duplicates in DB — seed one-by-one to skip conflicts
+            seeded_count = 0
+            for ex_data in default_exercises:
+                try:
+                    async with async_session_factory() as s2:
+                        existing = await s2.execute(
+                            select(Exercise).where(Exercise.name == ex_data["name"])
+                        )
+                        if existing.scalar_one_or_none():
+                            continue
+                        s2.add(Exercise(
+                            name=ex_data["name"],
+                            display_name=ex_data["display_name"],
+                            movement_type=ex_data["movement_type"],
+                            body_region=ex_data["body_region"],
+                            primary_muscles=ex_data["primary_muscles"],
+                            secondary_muscles=ex_data["secondary_muscles"],
+                        ))
+                        await s2.commit()
+                        seeded_count += 1
+                except Exception:
+                    pass
+            print(f"✅ Seeded {seeded_count} exercises (conflict-safe fallback)")
