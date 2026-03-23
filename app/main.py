@@ -6,7 +6,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import body_weight, diet_phase, exercises, nutrition, plans, progress, sessions, websocket
+from app.api import auth, body_weight, diet_phase, exercises, nutrition, plans, progress, sessions, websocket
 from app.config import get_settings
 from app.database import init_db
 
@@ -41,6 +41,7 @@ app.add_middleware(
 )
 
 # Include API routers
+app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
 app.include_router(exercises.router, prefix="/api/exercises", tags=["exercises"])
 app.include_router(progress.router, prefix="/api/progress", tags=["progress"])

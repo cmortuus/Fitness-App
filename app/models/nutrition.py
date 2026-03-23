@@ -14,6 +14,7 @@ class FoodItem(Base):
     __tablename__ = "food_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     brand: Mapped[str | None] = mapped_column(String(200), nullable=True)
     barcode: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
@@ -38,6 +39,7 @@ class NutritionEntry(Base):
     __table_args__ = (Index("ix_nutrition_entries_date", "date"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     food_item_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("food_items.id", ondelete="SET NULL"), nullable=True
     )
@@ -60,11 +62,12 @@ class MacroGoal(Base):
     __tablename__ = "macro_goals"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     calories: Mapped[float] = mapped_column(Float, nullable=False)
     protein: Mapped[float] = mapped_column(Float, nullable=False)
     carbs: Mapped[float] = mapped_column(Float, nullable=False)
     fat: Mapped[float] = mapped_column(Float, nullable=False)
-    effective_from: Mapped[date_type] = mapped_column(Date, nullable=False, unique=True)
+    effective_from: Mapped[date_type] = mapped_column(Date, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -76,6 +79,7 @@ class DietPhase(Base):
     __tablename__ = "diet_phases"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
     phase_type: Mapped[str] = mapped_column(String(20), nullable=False)
     started_on: Mapped[date_type] = mapped_column(Date, nullable=False)
     duration_weeks: Mapped[int] = mapped_column(Integer, nullable=False)
