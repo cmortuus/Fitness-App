@@ -8,8 +8,10 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.exercise import Exercise
+from app.models.user import User
 from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
 from app.services.progression import compute_overload
 from app.schemas.requests import (
@@ -23,13 +25,18 @@ from app.schemas.requests import (
 router = APIRouter()
 
 
-async def _get_session_with_sets(db: AsyncSession, session_id: int) -> WorkoutSession | None:
+async def _get_session_with_sets(
+    db: AsyncSession, session_id: int, user_id: int | None = None,
+) -> WorkoutSession | None:
     """Fetch a WorkoutSession with its sets eagerly loaded."""
-    result = await db.execute(
+    stmt = (
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
         .where(WorkoutSession.id == session_id)
     )
+    if user_id is not None:
+        stmt = stmt.where(WorkoutSession.user_id == user_id)
+    result = await db.execute(stmt)
     return result.scalar_one_or_none()
 
 
@@ -73,6 +80,7 @@ def serialize_session(workout_session: WorkoutSession) -> dict:
 
 @router.get("/", response_model=list[WorkoutSessionResponse])
 async def list_sessions(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 20,
     offset: int = 0,
@@ -82,6 +90,7 @@ async def list_sessions(
     result = await db.execute(
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
+        .where(WorkoutSession.user_id == user.id)
         .order_by(desc(WorkoutSession.date))
         .limit(limit)
         .offset(offset)
@@ -93,6 +102,7 @@ async def list_sessions(
 @router.post("/", response_model=WorkoutSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_session(
     session_data: WorkoutSessionCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a new workout session."""
@@ -101,16 +111,18 @@ async def create_session(
         name=session_data.name,
         workout_plan_id=session_data.workout_plan_id,
         status=WorkoutStatus.PLANNED,
+        user_id=user.id,
     )
     db.add(workout_session)
     await db.flush()
-    workout_session = await _get_session_with_sets(db, workout_session.id)
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
 
 
 @router.get("/{session_id}", response_model=WorkoutSessionResponse)
 async def get_session(
     session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get a workout session by ID."""
@@ -118,6 +130,7 @@ async def get_session(
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
         .where(WorkoutSession.id == session_id)
+        .where(WorkoutSession.user_id == user.id)
     )
     workout_session = result.scalar_one_or_none()
     if not workout_session:
@@ -131,6 +144,7 @@ async def get_session(
 @router.post("/{session_id}/start", response_model=WorkoutSessionResponse)
 async def start_session(
     session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Start a workout session."""
@@ -138,6 +152,7 @@ async def start_session(
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
         .where(WorkoutSession.id == session_id)
+        .where(WorkoutSession.user_id == user.id)
     )
     workout_session = result.scalar_one_or_none()
     if not workout_session:
@@ -150,6 +165,7 @@ async def start_session(
         select(WorkoutSession).where(
             WorkoutSession.status == WorkoutStatus.IN_PROGRESS,
             WorkoutSession.id != session_id,
+            WorkoutSession.user_id == user.id,
         )
     )
     existing = existing_result.scalars().first()
@@ -166,13 +182,14 @@ async def start_session(
     workout_session.status = WorkoutStatus.IN_PROGRESS
     workout_session.started_at = datetime.now(timezone.utc)
     await db.flush()
-    workout_session = await _get_session_with_sets(db, workout_session.id)
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
 
 
 @router.post("/{session_id}/complete", response_model=WorkoutSessionResponse)
 async def complete_session(
     session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Complete a workout session."""
@@ -180,6 +197,7 @@ async def complete_session(
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
         .where(WorkoutSession.id == session_id)
+        .where(WorkoutSession.user_id == user.id)
     )
     workout_session = result.scalar_one_or_none()
     if not workout_session:
@@ -191,7 +209,7 @@ async def complete_session(
     workout_session.status = WorkoutStatus.COMPLETED
     workout_session.completed_at = datetime.now(timezone.utc)
     await db.flush()
-    workout_session = await _get_session_with_sets(db, workout_session.id)
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
 
 
@@ -199,12 +217,13 @@ async def complete_session(
 async def add_set(
     session_id: int,
     set_data: SetCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Add a set to a workout session."""
-    # Verify session exists
+    # Verify session exists and belongs to user
     result = await db.execute(
-        select(WorkoutSession).where(WorkoutSession.id == session_id)
+        select(WorkoutSession).where(WorkoutSession.id == session_id, WorkoutSession.user_id == user.id)
     )
     if not result.scalar_one_or_none():
         raise HTTPException(
@@ -248,9 +267,19 @@ async def update_set(
     session_id: int,
     set_id: int,
     set_data: SetUpdate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Update a set with actual values."""
+    # Verify session belongs to user
+    sess_result = await db.execute(
+        select(WorkoutSession).where(WorkoutSession.id == session_id, WorkoutSession.user_id == user.id)
+    )
+    if not sess_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
     result = await db.execute(
         select(ExerciseSet).where(
             ExerciseSet.id == set_id,
@@ -294,9 +323,19 @@ async def update_set(
 async def delete_set(
     session_id: int,
     set_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a set from a workout session."""
+    # Verify session belongs to user
+    sess_result = await db.execute(
+        select(WorkoutSession).where(WorkoutSession.id == session_id, WorkoutSession.user_id == user.id)
+    )
+    if not sess_result.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
     result = await db.execute(
         select(ExerciseSet).where(
             ExerciseSet.id == set_id,
@@ -336,11 +375,12 @@ async def delete_set(
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_session(
     session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a workout session and all its sets (cancel an in-progress session)."""
     result = await db.execute(
-        select(WorkoutSession).where(WorkoutSession.id == session_id)
+        select(WorkoutSession).where(WorkoutSession.id == session_id, WorkoutSession.user_id == user.id)
     )
     workout_session = result.scalar_one_or_none()
     if not workout_session:
@@ -355,6 +395,7 @@ async def delete_session(
 @router.post("/from-plan/{plan_id}", response_model=WorkoutSessionResponse, status_code=status.HTTP_201_CREATED)
 async def create_session_from_plan(
     plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     day_number: int = 1,
     overload_style: str = "rep",
@@ -365,7 +406,7 @@ async def create_session_from_plan(
 
     # Get the plan
     result = await db.execute(
-        select(WorkoutPlan).where(WorkoutPlan.id == plan_id)
+        select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id)
     )
     plan = result.scalar_one_or_none()
     if not plan:
@@ -406,7 +447,7 @@ async def create_session_from_plan(
     # Use .scalars().first() (not scalar_one_or_none) so pre-existing dirty data
     # with multiple in-progress sessions doesn't cause a MultipleResultsFound crash.
     existing_result = await db.execute(
-        select(WorkoutSession).where(WorkoutSession.status == WorkoutStatus.IN_PROGRESS)
+        select(WorkoutSession).where(WorkoutSession.status == WorkoutStatus.IN_PROGRESS, WorkoutSession.user_id == user.id)
     )
     existing = existing_result.scalars().first()
     if existing:
@@ -433,6 +474,7 @@ async def create_session_from_plan(
             WorkoutSession.workout_plan_id == plan_id,
             WorkoutSession.name == f"{plan.name} - {day_name}",
             WorkoutSession.id.in_(sessions_with_data),
+            WorkoutSession.user_id == user.id,
         )
         .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id))
         .limit(1)
@@ -574,6 +616,7 @@ async def create_session_from_plan(
         name=f"{plan.name} - {day_name}",
         workout_plan_id=plan_id,
         status=WorkoutStatus.PLANNED,
+        user_id=user.id,
     )
     db.add(workout_session)
     await db.flush()

@@ -45,6 +45,23 @@ async def setup_db():
 
 @pytest_asyncio.fixture
 async def client():
+    """Authenticated test client — registers a test user and includes auth header."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
+        # Register test user and get token
+        r = await c.post("/api/auth/register", json={
+            "username": "testrunner",
+            "email": "testrunner@test.com",
+            "password": "testpass123",
+        })
+        assert r.status_code == 201, f"Failed to register test user: {r.text}"
+        token = r.json()["access_token"]
+        c.headers["Authorization"] = f"Bearer {token}"
+        yield c
+
+
+@pytest_asyncio.fixture
+async def raw_client():
+    """Unauthenticated client for testing auth endpoints."""
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
         yield c
 

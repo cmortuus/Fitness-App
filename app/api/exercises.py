@@ -6,8 +6,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.exercise import Exercise
+from app.models.user import User
 from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession
 from app.schemas.requests import ExerciseCreate, ExerciseResponse
 
@@ -16,6 +18,7 @@ router = APIRouter()
 
 @router.get("/", response_model=list[ExerciseResponse])
 async def list_exercises(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """List all available exercises."""
@@ -43,6 +46,7 @@ async def list_exercises(
 @router.get("/{exercise_id}", response_model=ExerciseResponse)
 async def get_exercise(
     exercise_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get an exercise by ID."""
@@ -70,6 +74,7 @@ async def get_exercise(
 @router.post("/", response_model=ExerciseResponse, status_code=status.HTTP_201_CREATED)
 async def create_exercise(
     exercise_data: ExerciseCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a new exercise definition."""
@@ -104,6 +109,7 @@ async def create_exercise(
 @router.get("/{exercise_id}/history")
 async def get_exercise_history(
     exercise_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 10,
 ) -> list[dict]:
@@ -127,6 +133,7 @@ async def get_exercise_history(
             (ExerciseSet.actual_reps.is_not(None))
             | (ExerciseSet.reps_left.is_not(None))
             | (ExerciseSet.reps_right.is_not(None)),
+            WorkoutSession.user_id == user.id,
         )
         .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id), ExerciseSet.set_number)
     )
@@ -196,6 +203,7 @@ async def get_exercise_history(
 @router.delete("/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_exercise(
     exercise_id: int,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete an exercise definition."""

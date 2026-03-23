@@ -240,15 +240,15 @@ class TestPerSetIndependence:
 
         # Set 1: hit target (8 reps) → progress to 9 reps at same weight
         assert s2_by_num[1]["planned_reps"] == 9,        f"Set 1: expected 9, got {s2_by_num[1]['planned_reps']}"
-        assert s2_by_num[1]["planned_weight_kg"] == 100.0, f"Set 1: expected 100.0 kg"
+        assert s2_by_num[1]["planned_weight_kg"] == 100.0, "Set 1: expected 100.0 kg"
 
         # Set 2: missed target (7 < 8) → retry at same weight, re-attempt planned target
         assert s2_by_num[2]["planned_reps"] == 8,        f"Set 2: expected 8, got {s2_by_num[2]['planned_reps']}"
-        assert s2_by_num[2]["planned_weight_kg"] == 100.0, f"Set 2: expected 100.0 kg"
+        assert s2_by_num[2]["planned_weight_kg"] == 100.0, "Set 2: expected 100.0 kg"
 
         # Set 3: missed target (6 < 8) → retry at same weight, re-attempt planned target
         assert s2_by_num[3]["planned_reps"] == 8,        f"Set 3: expected 8, got {s2_by_num[3]['planned_reps']}"
-        assert s2_by_num[3]["planned_weight_kg"] == 100.0, f"Set 3: expected 100.0 kg"
+        assert s2_by_num[3]["planned_weight_kg"] == 100.0, "Set 3: expected 100.0 kg"
 
     async def test_extra_set_falls_back_gracefully(self, client: AsyncClient):
         """If week 2 has more sets than week 1, extra sets fall back to the last available."""

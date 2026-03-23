@@ -19,6 +19,7 @@ export interface UserProfile {
 export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
+  heightUnit: 'in' | 'ft' | 'cm';  // in=inches, ft=feet+inches, cm=centimeters
   progressionStyle: 'rep' | 'weight';  // prefer rep overload vs immediate weight overload
   profile: UserProfile;
 }
@@ -33,6 +34,7 @@ const defaultSettings: AppSettings = {
     lowerIsolation: 120,
   },
   weightUnit: 'lbs',
+  heightUnit: 'ft',
   progressionStyle: 'rep',
   profile: {
     age: null,

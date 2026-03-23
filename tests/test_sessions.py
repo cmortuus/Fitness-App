@@ -112,6 +112,10 @@ class TestSessionLifecycle:
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
 
+        # Get the authenticated user's ID
+        me = await client.get("/api/auth/me")
+        user_id = me.json()["id"]
+
         # Bypass the guard by inserting two IN_PROGRESS sessions directly into the DB
         for i in range(2):
             db.add(WorkoutSession(
@@ -119,6 +123,7 @@ class TestSessionLifecycle:
                 date=date.today(),
                 status=WorkoutStatus.IN_PROGRESS,
                 workout_plan_id=plan["id"],
+                user_id=user_id,
             ))
         await db.commit()
 

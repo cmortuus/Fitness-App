@@ -7,9 +7,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
 from app.models.nutrition import DietPhase, MacroGoal
+from app.models.user import User
 from app.schemas.requests import DietPhaseCreate
 from app.services.diet_phase import (
     calculate_macros,
@@ -44,18 +46,18 @@ def serialize_phase(phase: DietPhase, extra: dict | None = None) -> dict:
     return data
 
 
-async def _get_weight_entries(db: AsyncSession, days: int = 14) -> list[BodyWeightEntry]:
+async def _get_weight_entries(db: AsyncSession, user_id: int, days: int = 14) -> list[BodyWeightEntry]:
     """Fetch recent body weight entries."""
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
     result = await db.execute(
         select(BodyWeightEntry)
-        .where(BodyWeightEntry.recorded_at >= cutoff)
+        .where(BodyWeightEntry.recorded_at >= cutoff, BodyWeightEntry.user_id == user_id)
         .order_by(desc(BodyWeightEntry.recorded_at))
     )
     return list(result.scalars().all())
 
 
-async def _build_phase_status(phase: DietPhase, db: AsyncSession) -> dict:
+async def _build_phase_status(phase: DietPhase, db: AsyncSession, user_id: int) -> dict:
     """Build the full status response for a phase."""
     today = datetime.now(timezone.utc).date()
     days_in = (today - phase.started_on).days
@@ -63,7 +65,7 @@ async def _build_phase_status(phase: DietPhase, db: AsyncSession) -> dict:
     weeks_remaining = max(0, phase.duration_weeks - current_week)
 
     # Weight data
-    entries = await _get_weight_entries(db, days=21)
+    entries = await _get_weight_entries(db, user_id=user_id, days=21)
     current_avg = weight_trend(entries, window=7)
 
     # Split entries into this week and last week for adjustment calc
@@ -108,10 +110,10 @@ async def _build_phase_status(phase: DietPhase, db: AsyncSession) -> dict:
     })
 
 
-async def _upsert_goal(db: AsyncSession, macros: dict, effective: date) -> None:
+async def _upsert_goal(db: AsyncSession, macros: dict, effective: date, user_id: int) -> None:
     """Create or update a MacroGoal for the given date."""
     result = await db.execute(
-        select(MacroGoal).where(MacroGoal.effective_from == effective)
+        select(MacroGoal).where(MacroGoal.effective_from == effective, MacroGoal.user_id == user_id)
     )
     goal = result.scalar_one_or_none()
     if goal:
@@ -126,6 +128,7 @@ async def _upsert_goal(db: AsyncSession, macros: dict, effective: date) -> None:
             carbs=macros["carbs"],
             fat=macros["fat"],
             effective_from=effective,
+            user_id=user_id,
         ))
     await db.flush()
 
@@ -135,6 +138,7 @@ async def _upsert_goal(db: AsyncSession, macros: dict, effective: date) -> None:
 @router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_phase(
     data: DietPhaseCreate,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Start a new diet phase. Deactivates any existing active phase."""
@@ -142,7 +146,7 @@ async def create_phase(
 
     # Get starting weight
     bw_result = await db.execute(
-        select(BodyWeightEntry).order_by(desc(BodyWeightEntry.recorded_at)).limit(1)
+        select(BodyWeightEntry).where(BodyWeightEntry.user_id == user.id).order_by(desc(BodyWeightEntry.recorded_at)).limit(1)
     )
     latest_bw = bw_result.scalar_one_or_none()
     if not latest_bw:
@@ -153,7 +157,7 @@ async def create_phase(
 
     # Deactivate any existing active phase
     active_result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     for p in active_result.scalars().all():
         p.is_active = False
@@ -172,6 +176,7 @@ async def create_phase(
         body_fat_pct=data.body_fat_pct,
         protein_per_lb=data.protein_per_lb,
         is_active=True,
+        user_id=user.id,
     )
     db.add(phase)
     await db.flush()
@@ -187,50 +192,53 @@ async def create_phase(
         body_fat_pct=data.body_fat_pct,
         protein_per_lb=data.protein_per_lb,
     )
-    await _upsert_goal(db, macros, today)
+    await _upsert_goal(db, macros, today, user_id=user.id)
 
-    return await _build_phase_status(phase, db)
+    return await _build_phase_status(phase, db, user_id=user.id)
 
 
 @router.get("/active")
 async def get_active_phase(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict | None:
     """Get the active diet phase with current status."""
     result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     phase = result.scalar_one_or_none()
     if not phase:
         return None
-    return await _build_phase_status(phase, db)
+    return await _build_phase_status(phase, db, user_id=user.id)
 
 
 @router.get("/")
 async def list_phases(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """List all phases (history)."""
     result = await db.execute(
-        select(DietPhase).order_by(desc(DietPhase.started_on))
+        select(DietPhase).where(DietPhase.user_id == user.id).order_by(desc(DietPhase.started_on))
     )
     return [serialize_phase(p) for p in result.scalars().all()]
 
 
 @router.post("/active/recalculate")
 async def recalculate_phase(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     apply: bool = False,
 ) -> dict:
     """Recalculate weekly targets based on current weight trend."""
     result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     phase = result.scalar_one_or_none()
     if not phase:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active phase")
 
-    status_data = await _build_phase_status(phase, db)
+    status_data = await _build_phase_status(phase, db, user_id=user.id)
 
     if apply and status_data.get("current_weight_kg"):
         # Recalculate macros based on current weight
@@ -250,7 +258,7 @@ async def recalculate_phase(
             macros["calories"] = max(1200, macros["calories"] + cal_adj)
 
         today = datetime.now(timezone.utc).date()
-        await _upsert_goal(db, macros, today)
+        await _upsert_goal(db, macros, today, user_id=user.id)
         status_data["current_goals"] = {k: macros[k] for k in ("calories", "protein", "carbs", "fat")}
 
     return status_data
@@ -258,11 +266,12 @@ async def recalculate_phase(
 
 @router.delete("/active", status_code=status.HTTP_204_NO_CONTENT)
 async def end_phase(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """End the active phase."""
     result = await db.execute(
-        select(DietPhase).where(DietPhase.is_active == True)
+        select(DietPhase).where(DietPhase.is_active.is_(True), DietPhase.user_id == user.id)
     )
     phase = result.scalar_one_or_none()
     if not phase:

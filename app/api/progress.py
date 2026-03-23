@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
 from app.models.exercise import Exercise
 from app.models.nutrition import MacroGoal, NutritionEntry
+from app.models.user import User
 from app.models.workout import ExerciseSet, WorkoutSession, WorkoutStatus
 
 router = APIRouter()
@@ -18,6 +20,7 @@ router = APIRouter()
 
 @router.get("/")
 async def get_progress(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     exercise_id: int | None = Query(None, description="Filter by exercise ID"),
     start_date: date | None = Query(None, description="Start date for progress"),
@@ -43,6 +46,7 @@ async def get_progress(
             WorkoutSession.status == WorkoutStatus.COMPLETED,
             WorkoutSession.date >= start_date,
             WorkoutSession.date <= end_date,
+            WorkoutSession.user_id == user.id,
         )
         .order_by(WorkoutSession.date, WorkoutSession.id)
     )
@@ -123,6 +127,7 @@ async def get_progress(
 
 @router.get("/recommendations")
 async def get_recommendations(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
     days_back: int = Query(30, description="Number of days to analyze"),
 ) -> list[dict]:
@@ -135,6 +140,7 @@ async def get_recommendations(
         select(WorkoutSession).where(
             WorkoutSession.status == WorkoutStatus.COMPLETED,
             WorkoutSession.date >= start_date,
+            WorkoutSession.user_id == user.id,
         )
     )
     sessions = sessions_result.scalars().all()
@@ -220,6 +226,7 @@ async def get_recommendations(
 
 @router.get("/insights")
 async def get_insights(
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """Generate actionable fitness + nutrition insights for the past 7 days."""
@@ -229,7 +236,7 @@ async def get_insights(
 
     # 1. Protein adherence
     goal_result = await db.execute(
-        select(MacroGoal).where(MacroGoal.effective_from <= today)
+        select(MacroGoal).where(MacroGoal.effective_from <= today, MacroGoal.user_id == user.id)
         .order_by(desc(MacroGoal.effective_from)).limit(1)
     )
     goal = goal_result.scalar_one_or_none()
@@ -238,7 +245,7 @@ async def get_insights(
         for i in range(7):
             d = today - timedelta(days=i)
             result = await db.execute(
-                select(func.sum(NutritionEntry.protein)).where(NutritionEntry.date == d)
+                select(func.sum(NutritionEntry.protein)).where(NutritionEntry.date == d, NutritionEntry.user_id == user.id)
             )
             total = result.scalar() or 0
             if total >= goal.protein * 0.9:  # within 90% of target
@@ -254,7 +261,7 @@ async def get_insights(
         for i in range(7):
             d = today - timedelta(days=i)
             result = await db.execute(
-                select(func.sum(NutritionEntry.calories)).where(NutritionEntry.date == d)
+                select(func.sum(NutritionEntry.calories)).where(NutritionEntry.date == d, NutritionEntry.user_id == user.id)
             )
             total = result.scalar() or 0
             if total > 0 and abs(total - goal.calories) <= goal.calories * 0.1:
@@ -267,6 +274,7 @@ async def get_insights(
         select(func.count(WorkoutSession.id))
         .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
         .where(WorkoutSession.completed_at.isnot(None))
+        .where(WorkoutSession.user_id == user.id)
     )
     workout_count = ws_result.scalar() or 0
     if workout_count >= 4:
@@ -278,6 +286,7 @@ async def get_insights(
     bw_result = await db.execute(
         select(BodyWeightEntry)
         .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(BodyWeightEntry.user_id == user.id)
         .order_by(BodyWeightEntry.recorded_at)
     )
     bw_entries = bw_result.scalars().all()
@@ -300,6 +309,7 @@ async def get_insights(
         .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
+        .where(WorkoutSession.user_id == user.id)
     )
     # Group by exercise, find max estimated 1RM
     exercise_maxes: dict[str, float] = {}
@@ -318,6 +328,7 @@ async def get_insights(
         .where(WorkoutSession.started_at < datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
+        .where(WorkoutSession.user_id == user.id)
     )
     prev_maxes: dict[str, float] = {}
     for s, name in prev_sets.all():
