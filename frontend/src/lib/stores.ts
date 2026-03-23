@@ -9,10 +9,18 @@ export interface RestDurations {
   lowerIsolation: number;  // e.g. leg curl, leg extension  → default 2 min
 }
 
+export interface UserProfile {
+  age: number | null;
+  sex: 'male' | 'female' | null;
+  heightIn: number | null;       // height in inches
+  activityLevel: number;          // 1.0-1.8 multiplier
+}
+
 export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
   progressionStyle: 'rep' | 'weight';  // prefer rep overload vs immediate weight overload
+  profile: UserProfile;
 }
 
 const SETTINGS_KEY = 'hgt_settings';
@@ -26,6 +34,12 @@ const defaultSettings: AppSettings = {
   },
   weightUnit: 'lbs',
   progressionStyle: 'rep',
+  profile: {
+    age: null,
+    sex: null,
+    heightIn: null,
+    activityLevel: 1.4,
+  },
 };
 
 function loadSettings(): AppSettings {

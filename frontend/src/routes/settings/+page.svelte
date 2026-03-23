@@ -106,6 +106,63 @@
 <div class="space-y-6 max-w-2xl p-6">
   <h2 class="text-2xl font-bold">Settings</h2>
 
+  <!-- ── Profile ─────────────────────────────────────────────────────── -->
+  <div class="card space-y-4">
+    <div>
+      <h3 class="text-lg font-semibold">Profile</h3>
+      <p class="text-sm text-zinc-400 mt-1">Used for TDEE estimates and macro calculations.</p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-3">
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Age</label>
+        <input type="number" min="13" max="100" placeholder="—"
+               value={$settings.profile.age ?? ''}
+               onchange={(e) => settings.update(s => ({ ...s, profile: { ...s.profile, age: e.currentTarget.value ? Number(e.currentTarget.value) : null } }))}
+               class="input text-center" />
+      </div>
+      <div>
+        <label class="text-xs text-zinc-400 block mb-1">Sex</label>
+        <div class="flex gap-2">
+          {#each [['male', 'Male'], ['female', 'Female']] as [val, label]}
+            <button onclick={() => settings.update(s => ({ ...s, profile: { ...s.profile, sex: val as any } }))}
+                    class="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors
+                           {$settings.profile.sex === val ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+              {label}
+            </button>
+          {/each}
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <label class="text-xs text-zinc-400 block mb-1">Height</label>
+      <div class="flex gap-2 items-center">
+        <input type="number" min="48" max="96" placeholder="—"
+               value={$settings.profile.heightIn ?? ''}
+               onchange={(e) => settings.update(s => ({ ...s, profile: { ...s.profile, heightIn: e.currentTarget.value ? Number(e.currentTarget.value) : null } }))}
+               class="input text-center w-24" />
+        <span class="text-sm text-zinc-500">inches</span>
+        {#if $settings.profile.heightIn}
+          <span class="text-xs text-zinc-600">({Math.floor($settings.profile.heightIn / 12)}'{$settings.profile.heightIn % 12}")</span>
+        {/if}
+      </div>
+    </div>
+
+    <div>
+      <label class="text-xs text-zinc-400 block mb-1">Activity Level</label>
+      <div class="space-y-1">
+        {#each [[1.0, 'Sedentary'], [1.2, 'Light (1-2x/wk)'], [1.4, 'Moderate (3-4x/wk)'], [1.6, 'Active (5-6x/wk)'], [1.8, 'Very Active']] as [val, label]}
+          <button onclick={() => settings.update(s => ({ ...s, profile: { ...s.profile, activityLevel: val as number } }))}
+                  class="w-full text-left px-3 py-2 rounded-lg text-sm transition-colors
+                         {$settings.profile.activityLevel === val ? 'bg-primary-600/20 text-primary-400 font-medium' : 'text-zinc-400 hover:bg-zinc-800'}">
+            {label}
+          </button>
+        {/each}
+      </div>
+    </div>
+  </div>
+
   <!-- ── Weight Unit ─────────────────────────────────────────────────── -->
   <div class="card space-y-4">
     <div>
