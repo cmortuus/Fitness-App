@@ -80,16 +80,11 @@
 
   onMount(async () => {
     try {
-      // Use direct fetch since axios has issues
-      const [exRes, recentRes, groupedRes] = await Promise.all([
-        fetch('/api/exercises/'),
-        fetch('/api/plans/exercises/recent?limit=15'),
-        fetch('/api/plans/exercises/grouped'),
+      const [exercisesData, recentData, groupedData] = await Promise.all([
+        getExercises(),
+        getRecentExercises(15),
+        getExercisesGrouped(),
       ]);
-
-      const exercisesData = await exRes.json();
-      const recentData = await recentRes.json();
-      const groupedData = await groupedRes.json();
 
       exercises.set(exercisesData);
       allExercises = exercisesData;
@@ -452,13 +447,9 @@
             class="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-500"
             onclick={async () => {
               try {
-                const res = await fetch('/api/exercises/');
-                const data = await res.json();
-                allExercises = data;
-                const groupedRes = await fetch('/api/plans/exercises/grouped');
-                groupedExercises = await groupedRes.json();
-                const recentRes = await fetch('/api/plans/exercises/recent?limit=15');
-                recentExercises = await recentRes.json();
+                allExercises = await getExercises();
+                groupedExercises = await getExercisesGrouped();
+                recentExercises = await getRecentExercises(15);
                 initialized = true;
               } catch (e) {
                 alert('Failed: ' + (e instanceof Error ? e.message : String(e)));
@@ -667,12 +658,10 @@
                 if (!confirm(`Delete "${configuringExercise.exercise.display_name}"? This cannot be undone.`)) return;
                 try {
                   await deleteExercise(configuringExercise.exercise.id);
-                  const [exRes, groupedRes] = await Promise.all([
-                    fetch('/api/exercises/'),
-                    fetch('/api/plans/exercises/grouped'),
+                  const [exercisesData, groupedData] = await Promise.all([
+                    getExercises(),
+                    getExercisesGrouped(),
                   ]);
-                  const exercisesData = await exRes.json();
-                  const groupedData = await groupedRes.json();
                   exercises.set(exercisesData);
                   allExercises = exercisesData;
                   groupedExercises = groupedData;
@@ -757,12 +746,10 @@
                           try {
                             await deleteExercise(exercise.id);
                             // Refresh exercises list
-                            const [exRes, groupedRes] = await Promise.all([
-                              fetch('/api/exercises/'),
-                              fetch('/api/plans/exercises/grouped'),
+                            const [exercisesData, groupedData] = await Promise.all([
+                              getExercises(),
+                              getExercisesGrouped(),
                             ]);
-                            const exercisesData = await exRes.json();
-                            const groupedData = await groupedRes.json();
                             exercises.set(exercisesData);
                             allExercises = exercisesData;
                             groupedExercises = groupedData;
@@ -806,13 +793,13 @@
                             if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
                             try {
                               await deleteExercise(exercise.id);
-                              const [exRes, groupedRes] = await Promise.all([
-                                fetch('/api/exercises/'),
-                                fetch('/api/plans/exercises/grouped'),
+                              const [exercisesData, groupedData] = await Promise.all([
+                                getExercises(),
+                                getExercisesGrouped(),
                               ]);
-                              exercises.set(await exRes.json());
-                              allExercises = await exRes.json();
-                              groupedExercises = await groupedRes.json();
+                              exercises.set(exercisesData);
+                              allExercises = exercisesData;
+                              groupedExercises = groupedData;
                             } catch (error) {
                               alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
                             }
@@ -864,13 +851,13 @@
                                     if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
                                     try {
                                       await deleteExercise(exercise.id);
-                                      const [exRes, groupedRes] = await Promise.all([
-                                        fetch('/api/exercises/'),
-                                        fetch('/api/plans/exercises/grouped'),
+                                      const [exercisesData, groupedData] = await Promise.all([
+                                        getExercises(),
+                                        getExercisesGrouped(),
                                       ]);
-                                      exercises.set(await exRes.json());
-                                      allExercises = await exRes.json();
-                                      groupedExercises = await groupedRes.json();
+                                      exercises.set(exercisesData);
+                                      allExercises = exercisesData;
+                                      groupedExercises = groupedData;
                                     } catch (error) {
                                       alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
                                     }
