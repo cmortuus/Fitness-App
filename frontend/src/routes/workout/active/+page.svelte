@@ -1272,22 +1272,20 @@
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
                     style="grid-template-columns: 1.75rem 1fr 1fr 1fr 3rem"
                   >
-                    <button
-                      onclick={() => {
-                        const types = ['standard', 'myo_rep', 'myo_rep_match', 'drop_set'];
-                        const idx = types.indexOf(set.setType || 'standard');
-                        set.setType = types[(idx + 1) % types.length];
-                        uiExercises = [...uiExercises];
-                      }}
+                    <select
+                      value={set.setType || 'standard'}
+                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
                       disabled={set.done}
-                      title={set.setType === 'myo_rep' ? 'Myo Reps' : set.setType === 'myo_rep_match' ? 'Myo Match' : set.setType === 'drop_set' ? 'Drop Set' : 'Standard (tap to change)'}
-                      class="text-xs text-center font-mono w-7 h-7 rounded-md transition-colors
+                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer appearance-none text-center w-12 py-1 rounded-md transition-colors
                              {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
                               set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
                               set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
-                              'text-zinc-400 hover:bg-zinc-800'}">
-                      {set.setNumber}
-                    </button>
+                              'text-zinc-500'}">
+                      <option value="standard">S{set.setNumber}</option>
+                      <option value="myo_rep">Myo</option>
+                      <option value="myo_rep_match">MyoM</option>
+                      <option value="drop_set">Drop</option>
+                    </select>
 
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
@@ -1433,22 +1431,20 @@
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
                     style="grid-template-columns: 1.75rem 1fr 1fr 3rem"
                   >
-                    <button
-                      onclick={() => {
-                        const types = ['standard', 'myo_rep', 'myo_rep_match', 'drop_set'];
-                        const idx = types.indexOf(set.setType || 'standard');
-                        set.setType = types[(idx + 1) % types.length];
-                        uiExercises = [...uiExercises];
-                      }}
+                    <select
+                      value={set.setType || 'standard'}
+                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
                       disabled={set.done}
-                      title={set.setType === 'myo_rep' ? 'Myo Reps' : set.setType === 'myo_rep_match' ? 'Myo Match' : set.setType === 'drop_set' ? 'Drop Set' : 'Standard (tap to change)'}
-                      class="text-xs text-center font-mono w-7 h-7 rounded-md transition-colors
+                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer appearance-none text-center w-12 py-1 rounded-md transition-colors
                              {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
                               set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
                               set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
-                              'text-zinc-400 hover:bg-zinc-800'}">
-                      {set.setNumber}
-                    </button>
+                              'text-zinc-500'}">
+                      <option value="standard">S{set.setNumber}</option>
+                      <option value="myo_rep">Myo</option>
+                      <option value="myo_rep_match">MyoM</option>
+                      <option value="drop_set">Drop</option>
+                    </select>
 
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
