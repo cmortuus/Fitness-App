@@ -1489,7 +1489,7 @@
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
                       <input
-                        type="number" inputmode="numeric"
+                        type="number" inputmode="decimal"
                         value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
                         oninput={(e) => {
                           const raw = (e.target as HTMLInputElement).value;
@@ -1534,7 +1534,7 @@
 
                     <!-- Left reps -->
                     <input
-                      type="number" inputmode="numeric"
+                      type="number" inputmode="decimal"
                       value={set.repsLeft ?? ''}
                       oninput={(e) => {
                         const v = (e.target as HTMLInputElement).value;
@@ -1557,7 +1557,7 @@
 
                     <!-- Right reps -->
                     <input
-                      type="number" inputmode="numeric"
+                      type="number" inputmode="decimal"
                       value={set.repsRight ?? ''}
                       oninput={(e) => {
                         const v = (e.target as HTMLInputElement).value;
@@ -1632,7 +1632,7 @@
                     {#each set.drops as drop, di}
                       <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
                         <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
-                        <input type="number" inputmode="numeric" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
+                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
                         <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
                       </div>
                     {/each}
@@ -1675,7 +1675,7 @@
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
                       <input
-                        type="number" inputmode="numeric"
+                        type="number" inputmode="decimal"
                         value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
                         oninput={(e) => {
                           const raw = (e.target as HTMLInputElement).value;
@@ -1716,7 +1716,7 @@
 
                     <!-- Reps -->
                     <input
-                      type="number" inputmode="numeric"
+                      type="number" inputmode="decimal"
                       value={set.reps ?? ''}
                       oninput={(e) => {
                         const v = (e.target as HTMLInputElement).value;
@@ -1791,7 +1791,7 @@
                     {#each set.drops as drop, di}
                       <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
                         <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
-                        <input type="number" inputmode="numeric" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
+                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
                         <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
                       </div>
                     {/each}
