@@ -18,18 +18,19 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: "pip"
 
       - name: Install dependencies
         run: |
           pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -e .
           pip install pytest pytest-asyncio httpx
 
       - name: Run tests
         env:
           PYTHONPATH: .
+          JWT_SECRET_KEY: test-secret-for-ci-only
         run: pytest tests/ -v --tb=short
 
   lint:
@@ -43,7 +44,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
           cache: "pip"
 
       - name: Install ruff

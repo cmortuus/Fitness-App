@@ -29,6 +29,7 @@ jobs:
           python -m venv venv
           source venv/bin/activate
           pip install -e .
+          pip install pytest pytest-asyncio httpx
 
       - name: Run Alembic migrations
         run: |
