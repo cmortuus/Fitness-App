@@ -1489,7 +1489,7 @@
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
                       <input
-                        type="number" inputmode="numeric" inputmode="numeric"
+                        type="number" inputmode="numeric"
                         value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
                         oninput={(e) => {
                           const raw = (e.target as HTMLInputElement).value;
@@ -1675,7 +1675,7 @@
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
                       <input
-                        type="number" inputmode="numeric" inputmode="numeric"
+                        type="number" inputmode="numeric"
                         value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
                         oninput={(e) => {
                           const raw = (e.target as HTMLInputElement).value;
