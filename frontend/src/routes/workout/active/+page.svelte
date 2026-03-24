@@ -1022,6 +1022,12 @@
       </div>
     {/if}
 
+    <a href="/plans/templates"
+       class="block w-full py-4 text-center text-sm text-primary-400 hover:text-primary-300
+              hover:bg-primary-500/10 rounded-2xl transition-colors border border-primary-500/20">
+      Browse Template Programs
+    </a>
+
     <button onclick={startFreeSession}
             class="w-full py-4 text-sm text-zinc-500 hover:text-zinc-300
                    hover:bg-zinc-800/50 rounded-2xl transition-colors border border-zinc-800/60">

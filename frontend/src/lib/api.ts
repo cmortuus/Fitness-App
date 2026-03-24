@@ -683,4 +683,43 @@ export async function endPhase(): Promise<void> {
   await api.delete('/nutrition/phases/active');
 }
 
+// ── Workout Templates ────────────────────────────────────────────────────────
+
+export interface WorkoutTemplateDay {
+  day_number: number;
+  day_name: string;
+  exercises: { exercise_id: number; sets: number; reps: number; starting_weight_kg: number; progression_type: string }[];
+}
+
+export interface WorkoutTemplate {
+  id: number;
+  name: string;
+  split_type: string;
+  days_per_week: number;
+  equipment_tier: string;
+  description: string;
+  block_type: string;
+  exercise_count: number;
+  days: WorkoutTemplateDay[];
+}
+
+export async function getTemplates(params?: {
+  split_type?: string;
+  equipment_tier?: string;
+  days_per_week?: number;
+}): Promise<WorkoutTemplate[]> {
+  const response = await api.get('/templates/', { params });
+  return response.data;
+}
+
+export async function getTemplate(id: number): Promise<WorkoutTemplate> {
+  const response = await api.get(`/templates/${id}`);
+  return response.data;
+}
+
+export async function cloneTemplate(id: number): Promise<{ id: number; name: string; message: string }> {
+  const response = await api.post(`/templates/${id}/clone`);
+  return response.data;
+}
+
 export default api;

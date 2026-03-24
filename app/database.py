@@ -62,6 +62,12 @@ async def init_db() -> None:
     except Exception as e:
         print(f"⚠️ Exercise seeding failed (non-fatal): {e}")
 
+    # Seed workout templates
+    try:
+        await seed_templates()
+    except Exception as e:
+        print(f"⚠️ Template seeding failed (non-fatal): {e}")
+
 
 async def seed_exercises() -> None:
     """Seed database with default exercises if empty."""
@@ -566,3 +572,66 @@ async def seed_exercises() -> None:
                 except Exception:
                     pass
             print(f"✅ Seeded {seeded_count} exercises (conflict-safe fallback)")
+
+
+async def seed_templates() -> None:
+    """Seed workout templates if the table is empty."""
+    import json
+    from app.models.template import WorkoutTemplate
+    from app.models.exercise import Exercise
+    from app.data.templates import TEMPLATES
+
+    async with async_session_factory() as session:
+        result = await session.execute(select(WorkoutTemplate).limit(1))
+        if result.scalar_one_or_none():
+            return  # Already seeded
+
+        # Build exercise name → id lookup
+        ex_result = await session.execute(select(Exercise))
+        exercises = {e.name: e.id for e in ex_result.scalars().all()}
+
+        seeded = 0
+        for tmpl in TEMPLATES:
+            # Resolve exercise names to IDs
+            days = []
+            valid = True
+            for day in tmpl["days"]:
+                resolved = []
+                for ex in day["exercises"]:
+                    ex_id = exercises.get(ex["exercise"])
+                    if not ex_id:
+                        print(f"  ⚠️ Template '{tmpl['name']}': exercise '{ex['exercise']}' not found, skipping template")
+                        valid = False
+                        break
+                    resolved.append({
+                        "exercise_id": ex_id,
+                        "sets": ex["sets"],
+                        "reps": ex["reps"],
+                        "starting_weight_kg": 0,
+                        "progression_type": "linear",
+                    })
+                if not valid:
+                    break
+                days.append({
+                    "day_number": day["day_number"],
+                    "day_name": day["day_name"],
+                    "exercises": resolved,
+                })
+
+            if not valid:
+                continue
+
+            planned = json.dumps({"number_of_days": tmpl["days_per_week"], "days": days})
+            session.add(WorkoutTemplate(
+                name=tmpl["name"],
+                split_type=tmpl["split_type"],
+                days_per_week=tmpl["days_per_week"],
+                equipment_tier=tmpl["equipment_tier"],
+                description=tmpl.get("description", ""),
+                planned_exercises=planned,
+                block_type=tmpl.get("block_type", "hypertrophy"),
+            ))
+            seeded += 1
+
+        await session.commit()
+        print(f"✅ Seeded {seeded} workout templates")
