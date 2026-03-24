@@ -300,7 +300,7 @@ class CarbPreset(str, Enum):
 class DietPhaseCreate(BaseModel):
     phase_type: PhaseType
     duration_weeks: int = Field(ge=4, le=24, default=8)
-    target_rate_pct: float = Field(ge=0.1, le=1.5, default=0.7)
+    target_rate_pct: float = Field(ge=0, le=1.5, default=0.7)
     activity_multiplier: float = Field(ge=1.0, le=2.0, default=1.4)
     tdee_override: float | None = None
     carb_preset: CarbPreset = CarbPreset.MODERATE
