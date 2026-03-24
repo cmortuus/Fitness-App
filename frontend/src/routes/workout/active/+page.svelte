@@ -1628,19 +1628,23 @@
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-4 w-12 text-[9px] text-zinc-600 hover:text-amber-400 transition-colors"
+                          class="h-6 w-12 text-[11px] text-zinc-500 hover:text-amber-400 transition-colors rounded"
                           title="Skip this set"
                         >skip</button>
                       </div>
                     {/if}
                   </div>
-                  <!-- High-rep advisory (unilateral) -->
-                  {#if !set.done && ((set.repsLeft ?? 0) > 30 || (set.repsRight ?? 0) > 30)}
-                    <div class="px-1 mt-0.5">
-                      <p class="text-xs text-amber-400 leading-snug">
-                        ⚠ Sets above 30 reps are outside the reliable range for weight progression. Consider increasing the load instead.
-                      </p>
-                    </div>
+                  <!-- Rep range advisories (unilateral) -->
+                  {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
+                    {#if (set.repsLeft ?? 0) > 30 || (set.repsRight ?? 0) > 30}
+                      <div class="px-1 mt-0.5">
+                        <p class="text-[10px] text-amber-400/70">30+ reps — consider increasing weight</p>
+                      </div>
+                    {:else if (set.repsLeft ?? 0) > 0 && (set.repsLeft ?? 0) < 4}
+                      <div class="px-1 mt-0.5">
+                        <p class="text-[10px] text-amber-400/70">Under 4 reps — more strength than hypertrophy</p>
+                      </div>
+                    {/if}
                   {/if}
                   <!-- Deviation warning (unilateral) -->
                   {@const devWarnUni = deviationWarning(set, set.weightLbs, set.repsLeft ?? set.repsRight, isAssistedEx)}
@@ -1788,19 +1792,23 @@
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-4 w-12 text-[9px] text-zinc-600 hover:text-amber-400 transition-colors"
+                          class="h-6 w-12 text-[11px] text-zinc-500 hover:text-amber-400 transition-colors rounded"
                           title="Skip this set"
                         >skip</button>
                       </div>
                     {/if}
                   </div>
-                  <!-- High-rep advisory (> 30 reps moves outside the Epley range) -->
-                  {#if !set.done && (set.reps ?? 0) > 30}
-                    <div class="col-span-full px-1 mt-0.5">
-                      <p class="text-xs text-amber-400 leading-snug">
-                        ⚠ Sets above 30 reps are outside the reliable range for weight progression. Consider increasing the load instead.
-                      </p>
-                    </div>
+                  <!-- Rep range advisories (bilateral) -->
+                  {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
+                    {#if (set.reps ?? 0) > 30}
+                      <div class="col-span-full px-1 mt-0.5">
+                        <p class="text-[10px] text-amber-400/70">30+ reps — consider increasing weight</p>
+                      </div>
+                    {:else if (set.reps ?? 0) > 0 && (set.reps ?? 0) < 4}
+                      <div class="col-span-full px-1 mt-0.5">
+                        <p class="text-[10px] text-amber-400/70">Under 4 reps — more strength than hypertrophy</p>
+                      </div>
+                    {/if}
                   {/if}
                   <!-- Deviation warning -->
                   {@const devWarnBi = deviationWarning(set, set.weightLbs, set.reps, isAssistedEx)}
