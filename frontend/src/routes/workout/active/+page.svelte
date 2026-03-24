@@ -125,6 +125,32 @@
   let elapsed = $state(0);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
 
+  // ─── Plate calculator ──────────────────────────────────────────────────
+  const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
+  const PLATES_KG = [20, 15, 10, 5, 2.5, 1.25];
+  const BAR_LBS = 45;
+  const BAR_KG = 20;
+
+  function calcPlates(totalWeight: number, isLbs: boolean): string {
+    const bar = isLbs ? BAR_LBS : BAR_KG;
+    const plates = isLbs ? PLATES_LBS : PLATES_KG;
+    const perSide = (totalWeight - bar) / 2;
+    if (perSide <= 0) return totalWeight <= bar ? 'bar only' : '';
+    let remaining = perSide;
+    const result: string[] = [];
+    for (const plate of plates) {
+      const count = Math.floor(remaining / plate);
+      if (count > 0) {
+        result.push(`${count}×${plate}`);
+        remaining -= count * plate;
+      }
+    }
+    if (remaining > 0.1) return ''; // Can't make exact weight
+    return result.join(' + ') + ' /side';
+  }
+
+  let showPlates = $state(false);
+
   // Rest timer
   let restActive = $state(false);
   let restSecs = $state($settings.restDurations.upperCompound);
@@ -1306,6 +1332,10 @@
           <div class="flex items-center gap-3 mt-0.5">
             <span class="text-base font-mono font-bold text-primary-400">{formatClock(elapsed)}</span>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
+            <button onclick={() => showPlates = !showPlates}
+                    class="text-xs px-1.5 py-0.5 rounded transition-colors {showPlates ? 'bg-primary-600/20 text-primary-400' : 'text-zinc-600 hover:text-zinc-400'}">
+              🏋️ plates
+            </button>
           </div>
         </div>
 
@@ -1494,6 +1524,11 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
+                      {:else if showPlates && set.weightLbs != null && set.weightLbs > (unit === 'lbs' ? 45 : 20)}
+                        {@const plates = calcPlates(set.weightLbs, unit === 'lbs')}
+                        {#if plates}
+                          <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
+                        {/if}
                       {/if}
                     </div>
 
@@ -1671,6 +1706,11 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
+                      {:else if showPlates && set.weightLbs != null && set.weightLbs > (unit === 'lbs' ? 45 : 20)}
+                        {@const plates = calcPlates(set.weightLbs, unit === 'lbs')}
+                        {#if plates}
+                          <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
+                        {/if}
                       {/if}
                     </div>
 
