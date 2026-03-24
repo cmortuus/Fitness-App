@@ -1,0 +1,43 @@
+{
+  "name": "GymTracker",
+  "short_name": "GymTracker",
+  "description": "Track workouts, nutrition, and progress with science-based programming",
+  "start_url": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#09090b",
+  "theme_color": "#0f172a",
+  "icons": [
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["health", "fitness"],
+  "shortcuts": [
+    {
+      "name": "Start Workout",
+      "url": "/workout/active",
+      "description": "Start or continue a workout"
+    },
+    {
+      "name": "Log Food",
+      "url": "/nutrition",
+      "description": "Track nutrition and macros"
+    }
+  ]
+}
