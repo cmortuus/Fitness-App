@@ -755,7 +755,12 @@
             s.repsLeft  = reps;
             s.repsRight = reps;
             if (isAssisted) {
-              s.weightLbs = Math.max(0, Math.round((bodyWeightInUnit - weight) / 2.5) * 2.5);
+              if (weight < completedWeight) {
+                const netDrop = completedWeight - weight;
+                s.weightLbs = roundWeight((set.weightLbs ?? 0) + netDrop);
+              } else {
+                s.weightLbs = set.weightLbs;
+              }
             } else {
               s.weightLbs = weight;
             }
@@ -767,7 +772,15 @@
             const { weight, reps } = setForPosition(completedWeight, effectiveReps, idx + 1);
             s.reps = reps;
             if (isAssisted) {
-              s.weightLbs = Math.max(0, Math.round((bodyWeightInUnit - weight) / 2.5) * 2.5);
+              // For assisted: keep same assist amount unless Epley dropped the weight
+              if (weight < completedWeight) {
+                // Epley floor kicked in — increase assist to maintain equivalent effort
+                const netDrop = completedWeight - weight;
+                s.weightLbs = roundWeight((set.weightLbs ?? 0) + netDrop);
+              } else {
+                // Reps dropped but weight same — keep assist unchanged
+                s.weightLbs = set.weightLbs;
+              }
             } else {
               s.weightLbs = weight;
             }
@@ -1612,13 +1625,13 @@
 
                     <!-- Complete / Skip / Undo -->
                     {#if set.saving}
-                      <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
+                      <div class="flex gap-1 justify-center"><span class="text-zinc-400 text-xs">…</span></div>
                     {:else if set.skipped}
                       <button
                         onclick={() => unskipSet(ex.uiId, set.localId)}
-                        class="h-12 w-12 rounded-xl bg-amber-700/20 hover:bg-zinc-700 text-amber-400 text-xs font-medium transition-colors"
+                        class="h-12 px-3 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors"
                         title="Undo skip"
-                      >Skip</button>
+                      >Undo</button>
                     {:else if set.done}
                       <button
                         onclick={() => uncompleteSet(ex.uiId, set.localId)}
@@ -1627,16 +1640,16 @@
                       >✓</button>
                     {:else}
                       {@const canComplete = (set.repsLeft ?? 0) > 0 && (set.repsRight ?? 0) > 0}
-                      <div class="flex flex-col gap-1">
+                      <div class="flex gap-1">
                         <button
                           onclick={() => completeSet(ex.uiId, set.localId)}
                           disabled={!canComplete}
-                          class="h-8 w-12 rounded-lg bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          title={canComplete ? 'Log this set' : 'Enter reps for both sides first'}
+                          class="h-12 w-10 rounded-lg bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={canComplete ? 'Log this set' : 'Enter reps first'}
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-7 w-12 text-xs font-medium text-amber-500/80 hover:text-amber-400 bg-amber-500/10 rounded-lg transition-colors"
+                          class="h-12 w-10 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 text-[10px] font-semibold transition-colors"
                           title="Skip this set"
                         >Skip</button>
                       </div>
