@@ -29,6 +29,7 @@ class Settings(BaseSettings):
 
     # External APIs
     usda_api_key: str = "DEMO_KEY"
+    calorieninjas_api_key: str = ""
 
     # Database
     database_url: str = "sqlite+aiosqlite:///./homegym.db"

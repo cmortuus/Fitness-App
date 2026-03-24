@@ -114,6 +114,38 @@ def _normalize_usda_food(food: dict) -> dict | None:
     }
 
 
+def _normalize_calorieninjas(item: dict) -> dict | None:
+    """Normalize a CalorieNinjas result into our common shape."""
+    name = item.get("name")
+    if not name:
+        return None
+    # CalorieNinjas returns per-serving values, serving_size_g defaults to 100
+    serving = item.get("serving_size_g", 100) or 100
+    scale = 100 / serving  # normalize to per-100g
+    micros = {}
+    for cn_key, our_key in {
+        "fiber_g": "fiber_g", "sugar_g": "sugar_g", "sodium_mg": "sodium_mg",
+        "potassium_mg": "potassium_mg", "cholesterol_mg": "cholesterol_mg",
+    }.items():
+        val = item.get(cn_key)
+        if val is not None and val > 0:
+            micros[our_key] = round(val * scale, 3)
+    return {
+        "name": name.title(),
+        "brand": None,
+        "source": "calorieninjas",
+        "source_id": None,
+        "barcode": None,
+        "calories_per_100g": round(item.get("calories", 0) * scale, 1) if item.get("calories") else None,
+        "protein_per_100g": round(item.get("protein_g", 0) * scale, 1) if item.get("protein_g") else None,
+        "carbs_per_100g": round(item.get("carbohydrates_total_g", 0) * scale, 1) if item.get("carbohydrates_total_g") else None,
+        "fat_per_100g": round(item.get("fat_total_g", 0) * scale, 1) if item.get("fat_total_g") else None,
+        "serving_size_g": serving,
+        "serving_label": f"{serving}g serving",
+        "micronutrients": micros or None,
+    }
+
+
 def _parse_serving(s: str | None) -> float:
     """Try to extract grams from a serving string like '100 g' or '1 cup (240ml)'."""
     if not s:
@@ -134,15 +166,31 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
     settings = get_settings()
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-        off_task = client.get(
-            "https://world.openfoodfacts.org/cgi/search.pl",
-            params={"search_terms": query, "page": page, "page_size": page_size, "json": 1},
-        )
-        usda_task = client.get(
-            "https://api.nal.usda.gov/fdc/v1/foods/search",
-            params={"query": query, "pageSize": page_size, "pageNumber": page, "api_key": settings.usda_api_key},
-        )
-        off_resp, usda_resp = await asyncio.gather(off_task, usda_task, return_exceptions=True)
+        tasks = [
+            client.get(
+                "https://world.openfoodfacts.org/cgi/search.pl",
+                params={"search_terms": query, "page": page, "page_size": page_size, "json": 1},
+            ),
+            client.get(
+                "https://api.nal.usda.gov/fdc/v1/foods/search",
+                params={"query": query, "pageSize": page_size, "pageNumber": page, "api_key": settings.usda_api_key},
+            ),
+        ]
+        # Add CalorieNinjas if API key is configured
+        cn_key = settings.calorieninjas_api_key
+        if cn_key:
+            tasks.append(
+                client.get(
+                    "https://api.calorieninjas.com/v1/nutrition",
+                    params={"query": query},
+                    headers={"X-Api-Key": cn_key},
+                )
+            )
+        responses = await asyncio.gather(*tasks, return_exceptions=True)
+
+    off_resp = responses[0]
+    usda_resp = responses[1]
+    cn_resp = responses[2] if len(responses) > 2 else None
 
     results: list[dict] = []
 
@@ -157,6 +205,13 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
     if isinstance(off_resp, httpx.Response) and off_resp.status_code == 200:
         for product in off_resp.json().get("products", []):
             item = _normalize_off_product(product)
+            if item:
+                results.append(item)
+
+    # CalorieNinjas
+    if isinstance(cn_resp, httpx.Response) and cn_resp.status_code == 200:
+        for food in cn_resp.json().get("items", []):
+            item = _normalize_calorieninjas(food)
             if item:
                 results.append(item)
 
