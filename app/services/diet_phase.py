@@ -37,23 +37,41 @@ CARB_SPLITS = {
 }
 
 
-def estimate_tdee(weight_kg: float, activity_multiplier: float, tdee_override: float | None = None) -> float:
+def estimate_tdee(
+    weight_kg: float,
+    activity_multiplier: float,
+    tdee_override: float | None = None,
+    body_fat_pct: float | None = None,
+) -> float:
     """Estimate total daily energy expenditure.
 
-    Uses weight_lbs × cal_per_lb where activity_multiplier maps to cal/lb:
-      1.0 Sedentary   → 12 cal/lb
-      1.2 Light       → 13 cal/lb
-      1.4 Moderate    → 14 cal/lb
-      1.6 Active      → 15 cal/lb
-      1.8 Very Active → 16 cal/lb
+    Uses Katch-McArdle (if body fat % known) or a conservative cal/lb formula.
+    Activity multiplier maps to standard TDEE multipliers:
+      1.0 Sedentary   → ×1.2
+      1.2 Light       → ×1.375
+      1.4 Moderate    → ×1.55
+      1.6 Active      → ×1.725
+      1.8 Very Active → ×1.9
     Returns tdee_override if provided (user knows their maintenance).
     """
     if tdee_override and tdee_override > 0:
         return tdee_override
-    weight_lbs = weight_kg * KG_TO_LBS
-    # Map activity multiplier (1.0-1.8) to cal/lb (12-16)
-    cal_per_lb = 12 + (activity_multiplier - 1.0) * 5  # 1.0→12, 1.4→14, 1.8→16
-    return round(weight_lbs * cal_per_lb)
+
+    # Map our 1.0-1.8 scale to standard TDEE multipliers
+    tdee_multipliers = {1.0: 1.2, 1.2: 1.375, 1.4: 1.55, 1.6: 1.725, 1.8: 1.9}
+    mult = tdee_multipliers.get(activity_multiplier, 1.55)
+
+    if body_fat_pct and 5 <= body_fat_pct <= 60:
+        # Katch-McArdle: BMR = 370 + (21.6 × lean mass in kg)
+        lean_kg = weight_kg * (1 - body_fat_pct / 100)
+        bmr = 370 + (21.6 * lean_kg)
+    else:
+        # Cunningham-style estimate assuming ~25% body fat as default
+        # This gives more realistic numbers for higher body weights
+        estimated_lean = weight_kg * 0.75
+        bmr = 370 + (21.6 * estimated_lean)
+
+    return round(bmr * mult)
 
 
 def calculate_macros(
@@ -75,7 +93,7 @@ def calculate_macros(
 
     Returns dict with calories, protein, carbs, fat (all rounded).
     """
-    tdee = estimate_tdee(weight_kg, activity_multiplier, tdee_override)
+    tdee = estimate_tdee(weight_kg, activity_multiplier, tdee_override, body_fat_pct)
     weight_lbs = weight_kg * KG_TO_LBS
 
     # Daily calorie adjustment from target rate
