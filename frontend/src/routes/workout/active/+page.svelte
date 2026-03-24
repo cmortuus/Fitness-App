@@ -548,6 +548,7 @@
           set_number: set.setNumber,
           planned_reps: set.reps ?? undefined,
           planned_weight_kg: weightKg,
+          ...(set.setType !== 'standard' && { set_type: set.setType }),
         });
         bId = created.id;
         set.backendId = bId;
