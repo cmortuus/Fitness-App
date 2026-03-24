@@ -1300,7 +1300,14 @@
                   >
                     <select
                       value={set.setType || 'standard'}
-                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; syncMyoMatchSets(ex); uiExercises = [...uiExercises]; }}
+                      onchange={(e) => {
+                        set.setType = (e.target as HTMLSelectElement).value;
+                        syncMyoMatchSets(ex);
+                        uiExercises = [...uiExercises];
+                        if (set.backendId && sessionId) {
+                          updateSet(sessionId, set.backendId, { set_type: set.setType }).catch(() => {});
+                        }
+                      }}
                       disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
                              {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
@@ -1461,7 +1468,14 @@
                   >
                     <select
                       value={set.setType || 'standard'}
-                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; syncMyoMatchSets(ex); uiExercises = [...uiExercises]; }}
+                      onchange={(e) => {
+                        set.setType = (e.target as HTMLSelectElement).value;
+                        syncMyoMatchSets(ex);
+                        uiExercises = [...uiExercises];
+                        if (set.backendId && sessionId) {
+                          updateSet(sessionId, set.backendId, { set_type: set.setType }).catch(() => {});
+                        }
+                      }}
                       disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
                              {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
