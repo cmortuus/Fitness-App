@@ -161,11 +161,11 @@ main() {
     log "No existing database — fresh install"
   fi
 
-  # 4. Pull latest code
+  # 4. Pull latest code — always match origin/main exactly
   log "Pulling latest code..."
   git -C "$APP_DIR" fetch origin
-  git -C "$APP_DIR" pull --ff-only || {
-    err "Git pull failed (merge conflict?). Aborting."
+  git -C "$APP_DIR" reset --hard origin/main || {
+    err "Git reset to origin/main failed. Aborting."
     exit 1
   }
 
