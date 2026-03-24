@@ -217,7 +217,18 @@
   onDestroy(() => {
     if (clockInterval) clearInterval(clockInterval);
     if (restInterval) clearInterval(restInterval);
+    if (draftSaveInterval) clearInterval(draftSaveInterval);
   });
+
+  // Save drafts when app goes to background (iOS PWA close, tab switch)
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden && sessionId) saveDrafts();
+    });
+    window.addEventListener('beforeunload', () => {
+      if (sessionId) saveDrafts();
+    });
+  }
 
   // Warn before leaving the page if there's an active session with incomplete sets
   beforeNavigate(({ cancel }) => {
@@ -569,17 +580,19 @@
   let pct = $derived(totalSets > 0 ? Math.round((doneSets / totalSets) * 100) : 0);
 
   // ─── Draft auto-save (cross-device sync) ─────────────────────────────────
-  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
-  // Auto-save drafts whenever uiExercises changes (debounced 3 seconds)
-  $effect(() => {
-    // Touch uiExercises to subscribe to changes
-    if (uiExercises.length > 0 && sessionId) scheduleDraftSave();
-  });
+  let draftSaveInterval: ReturnType<typeof setInterval> | null = null;
 
-  function scheduleDraftSave() {
-    if (draftSaveTimer) clearTimeout(draftSaveTimer);
-    draftSaveTimer = setTimeout(() => saveDrafts(), 3000);
-  }
+  // Save drafts every 5 seconds while a workout is active
+  $effect(() => {
+    if (sessionId && uiExercises.length > 0) {
+      if (!draftSaveInterval) {
+        draftSaveInterval = setInterval(() => saveDrafts(), 5000);
+      }
+    }
+    return () => {
+      if (draftSaveInterval) { clearInterval(draftSaveInterval); draftSaveInterval = null; }
+    };
+  });
 
   async function saveDrafts() {
     if (!sessionId) return;
