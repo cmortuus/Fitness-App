@@ -1385,7 +1385,8 @@
                 {#if editingNoteId === ex.exerciseId}
                   <div class="flex gap-1 mt-1">
                     <input type="text" bind:value={editingNoteText}
-                           class="flex-1 text-xs bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-white"
+                           class="flex-1 bg-zinc-800 border border-zinc-600 rounded-lg px-3 py-2 text-white"
+                           style="font-size: 16px;"
                            placeholder="Add a note..." />
                     <button onclick={async () => {
                       await setExerciseNote(ex.exerciseId, editingNoteText);

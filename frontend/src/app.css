@@ -70,6 +70,7 @@ html, body {
          px-4 py-3 text-white placeholder-zinc-500
          focus:outline-none focus:border-primary-500 focus:ring-1 focus:ring-primary-500/50
          transition-colors;
+  font-size: 16px; /* Prevents iOS Safari auto-zoom on focus */
   min-height: 48px;
 }
 

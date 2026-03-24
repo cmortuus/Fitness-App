@@ -48,6 +48,26 @@
     }
   });
 
+  let keyboardOpen = $state(false);
+
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const show = () => { keyboardOpen = true; };
+    const hide = () => { keyboardOpen = false; };
+    // Detect keyboard via visualViewport resize (reliable on iOS)
+    if (window.visualViewport) {
+      const vv = window.visualViewport;
+      const check = () => { keyboardOpen = vv.height < window.innerHeight * 0.75; };
+      vv.addEventListener('resize', check);
+      return () => vv.removeEventListener('resize', check);
+    }
+    // Fallback: focus/blur on inputs
+    document.addEventListener('focusin', (e) => {
+      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') show();
+    });
+    document.addEventListener('focusout', hide);
+  });
+
   function logout() {
     clearAuthTokens();
     window.location.href = '/login';
@@ -113,7 +133,7 @@
   </main>
 
   <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
-  <nav class="bottom-nav md:hidden">
+  <nav class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
     {#each staticNavItems as item}
       <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
         <span class="text-xl leading-none">{item.icon}</span>
