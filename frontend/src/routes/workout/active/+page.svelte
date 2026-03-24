@@ -237,16 +237,23 @@
               ? suggestedWeight * (1 + refRepsForOneRM / 30)
               : null;
 
+            // Restore draft values if the user was mid-workout (cross-device sync)
+            const hasDraft = bset?.draft_weight_kg != null || bset?.draft_reps != null;
+            const draftWeight = bset?.draft_weight_kg != null ? fromKg(bset.draft_weight_kg) : null;
+            const draftReps = bset?.draft_reps ?? null;
+            const draftLeft = bset?.draft_reps_left ?? null;
+            const draftRight = bset?.draft_reps_right ?? null;
+
             sets.push({
               localId: `${pe.exercise_id}-${i}`,
               backendId: bset?.id ?? null,
               setNumber: i,
-              weightLbs: suggestedWeight,
-              reps: suggestedReps,
-              // Pre-fill L/R with per-side planned reps when available,
+              weightLbs: hasDraft ? draftWeight : suggestedWeight,
+              reps: hasDraft ? draftReps : suggestedReps,
+              // Pre-fill L/R with draft values, then per-side planned reps,
               // falling back to the bilateral planned_reps.
-              repsLeft:  suggestedRepsLeft  ?? suggestedReps,
-              repsRight: suggestedRepsRight ?? suggestedReps,
+              repsLeft:  (hasDraft && draftLeft != null) ? draftLeft : (suggestedRepsLeft ?? suggestedReps),
+              repsRight: (hasDraft && draftRight != null) ? draftRight : (suggestedRepsRight ?? suggestedReps),
               done: false,
               saving: false,
               oneRM,
@@ -514,6 +521,40 @@
   let doneSets       = $derived(uiExercises.reduce((s, ex) => s + ex.sets.filter(st => st.done).length, 0));
   let incompleteSets = $derived(totalSets - doneSets);
   let pct = $derived(totalSets > 0 ? Math.round((doneSets / totalSets) * 100) : 0);
+
+  // ─── Draft auto-save (cross-device sync) ─────────────────────────────────
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  // Auto-save drafts whenever uiExercises changes (debounced 3 seconds)
+  $effect(() => {
+    // Touch uiExercises to subscribe to changes
+    if (uiExercises.length > 0 && sessionId) scheduleDraftSave();
+  });
+
+  function scheduleDraftSave() {
+    if (draftSaveTimer) clearTimeout(draftSaveTimer);
+    draftSaveTimer = setTimeout(() => saveDrafts(), 3000);
+  }
+
+  async function saveDrafts() {
+    if (!sessionId) return;
+    for (const ex of uiExercises) {
+      for (const set of ex.sets) {
+        if (set.done || !set.backendId) continue;
+        // Only save if user has typed something
+        if (set.weightLbs == null && set.reps == null) continue;
+        try {
+          await updateSet(sessionId, set.backendId, {
+            draft_weight_kg: set.weightLbs != null ? toKg(set.weightLbs) : null,
+            draft_reps: set.reps,
+            ...(ex.isUnilateral && {
+              draft_reps_left: set.repsLeft,
+              draft_reps_right: set.repsRight,
+            }),
+          });
+        } catch { /* ignore individual failures */ }
+      }
+    }
+  }
 
   // ─── Set actions ──────────────────────────────────────────────────────────
   async function completeSet(exUiId: string, localId: string) {

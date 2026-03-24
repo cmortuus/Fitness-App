@@ -108,6 +108,10 @@ class SetUpdate(BaseModel):
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None
+    draft_weight_kg: float | None = None
+    draft_reps: int | None = None
+    draft_reps_left: int | None = None
+    draft_reps_right: int | None = None
 
 
 class SetResponse(BaseModel):

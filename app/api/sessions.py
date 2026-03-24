@@ -60,6 +60,10 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "notes": exercise_set.notes,
         "started_at": exercise_set.started_at,
         "completed_at": exercise_set.completed_at,
+        "draft_weight_kg": exercise_set.draft_weight_kg,
+        "draft_reps": exercise_set.draft_reps,
+        "draft_reps_left": exercise_set.draft_reps_left,
+        "draft_reps_right": exercise_set.draft_reps_right,
     }
 
 

@@ -62,6 +62,12 @@ class ExerciseSet(Base):
     set_type: Mapped[str] = mapped_column(String(20), nullable=False, default="standard")
     sub_sets: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON for drop set entries
 
+    # Draft values — in-progress inputs not yet completed (for cross-device sync)
+    draft_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    draft_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    draft_reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    draft_reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Notes and timestamps
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
