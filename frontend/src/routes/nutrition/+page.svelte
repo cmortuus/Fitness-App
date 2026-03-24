@@ -57,10 +57,18 @@
   // Barcode scanner
   let scannerActive = $state(false);
   let scanError = $state('');
+  let lastScannedBarcode = $state('');
 
   // OCR Label scanner
   let ocrProcessing = $state(false);
   let ocrError = $state('');
+  let ocrLiveActive = $state(false);
+  let ocrLiveStatus = $state('');
+  let ocrWorker: any = null;
+  let ocrVideoEl: HTMLVideoElement | null = null;
+  let ocrCanvasEl: HTMLCanvasElement | null = null;
+  let ocrStream: MediaStream | null = null;
+  let ocrInterval: ReturnType<typeof setInterval> | null = null;
   let ocrResult = $state<{
     name: string; brand: string; barcode: string;
     servingSize: number; servingLabel: string;
@@ -68,6 +76,7 @@
     fiber: number; sodium: number; sugar: number;
   } | null>(null);
   let ocrSaving = $state(false);
+  let ocrFieldsFound = $state(0);
 
   // Phase wizard
   let showPhaseWizard = $state(false);
@@ -268,6 +277,93 @@
     };
   }
 
+  async function startLabelScanner() {
+    ocrError = '';
+    ocrResult = null;
+    ocrFieldsFound = 0;
+    ocrLiveStatus = 'Starting camera...';
+    ocrLiveActive = true;
+
+    try {
+      // Start camera
+      ocrStream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+      });
+      // Wait for DOM to render video element
+      await new Promise(r => setTimeout(r, 100));
+      if (ocrVideoEl) {
+        ocrVideoEl.srcObject = ocrStream;
+        await ocrVideoEl.play();
+      }
+
+      // Init Tesseract worker once
+      ocrLiveStatus = 'Loading OCR engine...';
+      const { createWorker } = await import('tesseract.js');
+      ocrWorker = await createWorker('eng');
+      ocrLiveStatus = 'Point at nutrition label...';
+
+      // Scan every 2 seconds
+      ocrInterval = setInterval(() => scanFrame(), 2000);
+    } catch (e) {
+      ocrError = 'Camera access failed. Check permissions.';
+      ocrLiveActive = false;
+      console.error('Camera error:', e);
+    }
+  }
+
+  async function scanFrame() {
+    if (!ocrVideoEl || !ocrCanvasEl || !ocrWorker) return;
+    const ctx = ocrCanvasEl.getContext('2d');
+    if (!ctx) return;
+
+    // Capture frame
+    ocrCanvasEl.width = ocrVideoEl.videoWidth;
+    ocrCanvasEl.height = ocrVideoEl.videoHeight;
+    ctx.drawImage(ocrVideoEl, 0, 0);
+
+    // Enhance: grayscale + contrast boost
+    const img = ctx.getImageData(0, 0, ocrCanvasEl.width, ocrCanvasEl.height);
+    for (let i = 0; i < img.data.length; i += 4) {
+      // Grayscale
+      const gray = img.data[i] * 0.299 + img.data[i+1] * 0.587 + img.data[i+2] * 0.114;
+      // Contrast boost
+      const c = gray > 128 ? Math.min(255, gray * 1.3) : Math.max(0, gray * 0.7);
+      img.data[i] = img.data[i+1] = img.data[i+2] = c;
+    }
+    ctx.putImageData(img, 0, 0);
+
+    try {
+      const { data } = await ocrWorker.recognize(ocrCanvasEl);
+      const parsed = parseNutritionLabel(data.text);
+
+      // Count how many fields we found
+      const fields = [parsed.calories, parsed.protein, parsed.carbs, parsed.fat].filter(v => v > 0).length;
+      ocrFieldsFound = fields;
+
+      if (fields >= 3) {
+        // Good enough — stop scanning and show results
+        parsed.barcode = lastScannedBarcode || '';
+        ocrResult = parsed;
+        ocrLiveStatus = '';
+        stopLabelScanner(false);
+      } else if (fields > 0) {
+        ocrLiveStatus = `Found ${fields}/4 values... hold steady`;
+      } else {
+        ocrLiveStatus = 'Point at nutrition label...';
+      }
+    } catch {
+      // Ignore individual frame errors
+    }
+  }
+
+  function stopLabelScanner(clearResult = true) {
+    if (ocrInterval) { clearInterval(ocrInterval); ocrInterval = null; }
+    if (ocrWorker) { ocrWorker.terminate().catch(() => {}); ocrWorker = null; }
+    if (ocrStream) { ocrStream.getTracks().forEach(t => t.stop()); ocrStream = null; }
+    ocrLiveActive = false;
+    if (clearResult) { ocrResult = null; ocrFieldsFound = 0; }
+  }
+
   async function processLabelImage(file: File) {
     ocrProcessing = true;
     ocrError = '';
@@ -282,6 +378,7 @@
       if (parsed.calories <= 0 && parsed.protein <= 0 && parsed.carbs <= 0) {
         ocrError = 'Could not read nutrition values. Try a clearer photo with good lighting.';
       } else {
+        parsed.barcode = lastScannedBarcode || '';
         ocrResult = parsed;
       }
     } catch (e) {
@@ -423,7 +520,12 @@
             selectedFood = result;
             selectedQty = result.serving_size_g || 100;
           } catch {
-            scanError = `Barcode ${decodedText} not found. Try manual entry.`;
+            // Barcode not in any database — switch to label OCR
+            lastScannedBarcode = decodedText;
+            scanError = `Barcode ${decodedText} not in database. Scan the nutrition label to add it.`;
+            // Auto-switch to label tab
+            activeTab = 'label';
+            startLabelScanner();
           }
         },
         () => {}
@@ -787,7 +889,10 @@
               {#if ocrResult}
                 <!-- Show extracted values for editing -->
                 <div class="space-y-3">
-                  <p class="text-xs text-zinc-400">Edit extracted values, then save to library</p>
+                  <p class="text-xs text-zinc-400">
+                    {lastScannedBarcode ? `Barcode ${lastScannedBarcode} not in database.` : ''}
+                    Edit values below, then save to the community library.
+                  </p>
                   <div class="grid grid-cols-2 gap-2">
                     <div>
                       <label for="ocr-name" class="text-[10px] text-zinc-500">Name</label>
@@ -804,81 +909,93 @@
                       <input id="ocr-serving" type="number" bind:value={ocrResult.servingSize} class="input !py-1.5 text-sm" />
                     </div>
                     <div>
-                      <label for="ocr-barcode" class="text-[10px] text-zinc-500">Barcode (optional)</label>
-                      <input id="ocr-barcode" type="text" bind:value={ocrResult.barcode} placeholder="Scan or type" class="input !py-1.5 text-sm" />
+                      <label for="ocr-barcode" class="text-[10px] text-zinc-500">Barcode</label>
+                      <input id="ocr-barcode" type="text" bind:value={ocrResult.barcode} placeholder="Auto-linked" class="input !py-1.5 text-sm" />
                     </div>
                   </div>
                   <div class="grid grid-cols-4 gap-2">
-                    <div>
-                      <label for="ocr-cal" class="text-[10px] text-zinc-500">Calories</label>
-                      <input id="ocr-cal" type="number" bind:value={ocrResult.calories} class="input !py-1.5 text-sm" />
-                    </div>
-                    <div>
-                      <label for="ocr-pro" class="text-[10px] text-zinc-500">Protein (g)</label>
-                      <input id="ocr-pro" type="number" bind:value={ocrResult.protein} class="input !py-1.5 text-sm" />
-                    </div>
-                    <div>
-                      <label for="ocr-carb" class="text-[10px] text-zinc-500">Carbs (g)</label>
-                      <input id="ocr-carb" type="number" bind:value={ocrResult.carbs} class="input !py-1.5 text-sm" />
-                    </div>
-                    <div>
-                      <label for="ocr-fat" class="text-[10px] text-zinc-500">Fat (g)</label>
-                      <input id="ocr-fat" type="number" bind:value={ocrResult.fat} class="input !py-1.5 text-sm" />
-                    </div>
+                    {#each [['ocr-cal', 'Calories', 'calories'], ['ocr-pro', 'Protein', 'protein'], ['ocr-carb', 'Carbs', 'carbs'], ['ocr-fat', 'Fat', 'fat']] as [id, label, key]}
+                      <div>
+                        <label for={id} class="text-[10px] text-zinc-500">{label}</label>
+                        <input {id} type="number" bind:value={ocrResult[key]} class="input !py-1.5 text-sm" />
+                      </div>
+                    {/each}
                   </div>
                   <div class="grid grid-cols-3 gap-2">
-                    <div>
-                      <label for="ocr-fiber" class="text-[10px] text-zinc-500">Fiber (g)</label>
-                      <input id="ocr-fiber" type="number" bind:value={ocrResult.fiber} class="input !py-1.5 text-sm" />
-                    </div>
-                    <div>
-                      <label for="ocr-sodium" class="text-[10px] text-zinc-500">Sodium (mg)</label>
-                      <input id="ocr-sodium" type="number" bind:value={ocrResult.sodium} class="input !py-1.5 text-sm" />
-                    </div>
-                    <div>
-                      <label for="ocr-sugar" class="text-[10px] text-zinc-500">Sugar (g)</label>
-                      <input id="ocr-sugar" type="number" bind:value={ocrResult.sugar} class="input !py-1.5 text-sm" />
-                    </div>
+                    {#each [['ocr-fiber', 'Fiber (g)', 'fiber'], ['ocr-sodium', 'Sodium (mg)', 'sodium'], ['ocr-sugar', 'Sugar (g)', 'sugar']] as [id, label, key]}
+                      <div>
+                        <label for={id} class="text-[10px] text-zinc-500">{label}</label>
+                        <input {id} type="number" bind:value={ocrResult[key]} class="input !py-1.5 text-sm" />
+                      </div>
+                    {/each}
                   </div>
                   <div class="flex gap-2">
-                    <button onclick={() => ocrResult = null} class="btn-ghost flex-1">Retake</button>
+                    <button onclick={() => { ocrResult = null; startLabelScanner(); }} class="btn-ghost flex-1">Rescan</button>
                     <button onclick={saveCommunityFood} disabled={ocrSaving}
                             class="btn-primary flex-1 disabled:opacity-50">
-                      {ocrSaving ? 'Saving...' : 'Save to Library & Log'}
+                      {ocrSaving ? 'Saving...' : 'Save & Log'}
                     </button>
                   </div>
                 </div>
+
+              {:else if ocrLiveActive}
+                <!-- Live video scanner -->
+                <div class="space-y-2">
+                  <div class="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
+                    <!-- svelte-ignore a11y_media_has_caption -->
+                    <video bind:this={ocrVideoEl} autoplay playsinline muted
+                           class="w-full h-full object-cover"></video>
+                    <canvas bind:this={ocrCanvasEl} class="hidden"></canvas>
+                    <!-- Status overlay -->
+                    <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                      <div class="flex items-center justify-between">
+                        <p class="text-xs text-white">{ocrLiveStatus}</p>
+                        {#if ocrFieldsFound > 0}
+                          <div class="flex gap-1">
+                            {#each [0,1,2,3] as i}
+                              <div class="w-2 h-2 rounded-full {i < ocrFieldsFound ? 'bg-green-400' : 'bg-zinc-600'}"></div>
+                            {/each}
+                          </div>
+                        {/if}
+                      </div>
+                    </div>
+                  </div>
+                  <button onclick={() => stopLabelScanner(true)} class="btn-ghost w-full">Cancel</button>
+                </div>
+
               {:else}
-                <!-- Camera / file input -->
+                <!-- Start options -->
                 <div class="text-center space-y-3">
-                  {#if ocrProcessing}
-                    <div class="py-8">
-                      <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-500 mx-auto"></div>
-                      <p class="text-sm text-zinc-400 mt-3">Reading nutrition label...</p>
+                  {#if lastScannedBarcode}
+                    <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                      <p class="text-xs text-amber-400">Barcode {lastScannedBarcode} not found in any database.</p>
+                      <p class="text-xs text-zinc-400 mt-1">Scan the nutrition label to add it to the community library.</p>
                     </div>
                   {:else}
-                    <p class="text-sm text-zinc-400">Take a photo of the Nutrition Facts label</p>
-                    <label class="btn-primary block w-full !py-3 cursor-pointer text-center">
+                    <p class="text-sm text-zinc-400">Scan a nutrition facts label to add to the community library</p>
+                  {/if}
+
+                  <button onclick={startLabelScanner} class="btn-primary w-full !py-3">
+                    Start Live Scanner
+                  </button>
+
+                  <div class="flex gap-2">
+                    <label class="flex-1 py-2.5 text-xs text-zinc-400 hover:text-zinc-300 cursor-pointer border border-zinc-800 rounded-xl text-center transition-colors">
                       Take Photo
                       <input type="file" accept="image/*" capture="environment"
-                             onchange={(e) => {
-                               const f = (e.target as HTMLInputElement).files?.[0];
-                               if (f) processLabelImage(f);
-                             }}
+                             onchange={(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) processLabelImage(f); }}
                              class="hidden" />
                     </label>
-                    <label class="block w-full py-3 text-sm text-zinc-400 hover:text-zinc-300 cursor-pointer border border-zinc-800 rounded-xl text-center transition-colors">
-                      Choose from Gallery
+                    <label class="flex-1 py-2.5 text-xs text-zinc-400 hover:text-zinc-300 cursor-pointer border border-zinc-800 rounded-xl text-center transition-colors">
+                      From Gallery
                       <input type="file" accept="image/*"
-                             onchange={(e) => {
-                               const f = (e.target as HTMLInputElement).files?.[0];
-                               if (f) processLabelImage(f);
-                             }}
+                             onchange={(e) => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) processLabelImage(f); }}
                              class="hidden" />
                     </label>
-                    {#if ocrError}
-                      <p class="text-xs text-red-400">{ocrError}</p>
-                    {/if}
+                  </div>
+
+                  {#if ocrError}
+                    <p class="text-xs text-red-400">{ocrError}</p>
                   {/if}
                 </div>
               {/if}
