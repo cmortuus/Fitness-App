@@ -1248,7 +1248,7 @@
             <!-- Column headers — adapt to unilateral / assisted mode -->
             {#if ex.isUnilateral}
               <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem">
-                <span class="text-xs text-zinc-500 text-center">#</span>
+                <span class="text-xs text-zinc-500 text-center">Type</span>
                 <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Wt (${unit})`}</span>
                 <span class="text-xs text-zinc-500 text-center">Left</span>
                 <span class="text-xs text-zinc-500 text-center">Right</span>
@@ -1256,7 +1256,7 @@
               </div>
             {:else}
               <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 2.5rem">
-                <span class="text-xs text-zinc-500 text-center">#</span>
+                <span class="text-xs text-zinc-500 text-center">Type</span>
                 <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Weight (${unit})`}</span>
                 <span class="text-xs text-zinc-500 text-center">Reps</span>
                 <span></span>
