@@ -339,6 +339,16 @@
     </div>
   {/if}
 
+  <!-- ── Quick link to Plans ────────────────────────────────────────── -->
+  <a href="/plans" class="card !p-4 flex items-center gap-3 hover:bg-zinc-800/80 transition-colors group">
+    <span class="text-2xl">📋</span>
+    <div class="flex-1">
+      <p class="text-sm font-semibold text-zinc-200 group-hover:text-primary-400 transition-colors">Manage Plans</p>
+      <p class="text-xs text-zinc-500">Create, edit, and archive workout plans</p>
+    </div>
+    <span class="text-zinc-600 text-sm">›</span>
+  </a>
+
   <!-- ── Calendar ────────────────────────────────────────────────────── -->
   <div class="card">
     <div class="flex items-center justify-between mb-4">
@@ -426,14 +436,5 @@
     </div>
   {/if}
 
-  <!-- ── Quick link to Plans ────────────────────────────────────────── -->
-  <a href="/plans" class="card !p-4 flex items-center gap-3 hover:bg-zinc-800/80 transition-colors group">
-    <span class="text-2xl">📋</span>
-    <div class="flex-1">
-      <p class="text-sm font-semibold text-zinc-200 group-hover:text-primary-400 transition-colors">Manage Plans</p>
-      <p class="text-xs text-zinc-500">Create, edit, and archive workout plans</p>
-    </div>
-    <span class="text-zinc-600 text-sm">›</span>
-  </a>
 
 </div>

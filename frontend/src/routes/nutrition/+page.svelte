@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, onDestroy } from 'svelte';
   import { activeDietPhase } from '$lib/stores';
   import {
     getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
@@ -97,7 +97,21 @@
   let showMicros = $state(false);
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
-  onMount(() => { loadDay(); });
+  onMount(() => {
+    loadDay();
+    // Release camera if user switches away or closes app
+    const handleVisibility = () => {
+      if (document.hidden) stopLabelScanner(false);
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+    window.addEventListener('beforeunload', () => stopLabelScanner(true));
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibility);
+      stopLabelScanner(true);
+    };
+  });
+
+  onDestroy(() => { stopLabelScanner(true); });
 
   async function loadDay() {
     loading = true;
