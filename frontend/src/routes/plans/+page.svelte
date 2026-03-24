@@ -2,14 +2,35 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { workoutPlans, exercises } from '$lib/stores';
-  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan } from '$lib/api';
-  import type { Exercise, WorkoutPlan } from '$lib/api';
+  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate } from '$lib/api';
+  import type { Exercise, WorkoutPlan, WorkoutTemplate } from '$lib/api';
 
   let allExercises = $state<Exercise[]>([]);
   let localPlans   = $state<WorkoutPlan[]>([]);
   let errorMsg     = $state<string | null>(null);
   let expandedPlan = $state<number | null>(null);
   let expandedDays = $state<Record<string, boolean>>({});
+
+  // Templates
+  let templates = $state<WorkoutTemplate[]>([]);
+  let splitFilter = $state<string | null>(null);
+  let equipFilter = $state<string | null>(null);
+  let previewTmpl = $state<WorkoutTemplate | null>(null);
+  let cloning = $state(false);
+
+  const SPLITS = [
+    { key: 'full_body', label: 'Full Body' },
+    { key: 'upper_lower', label: 'Upper/Lower' },
+    { key: 'ppl', label: 'PPL' },
+    { key: 'bro_split', label: 'Bro Split' },
+  ];
+  const EQUIP = [
+    { key: 'minimal', label: 'Minimal' },
+    { key: 'home', label: 'Home Gym' },
+    { key: 'standard', label: 'Standard' },
+    { key: 'well_equipped', label: 'Well-Equipped' },
+    { key: 'elite', label: 'Elite' },
+  ];
 
   function showError(msg: string) {
     errorMsg = msg;
@@ -18,11 +39,12 @@
 
   onMount(async () => {
     try {
-      const [plansData, exercisesData] = await Promise.all([getPlans(), getExercises()]);
+      const [plansData, exercisesData, tmplData] = await Promise.all([getPlans(), getExercises(), getTemplates()]);
       workoutPlans.set(plansData);
       exercises.set(exercisesData);
       allExercises = exercisesData;
       localPlans = JSON.parse(JSON.stringify(plansData));
+      templates = tmplData;
     } catch (error) {
       showError('Failed to load plans.');
       console.error('Failed to load data:', error);
@@ -66,6 +88,26 @@
 
   function getExerciseName(exerciseId: number): string {
     return allExercises.find(e => e.id === exerciseId)?.display_name || `Exercise ${exerciseId}`;
+  }
+
+  let filteredTemplates = $derived(
+    templates.filter(t => {
+      if (splitFilter && t.split_type !== splitFilter) return false;
+      if (equipFilter && t.equipment_tier !== equipFilter) return false;
+      return true;
+    })
+  );
+
+  async function handleClone(tmpl: WorkoutTemplate) {
+    cloning = true;
+    try {
+      await cloneTemplate(tmpl.id);
+      previewTmpl = null;
+      const plansData = await getPlans();
+      workoutPlans.set(plansData);
+      localPlans = JSON.parse(JSON.stringify(plansData));
+    } catch { showError('Failed to import template.'); }
+    cloning = false;
   }
 
   function totalExercises(plan: WorkoutPlan): number {
@@ -209,4 +251,91 @@
       </div>
     </div>
   {/if}
+
+  <!-- ── Template Browser ───────────────────────────────────────────────── -->
+  <div class="border-t border-zinc-800 pt-5">
+    <h3 class="text-lg font-bold mb-3">Program Templates</h3>
+
+    <!-- Filters -->
+    <div class="flex gap-2 overflow-x-auto pb-2">
+      <button onclick={() => splitFilter = null}
+              class="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors
+                     {!splitFilter ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+        All
+      </button>
+      {#each SPLITS as s}
+        <button onclick={() => splitFilter = splitFilter === s.key ? null : s.key}
+                class="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors
+                       {splitFilter === s.key ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+          {s.label}
+        </button>
+      {/each}
+    </div>
+    <select bind:value={equipFilter}
+            class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white mb-3">
+      <option value={null}>All Equipment Levels</option>
+      {#each EQUIP as e}
+        <option value={e.key}>{e.label}</option>
+      {/each}
+    </select>
+
+    <!-- Template list -->
+    <div class="space-y-2 max-h-[50vh] overflow-y-auto">
+      {#each filteredTemplates as tmpl}
+        <button onclick={() => previewTmpl = tmpl}
+                class="card !p-3 w-full text-left hover:bg-zinc-800/60 transition-colors">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="font-medium text-white text-sm">{tmpl.name}</p>
+              <p class="text-xs text-zinc-500 mt-0.5">
+                {tmpl.days_per_week} days/wk · {tmpl.exercise_count} exercises
+              </p>
+            </div>
+            <span class="text-zinc-600">›</span>
+          </div>
+        </button>
+      {/each}
+      {#if filteredTemplates.length === 0}
+        <p class="text-center py-4 text-zinc-500 text-sm">No templates match filters.</p>
+      {/if}
+    </div>
+    <p class="text-center text-xs text-zinc-600 mt-2">{filteredTemplates.length} templates</p>
+  </div>
 </div>
+
+<!-- Template preview modal -->
+{#if previewTmpl}
+  <div class="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50">
+    <div class="bg-zinc-900 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90vh] flex flex-col border border-zinc-800 shadow-2xl">
+      <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+        <div>
+          <h3 class="font-semibold text-white">{previewTmpl.name}</h3>
+          <p class="text-xs text-zinc-500">{previewTmpl.days_per_week} days/wk</p>
+        </div>
+        <button onclick={() => previewTmpl = null} class="text-zinc-400 hover:text-white text-xl">✕</button>
+      </div>
+      <div class="p-4 overflow-y-auto space-y-4 flex-1">
+        {#if previewTmpl.description}
+          <p class="text-sm text-zinc-400">{previewTmpl.description}</p>
+        {/if}
+        {#each previewTmpl.days as day}
+          <div class="space-y-1">
+            <h4 class="text-sm font-semibold text-primary-400">{day.day_name}</h4>
+            {#each day.exercises as ex}
+              <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
+                <span class="text-zinc-300 truncate">{getExerciseName(ex.exercise_id)}</span>
+                <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets} sets</span>
+              </div>
+            {/each}
+          </div>
+        {/each}
+      </div>
+      <div class="p-4 border-t border-zinc-800 shrink-0">
+        <button onclick={() => handleClone(previewTmpl!)} disabled={cloning}
+                class="btn-primary w-full !py-3 disabled:opacity-50">
+          {cloning ? 'Importing...' : 'Use This Template'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
