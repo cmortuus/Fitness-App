@@ -160,7 +160,7 @@ async def seed_exercises() -> None:
             {"name": "z_press", "display_name": "Z Press", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": ["triceps", "core"]},
             {"name": "landmine_press_shoulder", "display_name": "Landmine Press (Shoulder)", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": ["triceps"]},
             # Side Delts
-            {"name": "dumbbell_lateral_raise", "display_name": "Dumbbell Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "dumbbell_lateral_raise", "display_name": "Dumbbell Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "cable_lateral_raise", "display_name": "Cable Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "machine_lateral_raise", "display_name": "Machine Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "leaning_cable_lateral_raise", "display_name": "Leaning Cable Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
@@ -174,7 +174,7 @@ async def seed_exercises() -> None:
             {"name": "face_pull", "display_name": "Face Pull", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
             {"name": "cable_face_pull", "display_name": "Cable Face Pull", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
             {"name": "reverse_pec_deck", "display_name": "Reverse Pec Deck", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
-            {"name": "dumbbell_front_raise", "display_name": "Dumbbell Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "dumbbell_front_raise", "display_name": "Dumbbell Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "cable_front_raise", "display_name": "Cable Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "plate_front_raise", "display_name": "Plate Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "band_pull_apart", "display_name": "Band Pull Apart", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
@@ -268,7 +268,7 @@ async def seed_exercises() -> None:
             # ========== BICEPS ==========
             {"name": "barbell_curl", "display_name": "Barbell Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "ez_bar_curl", "display_name": "EZ Bar Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
-            {"name": "dumbbell_curl", "display_name": "Dumbbell Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "dumbbell_curl", "display_name": "Dumbbell Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "hammer_curl", "display_name": "Hammer Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "preacher_curl", "display_name": "Preacher Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "incline_curl", "display_name": "Incline Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
@@ -500,12 +500,26 @@ async def seed_exercises() -> None:
         seeded_count = 0
         skipped_count = 0
 
+        updated_count = 0
         for ex_data in default_exercises:
             # Check if exercise already exists
             existing = await session.execute(
                 select(Exercise).where(Exercise.name == ex_data["name"])
             )
-            if existing.scalar_one_or_none():
+            ex = existing.scalar_one_or_none()
+            if ex:
+                # Update flags if they've changed
+                changed = False
+                want_uni = ex_data.get("is_unilateral", False)
+                want_ast = ex_data.get("is_assisted", False)
+                if ex.is_unilateral != want_uni:
+                    ex.is_unilateral = want_uni
+                    changed = True
+                if ex.is_assisted != want_ast:
+                    ex.is_assisted = want_ast
+                    changed = True
+                if changed:
+                    updated_count += 1
                 skipped_count += 1
                 continue
 
@@ -524,7 +538,7 @@ async def seed_exercises() -> None:
 
         try:
             await session.commit()
-            print(f"✅ Seeded {seeded_count} default exercises (skipped {skipped_count} duplicates)")
+            print(f"✅ Seeded {seeded_count} new exercises, updated {updated_count} flags (skipped {skipped_count} unchanged)")
         except Exception:
             await session.rollback()
             # Duplicates in DB — seed one-by-one to skip conflicts
