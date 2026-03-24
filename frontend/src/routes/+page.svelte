@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { activeDietPhase, currentSession, workoutPlans, nextWorkoutUrl } from '$lib/stores';
+  import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import { getSessions, archivePlan, getPlans, getDailySummary, getInsights } from '$lib/api';
   import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
