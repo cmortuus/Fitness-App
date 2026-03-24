@@ -803,7 +803,14 @@
                     <div class="flex items-start justify-between gap-2">
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1.5">
-                          <span class="text-zinc-400 text-xs shrink-0">#{idx + 1}</span>
+                          <div class="flex flex-col shrink-0">
+                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) { const arr = day.exercises; [arr[idx-1], arr[idx]] = [arr[idx], arr[idx-1]]; days = [...days]; } }}
+                                    disabled={idx === 0}
+                                    class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▲</button>
+                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) { const arr = day.exercises; [arr[idx], arr[idx+1]] = [arr[idx+1], arr[idx]]; days = [...days]; } }}
+                                    disabled={idx === day.exercises.length - 1}
+                                    class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▼</button>
+                          </div>
                           <span class="font-medium text-sm truncate">{getExerciseName(ex.exercise_id)}</span>
                         </div>
                         <!-- Inline editable sets only -->

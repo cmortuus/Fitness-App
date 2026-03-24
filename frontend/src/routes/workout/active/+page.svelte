@@ -1431,6 +1431,14 @@
                 <!-- Set types are per-set, configured inline on each set row -->
               </div>
               <div class="flex items-center gap-1 ml-3 mt-0.5">
+                <!-- Reorder buttons -->
+                {@const exIdx = uiExercises.indexOf(ex)}
+                <button onclick={() => { if (exIdx > 0) { [uiExercises[exIdx-1], uiExercises[exIdx]] = [uiExercises[exIdx], uiExercises[exIdx-1]]; uiExercises = [...uiExercises]; } }}
+                        disabled={exIdx === 0}
+                        class="text-zinc-500 hover:text-white disabled:opacity-20 px-1 text-sm">▲</button>
+                <button onclick={() => { if (exIdx < uiExercises.length - 1) { [uiExercises[exIdx], uiExercises[exIdx+1]] = [uiExercises[exIdx+1], uiExercises[exIdx]]; uiExercises = [...uiExercises]; } }}
+                        disabled={exIdx === uiExercises.length - 1}
+                        class="text-zinc-500 hover:text-white disabled:opacity-20 px-1 text-sm">▼</button>
                 {#if exercise?.description}
                   <button
                     onclick={() => toggleNotes(ex.uiId)}
@@ -1628,9 +1636,9 @@
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-6 w-12 text-[11px] text-zinc-500 hover:text-amber-400 transition-colors rounded"
+                          class="h-7 w-12 text-xs font-medium text-amber-500/80 hover:text-amber-400 bg-amber-500/10 rounded-lg transition-colors"
                           title="Skip this set"
-                        >skip</button>
+                        >Skip</button>
                       </div>
                     {/if}
                   </div>
@@ -1792,9 +1800,9 @@
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-6 w-12 text-[11px] text-zinc-500 hover:text-amber-400 transition-colors rounded"
+                          class="h-7 w-12 text-xs font-medium text-amber-500/80 hover:text-amber-400 bg-amber-500/10 rounded-lg transition-colors"
                           title="Skip this set"
-                        >skip</button>
+                        >Skip</button>
                       </div>
                     {/if}
                   </div>
