@@ -8,26 +8,22 @@
   let allExercises = $state<Exercise[]>([]);
   let localPlans   = $state<WorkoutPlan[]>([]);
   let errorMsg     = $state<string | null>(null);
+  let expandedPlan = $state<number | null>(null);
 
   function showError(msg: string) {
     errorMsg = msg;
     setTimeout(() => { errorMsg = null; }, 5000);
   }
 
-  const saveTimers: Record<number, ReturnType<typeof setTimeout>> = {};
-
   onMount(async () => {
     try {
-      const [plansData, exercisesData] = await Promise.all([
-        getPlans(),
-        getExercises(),
-      ]);
+      const [plansData, exercisesData] = await Promise.all([getPlans(), getExercises()]);
       workoutPlans.set(plansData);
       exercises.set(exercisesData);
       allExercises = exercisesData;
       localPlans = JSON.parse(JSON.stringify(plansData));
     } catch (error) {
-      showError('Failed to load plans. Please refresh the page.');
+      showError('Failed to load plans.');
       console.error('Failed to load data:', error);
     }
   });
@@ -35,52 +31,16 @@
   let activePlans   = $derived(localPlans.filter(p => !p.is_archived));
   let archivedPlans = $derived(localPlans.filter(p =>  p.is_archived));
 
-  function scheduleSave(planId: number) {
-    clearTimeout(saveTimers[planId]);
-    saveTimers[planId] = setTimeout(() => savePlan(planId), 800);
-  }
-
-  async function savePlan(planId: number) {
-    const plan = localPlans.find(p => p.id === planId);
-    if (!plan) return;
-    try {
-      await updatePlan(planId, { number_of_days: plan.number_of_days, days: plan.days });
-    } catch (error) {
-      showError('Failed to save plan changes.');
-      console.error('Failed to save plan:', error);
-    }
-  }
-
-  function updateSets(planId: number, dayNumber: number, exIdx: number, value: number) {
-    const plan = localPlans.find(p => p.id === planId);
-    if (!plan) return;
-    const day = plan.days.find(d => d.day_number === dayNumber);
-    if (!day) return;
-    day.exercises[exIdx].sets = value;
-    localPlans = [...localPlans];
-    scheduleSave(planId);
-  }
-
-  function removeExercise(planId: number, dayNumber: number, exIdx: number) {
-    const plan = localPlans.find(p => p.id === planId);
-    if (!plan) return;
-    const day = plan.days.find(d => d.day_number === dayNumber);
-    if (!day) return;
-    day.exercises = day.exercises.filter((_, i) => i !== exIdx);
-    localPlans = [...localPlans];
-    scheduleSave(planId);
-  }
-
   async function handleDeletePlan(planId: number) {
-    if (!confirm('Are you sure you want to delete this plan?')) return;
+    if (!confirm('Delete this plan? This cannot be undone.')) return;
     try {
       await deletePlan(planId);
       const plansData = await getPlans();
       workoutPlans.set(plansData);
       localPlans = JSON.parse(JSON.stringify(plansData));
+      if (expandedPlan === planId) expandedPlan = null;
     } catch (error) {
-      showError('Failed to delete plan. It may be in use by a workout session.');
-      console.error('Failed to delete plan:', error);
+      showError('Failed to delete plan. It may be in use.');
     }
   }
 
@@ -90,10 +50,8 @@
       const plansData = await getPlans();
       workoutPlans.set(plansData);
       localPlans = JSON.parse(JSON.stringify(plansData));
-    } catch (error) {
-      showError('Failed to archive plan.');
-      console.error('Failed to archive plan:', error);
-    }
+      expandedPlan = null;
+    } catch { showError('Failed to archive plan.'); }
   }
 
   async function handleReusePlan(planId: number) {
@@ -102,202 +60,128 @@
       const plansData = await getPlans();
       workoutPlans.set(plansData);
       localPlans = JSON.parse(JSON.stringify(plansData));
-    } catch (error) {
-      showError('Failed to create a copy of this plan.');
-      console.error('Failed to reuse plan:', error);
-    }
-  }
-
-  async function addDayToPlan(planId: number) {
-    const plan = localPlans.find(p => p.id === planId);
-    if (!plan) return;
-    const newDayNumber = plan.days.length + 1;
-    plan.days = [...plan.days, { day_number: newDayNumber, day_name: `Day ${newDayNumber}`, exercises: [] }];
-    plan.number_of_days = newDayNumber;
-    localPlans = [...localPlans];
-    try {
-      await updatePlan(planId, { number_of_days: newDayNumber, days: plan.days });
-    } catch (error) {
-      alert('Failed to add day: ' + (error instanceof Error ? error.message : String(error)));
-    }
-  }
-
-  async function removeDayFromPlan(planId: number, dayNumber: number) {
-    if (!confirm('Delete this day? This cannot be undone.')) return;
-    const plan = localPlans.find(p => p.id === planId);
-    if (!plan) return;
-    const updatedDays = plan.days
-      .filter(d => d.day_number !== dayNumber)
-      .map((d, idx) => ({ ...d, day_number: idx + 1 }));
-    plan.days = updatedDays;
-    plan.number_of_days = updatedDays.length;
-    localPlans = [...localPlans];
-    try {
-      await updatePlan(planId, { number_of_days: updatedDays.length, days: updatedDays });
-    } catch (error) {
-      alert('Failed to remove day: ' + (error instanceof Error ? error.message : String(error)));
-    }
+    } catch { showError('Failed to copy plan.'); }
   }
 
   function getExerciseName(exerciseId: number): string {
-    const ex = allExercises.find(e => e.id === exerciseId);
-    return ex?.display_name || `Exercise ${exerciseId}`;
+    return allExercises.find(e => e.id === exerciseId)?.display_name || `Exercise ${exerciseId}`;
+  }
+
+  function totalExercises(plan: WorkoutPlan): number {
+    return plan.days.reduce((sum, d) => sum + d.exercises.length, 0);
+  }
+
+  function togglePlan(planId: number) {
+    expandedPlan = expandedPlan === planId ? null : planId;
   }
 </script>
 
 <div class="page-content space-y-5">
-  <!-- Error banner (auto-dismisses after 5 s) -->
   {#if errorMsg}
-    <div class="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300 flex items-center justify-between gap-3">
-      <span>⚠ {errorMsg}</span>
-      <button onclick={() => errorMsg = null} class="text-red-400 hover:text-red-200 shrink-0">✕</button>
+    <div class="rounded-lg bg-red-900/40 border border-red-700 px-4 py-3 text-sm text-red-300 flex items-center justify-between">
+      <span>{errorMsg}</span>
+      <button onclick={() => errorMsg = null} class="text-red-400 hover:text-red-200">✕</button>
     </div>
   {/if}
 
   <div class="flex items-center justify-between">
     <h2 class="text-2xl font-bold">Workout Plans</h2>
-    <button onclick={() => goto('/plans/create')} class="btn-primary">
-      Create Plan
-    </button>
+    <button onclick={() => goto('/plans/create')} class="btn-primary">+ New Plan</button>
   </div>
 
-  <!-- ── Active Plans ─────────────────────────────────────────────────── -->
+  <!-- Active Plans -->
   {#if activePlans.length > 0}
-    <div class="grid gap-6">
+    <div class="space-y-3">
       {#each activePlans as plan (plan.id)}
-        {@const localPlan = localPlans.find(p => p.id === plan.id)!}
-        <div class="card">
-          <!-- Plan header -->
-          <div class="flex items-start justify-between">
-            <div>
-              <h3 class="text-lg font-semibold">{plan.name}</h3>
-              {#if plan.description}
-                <p class="text-zinc-400 mt-1">{plan.description}</p>
-              {/if}
-              <div class="mt-2 flex items-center gap-4 text-sm text-zinc-400">
+        <div class="card !p-0 overflow-hidden">
+          <!-- Collapsed header — always visible -->
+          <button onclick={() => togglePlan(plan.id)}
+                  class="w-full text-left px-4 py-3 flex items-center justify-between hover:bg-zinc-800/40 transition-colors">
+            <div class="min-w-0">
+              <h3 class="font-semibold text-white truncate">{plan.name}</h3>
+              <div class="flex items-center gap-3 text-xs text-zinc-500 mt-0.5">
                 <span>{plan.number_of_days} {plan.number_of_days === 1 ? 'day' : 'days'}</span>
-                {#if plan.block_type}
+                <span>{totalExercises(plan)} exercises</span>
+                {#if plan.block_type && plan.block_type !== 'other'}
                   <span class="capitalize">{plan.block_type}</span>
-                {/if}
-                {#if plan.duration_weeks}
-                  <span>{plan.duration_weeks} weeks</span>
                 {/if}
               </div>
             </div>
-            <div class="flex items-center gap-3 shrink-0">
-              <button
-                onclick={() => handleArchivePlan(plan.id)}
-                class="text-zinc-400 hover:text-amber-400 text-sm transition-colors"
-                title="Archive this plan"
-              >Archive</button>
-              <button
-                onclick={() => handleDeletePlan(plan.id)}
-                class="text-red-400 hover:text-red-300 text-sm"
-              >Delete</button>
-            </div>
-          </div>
+            <span class="text-zinc-500 text-lg shrink-0 ml-3 transition-transform duration-200"
+                  class:rotate-180={expandedPlan === plan.id}>▾</span>
+          </button>
 
-          <!-- Days -->
-          <div class="mt-4 space-y-3">
-            <div class="flex items-center justify-between">
-              <h4 class="font-medium text-zinc-300 text-sm">Days ({localPlan.days.length})</h4>
-              <button
-                onclick={() => addDayToPlan(plan.id)}
-                class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded transition-colors"
-              >
-                + Add Day
-              </button>
-            </div>
+          <!-- Expanded details -->
+          {#if expandedPlan === plan.id}
+            <div class="border-t border-zinc-800 px-4 py-3 space-y-3">
+              {#if plan.description}
+                <p class="text-sm text-zinc-400">{plan.description}</p>
+              {/if}
 
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-              {#each localPlan.days as day (day.day_number)}
-                <div class="bg-zinc-800/50 rounded-xl p-3">
-                  <div class="flex items-center justify-between mb-3">
-                    <span class="font-medium text-sm text-gray-200">{day.day_name}</span>
-                    <button
-                      onclick={() => removeDayFromPlan(plan.id, day.day_number)}
-                      class="text-xs px-2 py-1 bg-red-600/80 hover:bg-red-500 text-white rounded transition-colors"
-                      title="Remove day"
-                    >−</button>
-                  </div>
-
+              {#each plan.days as day}
+                <div>
+                  <h4 class="text-xs font-semibold text-primary-400 mb-1">{day.day_name}</h4>
                   {#if day.exercises.length === 0}
-                    <p class="text-zinc-500 text-xs text-center py-4">No exercises</p>
+                    <p class="text-xs text-zinc-600 pl-2">No exercises</p>
                   {:else}
-                    <div class="space-y-2">
-                      {#each day.exercises as ex, exIdx (exIdx)}
-                        <div class="bg-zinc-900 rounded-lg px-3 py-2 flex items-center justify-between gap-2">
-                          <span class="text-xs text-white truncate flex-1">{getExerciseName(ex.exercise_id)}</span>
-                          <div class="flex items-center gap-1.5 shrink-0">
-                            <input
-                              type="number"
-                              value={ex.sets}
-                              min="1" max="20"
-                              title="Sets"
-                              oninput={(e) => {
-                                const v = parseInt((e.target as HTMLInputElement).value);
-                                if (!isNaN(v) && v > 0) updateSets(plan.id, day.day_number, exIdx, v);
-                              }}
-                              class="w-12 bg-zinc-800 border border-zinc-700 rounded px-1 py-0.5 text-xs text-center focus:outline-none focus:border-primary-500"
-                            />
-                            <span class="text-[10px] text-zinc-500">sets</span>
-                            <button
-                              onclick={() => removeExercise(plan.id, day.day_number, exIdx)}
-                              class="text-red-400 hover:text-red-300 text-xs ml-1"
-                            >✕</button>
-                          </div>
+                    <div class="space-y-1">
+                      {#each day.exercises as ex}
+                        <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
+                          <span class="text-zinc-300 truncate">{getExerciseName(ex.exercise_id)}</span>
+                          <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets}×{ex.reps}</span>
                         </div>
                       {/each}
                     </div>
                   {/if}
-
-                  <button
-                    onclick={() => goto(`/workout/active?plan=${plan.id}&day=${day.day_number}`)}
-                    class="mt-3 w-full text-xs py-1.5 bg-primary-600 hover:bg-primary-500 text-white rounded transition-colors"
-                  >
-                    Start Day {day.day_number}
-                  </button>
                 </div>
               {/each}
+
+              <!-- Actions -->
+              <div class="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                <button onclick={() => goto(`/workout/active?plan=${plan.id}&day=1`)}
+                        class="btn-primary text-sm flex-1">
+                  Start Workout
+                </button>
+                <button onclick={() => handleArchivePlan(plan.id)}
+                        class="px-3 py-2 text-sm text-zinc-400 hover:text-amber-400 bg-zinc-800 rounded-lg transition-colors">
+                  Archive
+                </button>
+                <button onclick={() => handleDeletePlan(plan.id)}
+                        class="px-3 py-2 text-sm text-red-400 hover:text-red-300 bg-zinc-800 rounded-lg transition-colors">
+                  Delete
+                </button>
+              </div>
             </div>
-          </div>
+          {/if}
         </div>
       {/each}
     </div>
   {:else}
     <div class="card text-center py-12">
-      <p class="text-zinc-400">No active plans. Create one or reuse an archived plan below.</p>
+      <p class="text-zinc-400">No active plans yet.</p>
       <button onclick={() => goto('/plans/create')} class="btn-primary mt-4">Create Plan</button>
     </div>
   {/if}
 
-  <!-- ── Archived Plans ───────────────────────────────────────────────── -->
+  <!-- Archived Plans -->
   {#if archivedPlans.length > 0}
     <div>
-      <h3 class="text-lg font-semibold text-zinc-400 mb-3">Archived</h3>
-      <div class="grid gap-4">
+      <h3 class="text-sm font-semibold text-zinc-500 uppercase tracking-wider mb-2">Archived</h3>
+      <div class="space-y-2">
         {#each archivedPlans as plan (plan.id)}
-          <div class="card border border-zinc-800 opacity-80">
-            <div class="flex items-center justify-between gap-4">
+          <div class="card !py-3 opacity-70">
+            <div class="flex items-center justify-between">
               <div class="min-w-0">
-                <h4 class="font-semibold truncate">{plan.name}</h4>
-                <div class="mt-1 flex items-center gap-3 text-xs text-zinc-500">
-                  <span>{plan.number_of_days} {plan.number_of_days === 1 ? 'day' : 'days'}</span>
-                  <span class="capitalize">{plan.block_type}</span>
-                  <span>{plan.duration_weeks} weeks</span>
-                </div>
+                <h4 class="font-medium truncate">{plan.name}</h4>
+                <p class="text-xs text-zinc-500">{plan.number_of_days} days · {totalExercises(plan)} exercises</p>
               </div>
-              <div class="flex items-center gap-3 shrink-0">
-                <button
-                  onclick={() => handleReusePlan(plan.id)}
-                  class="px-4 py-1.5 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-sm font-medium transition-colors"
-                >
+              <div class="flex gap-2 shrink-0 ml-3">
+                <button onclick={() => handleReusePlan(plan.id)}
+                        class="px-3 py-1.5 text-sm bg-primary-600 hover:bg-primary-500 text-white rounded-lg transition-colors">
                   Reuse
                 </button>
-                <button
-                  onclick={() => handleDeletePlan(plan.id)}
-                  class="text-red-400 hover:text-red-300 text-sm"
-                >Delete</button>
+                <button onclick={() => handleDeletePlan(plan.id)}
+                        class="text-red-400 hover:text-red-300 text-sm">Delete</button>
               </div>
             </div>
           </div>
