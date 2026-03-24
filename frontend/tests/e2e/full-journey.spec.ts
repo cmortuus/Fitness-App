@@ -171,6 +171,74 @@ test('Full user journey', async ({ page }) => {
     }
   });
 
+  // ── Step 4b: Myo rep match set type persists week-to-week ───────────────
+  await test.step('Myo rep match type persists to week 2', async () => {
+    // Create a fresh session via API with 3 sets
+    const exercises = await api('GET', '/exercises/');
+    const compound = exercises.find((e: any) => e.movement_type === 'compound') || exercises[0];
+
+    // Start a new session via from-plan endpoint
+    const session = await api('POST', `/sessions/from-plan/${planId}?day_number=1&overload_style=rep&body_weight_kg=0`);
+
+    // Start it
+    await api('POST', `/sessions/${session.id}/start`);
+
+    // Get the session with sets
+    const fullSession = await api('GET', `/sessions/${session.id}`);
+    const sets = fullSession.sets || [];
+    expect(sets.length).toBeGreaterThanOrEqual(1);
+
+    // Change set 2 to myo_rep_match via API
+    if (sets.length >= 2) {
+      await api('PATCH', `/sessions/${session.id}/sets/${sets[1].id}`, {
+        set_type: 'myo_rep_match',
+        actual_weight_kg: 60,
+        actual_reps: 8,
+        completed_at: new Date().toISOString(),
+      });
+
+      // Complete set 1 too
+      await api('PATCH', `/sessions/${session.id}/sets/${sets[0].id}`, {
+        actual_weight_kg: 60,
+        actual_reps: 8,
+        completed_at: new Date().toISOString(),
+      });
+
+      // Complete remaining sets
+      for (let i = 2; i < sets.length; i++) {
+        await api('PATCH', `/sessions/${session.id}/sets/${sets[i].id}`, {
+          actual_weight_kg: 60,
+          actual_reps: 8,
+          completed_at: new Date().toISOString(),
+        });
+      }
+
+      // Complete the session
+      await api('POST', `/sessions/${session.id}/complete`);
+
+      // Now create week 2 session from same plan
+      const week2 = await api('POST', `/sessions/from-plan/${planId}?day_number=1&overload_style=rep&body_weight_kg=0`);
+      await api('POST', `/sessions/${week2.id}/start`);
+      const week2Full = await api('GET', `/sessions/${week2.id}`);
+      const week2Sets = week2Full.sets || [];
+
+      // Set 2 should inherit myo_rep_match from week 1
+      if (week2Sets.length >= 2) {
+        expect(week2Sets[1].set_type).toBe('myo_rep_match');
+      }
+
+      // Clean up — complete week 2 session so it doesn't block future tests
+      for (const s of week2Sets) {
+        await api('PATCH', `/sessions/${week2.id}/sets/${s.id}`, {
+          actual_weight_kg: 60,
+          actual_reps: 8,
+          completed_at: new Date().toISOString(),
+        });
+      }
+      await api('POST', `/sessions/${week2.id}/complete`);
+    }
+  });
+
   // ── Step 5: Diet phase ───────────────────────────────────────────────────
   await test.step('Create diet phase (cut)', async () => {
     await page.goto('/nutrition');
