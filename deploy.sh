@@ -34,6 +34,34 @@ log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
 err()  { echo -e "${RED}[error]${NC} $*" >&2; }
 
+# ── Maintenance mode (nginx serves static page during restart) ────────────────
+
+enable_maintenance() {
+  local nginx_conf="/etc/nginx/sites-available/gymtracker"
+  if [ -f "$nginx_conf" ] && [ -f "$APP_DIR/maintenance.html" ]; then
+    log "Enabling maintenance page..."
+    # Add maintenance location block before the main location
+    sudo cp "$nginx_conf" "${nginx_conf}.bak"
+    # Create a temp config that serves maintenance.html for all non-API routes
+    sudo tee /etc/nginx/conf.d/maintenance.conf > /dev/null 2>&1 <<MEOF
+# Temporary maintenance mode — auto-removed by deploy.sh
+location / {
+    root ${APP_DIR};
+    try_files /maintenance.html =503;
+}
+MEOF
+    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null || true
+  fi
+}
+
+disable_maintenance() {
+  if [ -f /etc/nginx/conf.d/maintenance.conf ]; then
+    log "Disabling maintenance page..."
+    sudo rm -f /etc/nginx/conf.d/maintenance.conf
+    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null || true
+  fi
+}
+
 # ── Stop running services ────────────────────────────────────────────────────
 
 stop_services() {
@@ -205,7 +233,8 @@ ENVEOF
   cd "$APP_DIR"
 
   # ─── BRIEF DOWNTIME STARTS HERE (~5 seconds) ──────────────────────────
-  log "Swapping to new version (brief downtime)..."
+  log "Swapping to new version..."
+  enable_maintenance
   stop_services
 
   # 7. Run database migrations (fast, usually <1 second)
@@ -218,6 +247,7 @@ ENVEOF
 
   # 8. Start services with new code
   start_services
+  disable_maintenance
   # ─── DOWNTIME ENDS HERE ────────────────────────────────────────────────
 
   # 9. Health check
