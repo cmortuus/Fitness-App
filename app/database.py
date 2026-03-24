@@ -127,18 +127,18 @@ async def seed_exercises() -> None:
             # Rhomboids/Mid-Back (Horizontal Pull)
             {"name": "barbell_row", "display_name": "Barbell Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps", "hamstrings"]},
             {"name": "pendlay_row", "display_name": "Pendlay Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
-            {"name": "dumbbell_row", "display_name": "Dumbbell Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "dumbbell_row", "display_name": "Dumbbell Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"], "is_unilateral": True},
             {"name": "cable_row", "display_name": "Cable Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "seated_cable_row", "display_name": "Seated Cable Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "chest_supported_row", "display_name": "Chest Supported Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["mid_back"], "secondary_muscles": ["lats", "biceps"]},
             {"name": "machine_row", "display_name": "Machine Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "t_bar_row", "display_name": "T-Bar Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
-            {"name": "meadows_row", "display_name": "Meadows Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "meadows_row", "display_name": "Meadows Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"], "is_unilateral": True},
             {"name": "inverted_row", "display_name": "Inverted Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "seal_row", "display_name": "Seal Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "smith_machine_row", "display_name": "Smith Machine Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "trap_bar_row", "display_name": "Trap Bar Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
-            {"name": "one_arm_cable_row", "display_name": "One Arm Cable Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "one_arm_cable_row", "display_name": "One Arm Cable Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"], "is_unilateral": True},
             {"name": "hammer_strength_row", "display_name": "Hammer Strength Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "iso_lateral_row", "display_name": "ISO Lateral Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
             {"name": "ring_row", "display_name": "Ring Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
@@ -160,10 +160,10 @@ async def seed_exercises() -> None:
             {"name": "z_press", "display_name": "Z Press", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": ["triceps", "core"]},
             {"name": "landmine_press_shoulder", "display_name": "Landmine Press (Shoulder)", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": ["triceps"]},
             # Side Delts
-            {"name": "dumbbell_lateral_raise", "display_name": "Dumbbell Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
-            {"name": "cable_lateral_raise", "display_name": "Cable Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
+            {"name": "dumbbell_lateral_raise", "display_name": "Dumbbell Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "cable_lateral_raise", "display_name": "Cable Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "machine_lateral_raise", "display_name": "Machine Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
-            {"name": "leaning_cable_lateral_raise", "display_name": "Leaning Cable Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
+            {"name": "leaning_cable_lateral_raise", "display_name": "Leaning Cable Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "cable_y_raise", "display_name": "Cable Y-Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "upright_row", "display_name": "Upright Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["shoulders", "traps"], "secondary_muscles": ["biceps"]},
             {"name": "cable_upright_row", "display_name": "Cable Upright Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["shoulders", "traps"], "secondary_muscles": ["biceps"]},
@@ -174,12 +174,12 @@ async def seed_exercises() -> None:
             {"name": "face_pull", "display_name": "Face Pull", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
             {"name": "cable_face_pull", "display_name": "Cable Face Pull", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
             {"name": "reverse_pec_deck", "display_name": "Reverse Pec Deck", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
-            {"name": "dumbbell_front_raise", "display_name": "Dumbbell Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
+            {"name": "dumbbell_front_raise", "display_name": "Dumbbell Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "cable_front_raise", "display_name": "Cable Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "plate_front_raise", "display_name": "Plate Front Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
             {"name": "band_pull_apart", "display_name": "Band Pull Apart", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
             {"name": "prone_y_raise", "display_name": "Prone Y Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
-            {"name": "landmine_lateral_raise", "display_name": "Landmine Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": []},
+            {"name": "landmine_lateral_raise", "display_name": "Landmine Lateral Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "w_raise", "display_name": "W Raise", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["shoulders", "back"], "secondary_muscles": []},
 
             # ========== TRAPS ==========
@@ -201,10 +201,10 @@ async def seed_exercises() -> None:
             {"name": "sissy_squat", "display_name": "Sissy Squat", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": []},
             {"name": "goblet_squat", "display_name": "Goblet Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes", "hamstrings"]},
             {"name": "cyclist_squat", "display_name": "Cyclist Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes"]},
-            {"name": "bulgarian_split_squat", "display_name": "Bulgarian Split Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"]},
-            {"name": "walking_lunge", "display_name": "Walking Lunge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"]},
-            {"name": "reverse_lunge", "display_name": "Reverse Lunge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"]},
-            {"name": "step_up", "display_name": "Step Up", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"]},
+            {"name": "bulgarian_split_squat", "display_name": "Bulgarian Split Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"], "is_unilateral": True},
+            {"name": "walking_lunge", "display_name": "Walking Lunge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"], "is_unilateral": True},
+            {"name": "reverse_lunge", "display_name": "Reverse Lunge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"], "is_unilateral": True},
+            {"name": "step_up", "display_name": "Step Up", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"], "is_unilateral": True},
             {"name": "leg_press_calf_raise", "display_name": "Leg Press Calf Raise", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["calves"], "secondary_muscles": []},
             {"name": "box_squat", "display_name": "Box Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes", "hamstrings"]},
             {"name": "pause_squat", "display_name": "Pause Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes", "hamstrings"]},
@@ -244,16 +244,16 @@ async def seed_exercises() -> None:
             {"name": "glute_bridge", "display_name": "Glute Bridge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": ["hamstrings"]},
             {"name": "cable_pull_through", "display_name": "Cable Pull Through", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["glutes", "hamstrings"], "secondary_muscles": []},
             {"name": "frog_pump", "display_name": "Frog Pump", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
-            {"name": "glute_kickback", "display_name": "Glute Kickback", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
-            {"name": "cable_glute_kickback", "display_name": "Cable Glute Kickback", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
+            {"name": "glute_kickback", "display_name": "Glute Kickback", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "cable_glute_kickback", "display_name": "Cable Glute Kickback", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "reverse_hyper", "display_name": "Reverse Hyper", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes", "hamstrings"], "secondary_muscles": []},
             {"name": "kettlebell_swing", "display_name": "Kettlebell Swing", "movement_type": "compound", "body_region": "full_body", "primary_muscles": ["glutes", "hamstrings"], "secondary_muscles": ["back", "shoulders"]},
             {"name": "smith_machine_hip_thrust", "display_name": "Smith Machine Hip Thrust", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": ["hamstrings"]},
             {"name": "hip_abduction_machine", "display_name": "Hip Abduction Machine", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
             {"name": "hip_adduction_machine", "display_name": "Hip Adduction Machine", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
-            {"name": "cable_hip_abduction", "display_name": "Cable Hip Abduction", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
-            {"name": "cable_glute_kickback", "display_name": "Cable Glute Kickback", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
-            {"name": "donkey_kick", "display_name": "Donkey Kick", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
+            {"name": "cable_hip_abduction", "display_name": "Cable Hip Abduction", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "cable_glute_kickback", "display_name": "Cable Glute Kickback", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": [], "is_unilateral": True},
+            {"name": "donkey_kick", "display_name": "Donkey Kick", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "clamshell", "display_name": "Clamshell", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["glutes"], "secondary_muscles": []},
             {"name": "sumo_squat", "display_name": "Sumo Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["glutes", "quadriceps"], "secondary_muscles": ["hamstrings"]},
 
@@ -268,12 +268,12 @@ async def seed_exercises() -> None:
             # ========== BICEPS ==========
             {"name": "barbell_curl", "display_name": "Barbell Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "ez_bar_curl", "display_name": "EZ Bar Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
-            {"name": "dumbbell_curl", "display_name": "Dumbbell Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
+            {"name": "dumbbell_curl", "display_name": "Dumbbell Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "hammer_curl", "display_name": "Hammer Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "preacher_curl", "display_name": "Preacher Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "incline_curl", "display_name": "Incline Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "spider_curl", "display_name": "Spider Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
-            {"name": "concentration_curl", "display_name": "Concentration Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
+            {"name": "concentration_curl", "display_name": "Concentration Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": [], "is_unilateral": True},
             {"name": "cable_curl", "display_name": "Cable Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "bayesian_curl", "display_name": "Bayesian Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "drag_curl", "display_name": "Drag Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
@@ -377,7 +377,7 @@ async def seed_exercises() -> None:
             {"name": "ssb_box_squat", "display_name": "SSB Box Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes", "hamstrings"]},
             {"name": "ssb_pause_squat", "display_name": "SSB Pause Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes", "hamstrings"]},
             {"name": "ssb_front_squat", "display_name": "SSB Front Squat", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": ["glutes"]},
-            {"name": "ssb_lunge", "display_name": "SSB Lunge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"]},
+            {"name": "ssb_lunge", "display_name": "SSB Lunge", "movement_type": "compound", "body_region": "lower", "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["hamstrings"], "is_unilateral": True},
 
             # --- EZ Bar (additional variations) ---
             {"name": "ez_bar_bench_press", "display_name": "EZ Bar Bench Press", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["chest"], "secondary_muscles": ["triceps", "shoulders"]},
@@ -463,7 +463,7 @@ async def seed_exercises() -> None:
             {"name": "45_degree_machine_press", "display_name": "45\u00b0 Machine Press", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["chest", "shoulders"], "secondary_muscles": ["triceps"]},
 
             # ========== ADDITIONAL MISSING EXERCISES ==========
-            {"name": "kroc_row", "display_name": "Kroc Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps", "forearms"]},
+            {"name": "kroc_row", "display_name": "Kroc Row", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["back"], "secondary_muscles": ["biceps", "forearms"], "is_unilateral": True},
             {"name": "larsen_press", "display_name": "Larsen Press", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["chest"], "secondary_muscles": ["triceps", "shoulders"]},
             {"name": "spanish_squat", "display_name": "Spanish Squat", "movement_type": "isolation", "body_region": "lower", "primary_muscles": ["quadriceps"], "secondary_muscles": []},
             {"name": "reverse_grip_bench_press", "display_name": "Reverse Grip Bench Press", "movement_type": "compound", "body_region": "upper", "primary_muscles": ["chest"], "secondary_muscles": ["triceps", "biceps"]},
@@ -481,6 +481,20 @@ async def seed_exercises() -> None:
             {"name": "cable_bicep_curl", "display_name": "Cable Bicep Curl", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["biceps"], "secondary_muscles": []},
             {"name": "cable_tricep_extension", "display_name": "Cable Tricep Extension", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["triceps"], "secondary_muscles": []},
             {"name": "cable_flye", "display_name": "Cable Flye", "movement_type": "isolation", "body_region": "upper", "primary_muscles": ["chest"], "secondary_muscles": []},
+
+            # ========== ASSISTED EXERCISES ==========
+            {"name": "assisted_pull_up_machine", "display_name": "Assisted Pull-Up Machine", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "assisted_pull_up_machine_wide_grip", "display_name": "Assisted Pull-Up Machine Wide Grip", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "assisted_pull_up_machine_neutral_grip", "display_name": "Assisted Pull-Up Machine Neutral Grip", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "assisted_pull_up_machine_close_grip", "display_name": "Assisted Pull-Up Machine Close Grip", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "assisted_chin_up_machine", "display_name": "Assisted Chin-Up Machine", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back", "biceps"], "secondary_muscles": []},
+            {"name": "assisted_dip_machine", "display_name": "Assisted Dip Machine", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["chest", "triceps"], "secondary_muscles": ["shoulders"]},
+            {"name": "assisted_dip_machine_wide_grip", "display_name": "Assisted Dip Machine Wide Grip (Chest)", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["chest"], "secondary_muscles": ["triceps", "shoulders"]},
+            {"name": "assisted_dip_machine_close_grip", "display_name": "Assisted Dip Machine Close Grip (Tricep)", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["triceps"], "secondary_muscles": ["chest", "shoulders"]},
+            {"name": "band_assisted_pull_up", "display_name": "Band Assisted Pull-Up", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back"], "secondary_muscles": ["biceps"]},
+            {"name": "band_assisted_chin_up", "display_name": "Band Assisted Chin-Up", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["back", "biceps"], "secondary_muscles": []},
+            {"name": "band_assisted_dip", "display_name": "Band Assisted Dip", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["chest", "triceps"], "secondary_muscles": ["shoulders"]},
+            {"name": "assisted_pistol_squat", "display_name": "Assisted Pistol Squat (Band / TRX)", "movement_type": "compound", "body_region": "lower", "is_assisted": True, "is_unilateral": True, "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["core"]},
         ]
 
         seeded_count = 0
@@ -502,6 +516,8 @@ async def seed_exercises() -> None:
                 body_region=ex_data["body_region"],
                 primary_muscles=ex_data["primary_muscles"],
                 secondary_muscles=ex_data["secondary_muscles"],
+                is_unilateral=ex_data.get("is_unilateral", False),
+                is_assisted=ex_data.get("is_assisted", False),
             )
             session.add(exercise)
             seeded_count += 1
@@ -528,6 +544,8 @@ async def seed_exercises() -> None:
                             body_region=ex_data["body_region"],
                             primary_muscles=ex_data["primary_muscles"],
                             secondary_muscles=ex_data["secondary_muscles"],
+                            is_unilateral=ex_data.get("is_unilateral", False),
+                            is_assisted=ex_data.get("is_assisted", False),
                         ))
                         await s2.commit()
                         seeded_count += 1
