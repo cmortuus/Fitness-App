@@ -33,6 +33,9 @@
 
   function setRest(key: keyof RestDurations, secs: number) {
     settings.update(s => ({ ...s, restDurations: { ...s.restDurations, [key]: secs } }));
+    // Sync custom inputs so "Set" button doesn't overwrite the preset
+    customMins[key] = Math.floor(secs / 60);
+    customSecs[key] = secs % 60;
   }
 
   // Custom input state per category — initialized from current settings
