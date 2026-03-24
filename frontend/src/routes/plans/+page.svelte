@@ -9,6 +9,7 @@
   let localPlans   = $state<WorkoutPlan[]>([]);
   let errorMsg     = $state<string | null>(null);
   let expandedPlan = $state<number | null>(null);
+  let expandedDays = $state<Record<string, boolean>>({});
 
   function showError(msg: string) {
     errorMsg = msg;
@@ -74,6 +75,15 @@
   function togglePlan(planId: number) {
     expandedPlan = expandedPlan === planId ? null : planId;
   }
+
+  function toggleDay(planId: number, dayNum: number) {
+    const key = `${planId}-${dayNum}`;
+    expandedDays = { ...expandedDays, [key]: !expandedDays[key] };
+  }
+
+  function isDayExpanded(planId: number, dayNum: number): boolean {
+    return !!expandedDays[`${planId}-${dayNum}`];
+  }
 </script>
 
 <div class="page-content space-y-5">
@@ -119,18 +129,28 @@
               {/if}
 
               {#each plan.days as day}
-                <div>
-                  <h4 class="text-xs font-semibold text-primary-400 mb-1">{day.day_name}</h4>
-                  {#if day.exercises.length === 0}
-                    <p class="text-xs text-zinc-600 pl-2">No exercises</p>
-                  {:else}
-                    <div class="space-y-1">
-                      {#each day.exercises as ex}
-                        <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
-                          <span class="text-zinc-300 truncate">{getExerciseName(ex.exercise_id)}</span>
-                          <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets}×{ex.reps}</span>
-                        </div>
-                      {/each}
+                <div class="border border-zinc-800 rounded-lg overflow-hidden">
+                  <button onclick={() => toggleDay(plan.id, day.day_number)}
+                          class="w-full text-left px-3 py-2 flex items-center justify-between hover:bg-zinc-800/40 transition-colors">
+                    <div class="flex items-center gap-2">
+                      <span class="text-sm font-medium text-primary-400">{day.day_name}</span>
+                      <span class="text-xs text-zinc-600">{day.exercises.length} exercises</span>
+                    </div>
+                    <span class="text-zinc-600 text-sm transition-transform duration-200"
+                          class:rotate-180={isDayExpanded(plan.id, day.day_number)}>▾</span>
+                  </button>
+                  {#if isDayExpanded(plan.id, day.day_number)}
+                    <div class="border-t border-zinc-800 px-3 py-2 space-y-1">
+                      {#if day.exercises.length === 0}
+                        <p class="text-xs text-zinc-600">No exercises</p>
+                      {:else}
+                        {#each day.exercises as ex}
+                          <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
+                            <span class="text-zinc-300 truncate">{getExerciseName(ex.exercise_id)}</span>
+                            <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets}×{ex.reps}</span>
+                          </div>
+                        {/each}
+                      {/if}
                     </div>
                   {/if}
                 </div>
