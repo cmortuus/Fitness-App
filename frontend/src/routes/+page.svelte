@@ -162,6 +162,16 @@
     return allSessions.filter(s => s.date >= isoDate(weekAgo) && s.status === 'completed').length;
   })());
 
+  let weeklySets = $derived((() => {
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    const weekStr = isoDate(weekAgo);
+    const weekSessions = allSessions.filter(s => s.date >= weekStr && s.status === 'completed');
+    const planned = weekSessions.reduce((sum, s) => sum + (s.total_sets || 0), 0);
+    const completed = weekSessions.reduce((sum, s) =>
+      sum + (s.sets?.filter((st: any) => st.completed_at && !st.skipped_at).length || s.total_sets || 0), 0);
+    return { planned, completed };
+  })());
+
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
 </script>
 
@@ -169,16 +179,20 @@
 
   <!-- ── Quick stats strip ───────────────────────────────────────────── -->
   {#if !loading && allSessions.length > 0}
-    <div class="grid grid-cols-2 gap-3">
+    <div class="grid grid-cols-3 gap-3">
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-primary-400">{weeklyWorkouts}</p>
-        <p class="text-xs text-zinc-500 mt-0.5">workouts this week</p>
+        <p class="text-xs text-zinc-500 mt-0.5">workouts</p>
+      </div>
+      <div class="card text-center py-3">
+        <p class="text-2xl font-bold text-green-400">{weeklySets.completed}</p>
+        <p class="text-xs text-zinc-500 mt-0.5">sets this week</p>
       </div>
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-accent-400">
           {weeklyVolume > 999 ? (weeklyVolume / 1000).toFixed(1) + 'k' : weeklyVolume.toFixed(0)}
         </p>
-        <p class="text-xs text-zinc-500 mt-0.5">kg volume this week</p>
+        <p class="text-xs text-zinc-500 mt-0.5">{$settings.weightUnit === 'lbs' ? 'lbs' : 'kg'} volume</p>
       </div>
     </div>
   {/if}
