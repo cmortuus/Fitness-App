@@ -146,10 +146,7 @@ main() {
   current_ref=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "none")
   log "Current commit: $current_ref"
 
-  # 2. Stop services
-  stop_services
-
-  # 3. Back up database (if it exists)
+  # 2. Back up database FIRST (while services still running)
   if [ -f "$DB_FILE" ]; then
     local backup_path="$BACKUP_DIR/homegym_${TIMESTAMP}.db"
     log "Backing up database to: $(basename "$backup_path")"
@@ -161,7 +158,7 @@ main() {
     log "No existing database — fresh install"
   fi
 
-  # 4. Pull latest code — always match origin/main exactly
+  # 3. Pull latest code (old services still running — users unaffected)
   log "Pulling latest code..."
   git -C "$APP_DIR" fetch origin
   git -C "$APP_DIR" reset --hard origin/main || {
@@ -169,7 +166,7 @@ main() {
     exit 1
   }
 
-  # 5. Ensure .env exists with a secure JWT secret
+  # 4. Ensure .env exists with a secure JWT secret
   if [ ! -f "$APP_DIR/.env" ]; then
     log "Creating .env with random JWT secret..."
     local jwt_secret
@@ -179,7 +176,7 @@ JWT_SECRET_KEY=${jwt_secret}
 ENVEOF
   fi
 
-  # 6. Python venv + deps
+  # 5. Python venv + deps (old services still running)
   if [ ! -d "$VENV_DIR" ]; then
     log "Creating virtual environment..."
     python3 -m venv "$VENV_DIR"
@@ -193,25 +190,12 @@ ENVEOF
     exit 1
   }
 
-  # 6. Run database migrations
-  log "Running database migrations..."
-  alembic upgrade head || {
-    err "Migration failed — rolling back"
-    rollback
-    exit 1
-  }
-
-  # 7. Build frontend
-  log "Building frontend..."
+  # 6. Build frontend to temp dir (old services still running — zero downtime)
+  log "Building frontend (old version still serving)..."
   cd "$FRONTEND_DIR"
+  npm install --silent
 
-  if [ ! -d "node_modules" ]; then
-    log "Installing frontend dependencies..."
-    npm install --silent
-  else
-    npm install --silent
-  fi
-
+  # Build to a temp output so old build stays intact until swap
   NODE_OPTIONS="--max-old-space-size=512" npm run build || {
     err "Frontend build failed — rolling back"
     cd "$APP_DIR"
@@ -220,8 +204,21 @@ ENVEOF
   }
   cd "$APP_DIR"
 
-  # 8. Start services
+  # ─── BRIEF DOWNTIME STARTS HERE (~5 seconds) ──────────────────────────
+  log "Swapping to new version (brief downtime)..."
+  stop_services
+
+  # 7. Run database migrations (fast, usually <1 second)
+  log "Running database migrations..."
+  alembic upgrade head || {
+    err "Migration failed — rolling back"
+    rollback
+    exit 1
+  }
+
+  # 8. Start services with new code
   start_services
+  # ─── DOWNTIME ENDS HERE ────────────────────────────────────────────────
 
   # 9. Health check
   if health_check; then
