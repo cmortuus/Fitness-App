@@ -1215,19 +1215,7 @@
                 {#if exercise?.primary_muscles?.length}
                   <p class="text-xs text-zinc-500 mt-0.5 capitalize">{muscleLabel(ex.exerciseId)}</p>
                 {/if}
-                <select value={ex.sets[0]?.setType || 'standard'}
-                        onchange={(e) => { const v = (e.target as HTMLSelectElement).value; ex.sets.forEach(s => s.setType = v); uiExercises = [...uiExercises]; }}
-                        class="text-[10px] mt-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-400 cursor-pointer">
-                  <option value="standard">Standard</option>
-                  <option value="myo_rep">Myo Reps</option>
-                  <option value="myo_rep_match">Myo Match</option>
-                  <option value="drop_set">Drop Set</option>
-                </select>
-                {#if false && ex.sets[0]?.setType && ex.sets[0].setType !== 'standard'}
-                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium uppercase">
-                    {ex.sets[0].setType === 'myo_rep' ? 'Myo' : ex.sets[0].setType === 'myo_rep_match' ? 'Myo Match' : 'Drop'}
-                  </span>
-                {/if}
+                <!-- Set types are per-set, configured inline on each set row -->
               </div>
               <div class="flex items-center gap-1 ml-3 mt-0.5">
                 {#if exercise?.description}
@@ -1284,7 +1272,22 @@
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
                     style="grid-template-columns: 1.75rem 1fr 1fr 1fr 3rem"
                   >
-                    <span class="text-xs text-zinc-400 text-center font-mono">{set.setNumber}</span>
+                    <button
+                      onclick={() => {
+                        const types = ['standard', 'myo_rep', 'myo_rep_match', 'drop_set'];
+                        const idx = types.indexOf(set.setType || 'standard');
+                        set.setType = types[(idx + 1) % types.length];
+                        uiExercises = [...uiExercises];
+                      }}
+                      disabled={set.done}
+                      title={set.setType === 'myo_rep' ? 'Myo Reps' : set.setType === 'myo_rep_match' ? 'Myo Match' : set.setType === 'drop_set' ? 'Drop Set' : 'Standard (tap to change)'}
+                      class="text-xs text-center font-mono w-7 h-7 rounded-md transition-colors
+                             {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
+                              set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
+                              set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
+                              'text-zinc-400 hover:bg-zinc-800'}">
+                      {set.setNumber}
+                    </button>
 
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
@@ -1430,7 +1433,22 @@
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
                     style="grid-template-columns: 1.75rem 1fr 1fr 3rem"
                   >
-                    <span class="text-xs text-zinc-400 text-center font-mono">{set.setNumber}</span>
+                    <button
+                      onclick={() => {
+                        const types = ['standard', 'myo_rep', 'myo_rep_match', 'drop_set'];
+                        const idx = types.indexOf(set.setType || 'standard');
+                        set.setType = types[(idx + 1) % types.length];
+                        uiExercises = [...uiExercises];
+                      }}
+                      disabled={set.done}
+                      title={set.setType === 'myo_rep' ? 'Myo Reps' : set.setType === 'myo_rep_match' ? 'Myo Match' : set.setType === 'drop_set' ? 'Drop Set' : 'Standard (tap to change)'}
+                      class="text-xs text-center font-mono w-7 h-7 rounded-md transition-colors
+                             {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
+                              set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
+                              set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
+                              'text-zinc-400 hover:bg-zinc-800'}">
+                      {set.setNumber}
+                    </button>
 
                     <!-- Weight / Assist -->
                     <div class="flex flex-col gap-0.5">
