@@ -19,10 +19,18 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// Handle responses — redirect to login on 401
+// Auto-retry on network errors or server restart (502/503/504)
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
+    const config = error.config as any;
+    const isRetryable = !error.response || [502, 503, 504].includes(error.response.status);
+    if (isRetryable && config && !config._retryCount) {
+      config._retryCount = 1;
+      console.log('API request failed, retrying in 2s...');
+      await new Promise(r => setTimeout(r, 2000));
+      return api.request(config);
+    }
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       // Try refresh token
       const refreshToken = localStorage.getItem('hgt_refresh_token');
