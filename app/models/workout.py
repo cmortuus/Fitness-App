@@ -142,6 +142,7 @@ class WorkoutPlan(Base):
     min_technique_score: Mapped[float | None] = mapped_column(Float, nullable=True, default=0.0)
 
     # Lifecycle
+    is_draft: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     # Timestamps

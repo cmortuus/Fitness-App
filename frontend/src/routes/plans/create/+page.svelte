@@ -90,8 +90,17 @@
       allExercises = exercisesData;
       recentExercises = recentData;
       groupedExercises = groupedData;
-      initializeDays();
+
+      // Check for saved draft in localStorage
+      const restored = restoreDraftFromStorage();
+      if (!restored) {
+        initializeDays();
+      }
       initialized = true;
+
+      // Auto-save to localStorage every 30s
+      const autosaveInterval = setInterval(saveDraftToStorage, 30000);
+      return () => clearInterval(autosaveInterval);
     } catch (error) {
       console.error('Failed to load data:', error);
       alert('Failed to load exercises: ' + (error instanceof Error ? error.message : String(error)));
@@ -310,24 +319,76 @@
     }
   }
 
+  function buildPlanData(isDraft: boolean = false) {
+    return {
+      name: newPlanName || (isDraft ? 'Untitled Draft' : ''),
+      description: newPlanDescription,
+      block_type: blockType,
+      duration_weeks: durationWeeks,
+      number_of_days: numberOfDays,
+      days: days,
+      auto_progression: true,
+      is_draft: isDraft,
+    };
+  }
+
   async function handleCreatePlan() {
     try {
-      const planData = {
-        name: newPlanName,
-        description: newPlanDescription,
-        block_type: blockType,
-        duration_weeks: durationWeeks,
-        number_of_days: numberOfDays,
-        days: days,
-        auto_progression: true,
-      };
-      console.log('Creating plan with data:', planData);
-      await createPlan(planData);
+      await createPlan(buildPlanData(false));
+      clearDraftFromStorage();
       goto('/plans');
     } catch (error) {
       console.error('Failed to create plan:', error);
       alert('Failed to create plan: ' + (error instanceof Error ? error.message : String(error)));
     }
+  }
+
+  async function handleSaveDraft() {
+    try {
+      await createPlan(buildPlanData(true));
+      clearDraftFromStorage();
+      goto('/plans');
+    } catch (error) {
+      console.error('Failed to save draft:', error);
+      alert('Failed to save draft: ' + (error instanceof Error ? error.message : String(error)));
+    }
+  }
+
+  // ── localStorage autosave ─────────────────────────────────────────────
+  const DRAFT_KEY = 'hgt_plan_draft';
+
+  function saveDraftToStorage() {
+    if (typeof localStorage === 'undefined') return;
+    const draft = {
+      name: newPlanName, description: newPlanDescription, blockType, durationWeeks,
+      numberOfDays, days, currentStep, savedAt: Date.now(),
+    };
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+  }
+
+  function clearDraftFromStorage() {
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(DRAFT_KEY);
+  }
+
+  function restoreDraftFromStorage(): boolean {
+    if (typeof localStorage === 'undefined') return false;
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return false;
+    try {
+      const draft = JSON.parse(raw);
+      if (Date.now() - draft.savedAt > 7 * 24 * 60 * 60 * 1000) {
+        clearDraftFromStorage();
+        return false; // Older than 7 days
+      }
+      newPlanName = draft.name || '';
+      newPlanDescription = draft.description || '';
+      blockType = draft.blockType || 'other';
+      durationWeeks = draft.durationWeeks || 4;
+      numberOfDays = draft.numberOfDays || 3;
+      days = draft.days || [];
+      currentStep = draft.currentStep || 1;
+      return true;
+    } catch { return false; }
   }
 
   function goToStep2() {
@@ -426,6 +487,12 @@
       </div>
 
       {#if currentStep === 2}
+        <button
+          onclick={handleSaveDraft}
+          class="btn-ghost"
+        >
+          Save Draft
+        </button>
         <button
           onclick={handleCreatePlan}
           class="btn-primary"

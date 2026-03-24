@@ -181,8 +181,9 @@ class WorkoutPlanCreate(BaseModel):
     block_type: BlockType = BlockType.OTHER
     duration_weeks: int = Field(default=4, ge=1, le=12)
     number_of_days: int = Field(default=1, ge=1, le=7)
-    days: list[PlannedDay]
+    days: list[PlannedDay] = []
     auto_progression: bool = True
+    is_draft: bool = False
 
 
 class WorkoutPlanResponse(BaseModel):
@@ -195,6 +196,7 @@ class WorkoutPlanResponse(BaseModel):
     number_of_days: int
     days: list[PlannedDay]
     auto_progression: bool
+    is_draft: bool = False
     is_archived: bool = False
     created_at: datetime
 

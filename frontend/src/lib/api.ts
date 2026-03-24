@@ -192,6 +192,7 @@ export interface WorkoutPlan {
   days: PlannedDay[];
   auto_progression: boolean;
   min_technique_score: number;
+  is_draft: boolean;
   is_archived: boolean;
 }
 
@@ -384,8 +385,14 @@ export async function createPlan(data: {
   days: PlannedDay[];
   auto_progression?: boolean;
   min_technique_score?: number;
+  is_draft?: boolean;
 }): Promise<WorkoutPlan> {
   const response = await api.post('/plans/', data);
+  return response.data;
+}
+
+export async function getPlansWithDrafts(): Promise<WorkoutPlan[]> {
+  const response = await api.get('/plans/?drafts=true');
   return response.data;
 }
 
@@ -395,6 +402,11 @@ export async function deletePlan(planId: number): Promise<void> {
 
 export async function archivePlan(planId: number): Promise<WorkoutPlan> {
   const response = await api.post(`/plans/${planId}/archive`);
+  return response.data;
+}
+
+export async function publishPlan(planId: number): Promise<WorkoutPlan> {
+  const response = await api.post(`/plans/${planId}/publish`);
   return response.data;
 }
 

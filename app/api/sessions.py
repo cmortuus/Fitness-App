@@ -414,6 +414,11 @@ async def create_session_from_plan(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workout plan {plan_id} not found",
         )
+    if plan.is_draft:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot start a workout from a draft plan. Publish it first.",
+        )
 
     # Parse planned exercises
     planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}

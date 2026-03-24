@@ -49,6 +49,7 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         "number_of_days": number_of_days,
         "days": days,
         "auto_progression": plan.auto_progression,
+        "is_draft": plan.is_draft,
         "is_archived": plan.is_archived,
         "created_at": plan.created_at,
     }
@@ -58,9 +59,13 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
 async def list_plans(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    include_drafts: bool = Query(False, alias="drafts"),
 ) -> list[dict]:
-    """List all workout plans."""
-    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.user_id == user.id).order_by(WorkoutPlan.created_at.desc()))
+    """List all workout plans. Pass ?drafts=true to include drafts."""
+    stmt = select(WorkoutPlan).where(WorkoutPlan.user_id == user.id)
+    if not include_drafts:
+        stmt = stmt.where(WorkoutPlan.is_draft.is_(False))
+    result = await db.execute(stmt.order_by(WorkoutPlan.created_at.desc()))
     plans = result.scalars().all()
     return [serialize_plan(p) for p in plans]
 
@@ -174,32 +179,34 @@ async def create_plan(
     }
     planned_exercises_json = json.dumps(planned_data)
 
-    # Validate all exercise IDs exist
-    all_exercise_ids = {
-        ex.exercise_id
-        for day in plan_data.days
-        for ex in day.exercises
-    }
-    if all_exercise_ids:
-        result = await db.execute(
-            select(Exercise.id).where(Exercise.id.in_(all_exercise_ids))
-        )
-        found_ids = {row[0] for row in result.all()}
-        missing = all_exercise_ids - found_ids
-        if missing:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail=f"Exercise IDs not found: {sorted(missing)}",
+    # Validate exercise IDs (skip for drafts — allow empty/incomplete plans)
+    if not plan_data.is_draft:
+        all_exercise_ids = {
+            ex.exercise_id
+            for day in plan_data.days
+            for ex in day.exercises
+        }
+        if all_exercise_ids:
+            result = await db.execute(
+                select(Exercise.id).where(Exercise.id.in_(all_exercise_ids))
             )
+            found_ids = {row[0] for row in result.all()}
+            missing = all_exercise_ids - found_ids
+            if missing:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Exercise IDs not found: {sorted(missing)}",
+                )
 
     plan = WorkoutPlan(
         name=plan_data.name,
         description=plan_data.description,
         block_type=plan_data.block_type.value,
         duration_weeks=plan_data.duration_weeks,
-        current_week=1,  # Start at week 1
+        current_week=1,
         planned_exercises=planned_exercises_json,
         auto_progression=plan_data.auto_progression,
+        is_draft=plan_data.is_draft,
         user_id=user.id,
     )
     db.add(plan)
@@ -220,6 +227,41 @@ async def archive_plan(
     if not plan:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Plan {plan_id} not found")
     plan.is_archived = True
+    await db.flush()
+    await db.refresh(plan)
+    return serialize_plan(plan)
+
+
+@router.post("/{plan_id}/publish", response_model=WorkoutPlanResponse)
+async def publish_plan(
+    plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Publish a draft plan — validates exercises and activates it."""
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Plan {plan_id} not found")
+    if not plan.is_draft:
+        return serialize_plan(plan)  # Already published
+
+    # Validate all exercises exist before publishing
+    try:
+        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    except (json.JSONDecodeError, TypeError):
+        planned_data = {}
+    days = planned_data.get("days", [])
+    all_exercise_ids = {ex["exercise_id"] for day in days for ex in day.get("exercises", [])}
+    if all_exercise_ids:
+        ex_result = await db.execute(select(Exercise.id).where(Exercise.id.in_(all_exercise_ids)))
+        found_ids = {row[0] for row in ex_result.all()}
+        missing = all_exercise_ids - found_ids
+        if missing:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                                detail=f"Cannot publish: exercise IDs not found: {sorted(missing)}")
+
+    plan.is_draft = False
     await db.flush()
     await db.refresh(plan)
     return serialize_plan(plan)
@@ -282,6 +324,7 @@ class PlanUpdate(BaseModel):
     number_of_days: int | None = None
     days: list | None = None
     auto_progression: bool | None = None
+    is_draft: bool | None = None
 
 
 @router.put("/{plan_id}", response_model=WorkoutPlanResponse)
@@ -311,6 +354,8 @@ async def update_plan(
         plan.duration_weeks = plan_data.duration_weeks
     if plan_data.auto_progression is not None:
         plan.auto_progression = plan_data.auto_progression
+    if plan_data.is_draft is not None:
+        plan.is_draft = plan_data.is_draft
 
     # Handle days update
     if plan_data.days is not None or plan_data.number_of_days is not None:
