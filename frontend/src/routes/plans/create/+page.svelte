@@ -1,8 +1,8 @@
 <script lang="ts">  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { exercises } from '$lib/stores';
-  import { getExercises, getRecentExercises, getExercisesGrouped, createPlan, createExercise, deleteExercise } from '$lib/api';
-  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise } from '$lib/api';
+  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise } from '$lib/api';
+  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutTemplate } from '$lib/api';
 
   // Plan basic info
   let newPlanName = $state('');
@@ -25,7 +25,29 @@
   // Days configuration
   let days = $state<PlannedDay[]>([]);
   let initialized = $state(false);
-  let currentStep = $state(1); // 1: Basic Info, 2: Configure Days
+  let currentStep = $state(1); // 0: Choose method, 1: Basic Info, 2: Configure Days
+  let createMode = $state<'choose' | 'template' | 'custom'>('choose');
+
+  // Template browser state
+  let templates = $state<WorkoutTemplate[]>([]);
+  let splitFilter = $state<string | null>(null);
+  let equipFilter = $state<string | null>(null);
+  let previewTmpl = $state<WorkoutTemplate | null>(null);
+  let cloning = $state(false);
+
+  const SPLITS = [
+    { key: 'full_body', label: 'Full Body' },
+    { key: 'upper_lower', label: 'Upper/Lower' },
+    { key: 'ppl', label: 'PPL' },
+    { key: 'bro_split', label: 'Bro Split' },
+  ];
+  const EQUIP_TIERS = [
+    { key: 'minimal', label: 'Minimal' },
+    { key: 'home', label: 'Home Gym' },
+    { key: 'standard', label: 'Standard' },
+    { key: 'well_equipped', label: 'Well-Equipped' },
+    { key: 'elite', label: 'Elite' },
+  ];
 
   // Exercise selection
   let searchQuery = $state('');
@@ -408,6 +430,37 @@
     goto('/plans');
   }
 
+  async function loadTemplates() {
+    try {
+      templates = await getTemplates();
+    } catch { templates = []; }
+  }
+
+  let filteredTemplates = $derived(
+    templates.filter(t => {
+      if (splitFilter && t.split_type !== splitFilter) return false;
+      if (equipFilter && t.equipment_tier !== equipFilter) return false;
+      return true;
+    })
+  );
+
+  function getExName(exId: number): string {
+    return allExercises.find(e => e.id === exId)?.display_name || `Exercise #${exId}`;
+  }
+
+  async function importTemplate(tmpl: WorkoutTemplate) {
+    cloning = true;
+    try {
+      const { cloneTemplate } = await import('$lib/api');
+      const result = await cloneTemplate(tmpl.id);
+      previewTmpl = null;
+      goto('/plans');
+    } catch (e) {
+      alert('Failed to import template');
+    }
+    cloning = false;
+  }
+
   function getExerciseName(exerciseId: number): string {
     const ex = allExercises.find(e => e.id === exerciseId);
     return ex?.display_name || `Exercise ${exerciseId}`;
@@ -480,32 +533,134 @@
   <div class="bg-zinc-900 border-b border-zinc-800 p-4">
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-4">
-        <button onclick={() => currentStep === 1 ? cancel() : goBackToStep1()} class="text-zinc-400 hover:text-white">
-          ← {currentStep === 1 ? 'Back to Plans' : 'Back'}
+        <button onclick={() => {
+          if (createMode === 'template' || createMode === 'custom') { createMode = 'choose'; }
+          else if (currentStep === 2) { goBackToStep1(); }
+          else { cancel(); }
+        }} class="text-zinc-400 hover:text-white">
+          ← {createMode === 'choose' ? 'Back to Plans' : 'Back'}
         </button>
-        <h1 class="text-xl font-bold">Create Workout Plan</h1>
+        <h1 class="text-xl font-bold">
+          {createMode === 'choose' ? 'New Plan' : createMode === 'template' ? 'Choose Template' : 'Build Custom Plan'}
+        </h1>
       </div>
 
-      {#if currentStep === 2}
-        <button
-          onclick={handleSaveDraft}
-          class="btn-ghost"
-        >
-          Save Draft
-        </button>
-        <button
-          onclick={handleCreatePlan}
-          class="btn-primary"
-        >
-          Create Plan
-        </button>
+      {#if currentStep === 2 && createMode === 'custom'}
+        <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
+        <button onclick={handleCreatePlan} class="btn-primary">Create Plan</button>
       {/if}
     </div>
   </div>
 
   <div class="p-6 max-w-7xl mx-auto space-y-6">
-    <!-- Step 1: Basic Info -->
-    {#if currentStep === 1}
+
+    <!-- Step 0: Choose method -->
+    {#if createMode === 'choose'}
+      <div class="max-w-md mx-auto space-y-4 pt-8">
+        <button onclick={() => { createMode = 'template'; loadTemplates(); }}
+                class="card !p-6 w-full text-left hover:bg-zinc-800/60 transition-colors">
+          <h3 class="font-semibold text-white text-lg">Use a Template</h3>
+          <p class="text-sm text-zinc-400 mt-1">65 pre-built programs across Full Body, Upper/Lower, PPL, and Bro splits. Choose your equipment level and days per week.</p>
+        </button>
+
+        <button onclick={() => { createMode = 'custom'; currentStep = 1; }}
+                class="card !p-6 w-full text-left hover:bg-zinc-800/60 transition-colors">
+          <h3 class="font-semibold text-white text-lg">Build from Scratch</h3>
+          <p class="text-sm text-zinc-400 mt-1">Create a fully custom plan — pick exercises, set counts, and day splits yourself.</p>
+        </button>
+      </div>
+
+    <!-- Template browser -->
+    {:else if createMode === 'template'}
+      <div class="max-w-2xl mx-auto space-y-4">
+        <!-- Filters -->
+        <div class="flex gap-2 overflow-x-auto pb-1">
+          <button onclick={() => splitFilter = null}
+                  class="shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+                         {!splitFilter ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            All
+          </button>
+          {#each SPLITS as s}
+            <button onclick={() => splitFilter = splitFilter === s.key ? null : s.key}
+                    class="shrink-0 px-3 py-1.5 rounded-full text-sm font-medium transition-colors
+                           {splitFilter === s.key ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+              {s.label}
+            </button>
+          {/each}
+        </div>
+        <div class="flex gap-2">
+          <select bind:value={equipFilter}
+                  class="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white">
+            <option value={null}>All Equipment</option>
+            {#each EQUIP_TIERS as e}
+              <option value={e.key}>{e.label}</option>
+            {/each}
+          </select>
+        </div>
+
+        <!-- Template list -->
+        {#if filteredTemplates.length === 0}
+          <p class="text-center py-8 text-zinc-500">No templates match your filters.</p>
+        {:else}
+          <div class="space-y-2">
+            {#each filteredTemplates as tmpl}
+              <button onclick={() => previewTmpl = tmpl}
+                      class="card !p-3 w-full text-left hover:bg-zinc-800/60 transition-colors">
+                <div class="flex items-center justify-between">
+                  <div>
+                    <p class="font-medium text-white text-sm">{tmpl.name}</p>
+                    <p class="text-xs text-zinc-500 mt-0.5">
+                      {tmpl.days_per_week} days/wk · {tmpl.exercise_count} exercises
+                    </p>
+                  </div>
+                  <span class="text-zinc-600">›</span>
+                </div>
+              </button>
+            {/each}
+          </div>
+          <p class="text-center text-xs text-zinc-600">{filteredTemplates.length} templates</p>
+        {/if}
+      </div>
+
+      <!-- Template preview modal -->
+      {#if previewTmpl}
+        <div class="fixed inset-0 bg-black/80 flex items-end sm:items-center justify-center z-50">
+          <div class="bg-zinc-900 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl max-h-[90vh] flex flex-col border border-zinc-800 shadow-2xl">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-zinc-800 shrink-0">
+              <div>
+                <h3 class="font-semibold text-white">{previewTmpl.name}</h3>
+                <p class="text-xs text-zinc-500">{previewTmpl.days_per_week} days/wk</p>
+              </div>
+              <button onclick={() => previewTmpl = null} class="text-zinc-400 hover:text-white text-xl">✕</button>
+            </div>
+            <div class="p-4 overflow-y-auto space-y-4 flex-1">
+              {#if previewTmpl.description}
+                <p class="text-sm text-zinc-400">{previewTmpl.description}</p>
+              {/if}
+              {#each previewTmpl.days as day}
+                <div class="space-y-1">
+                  <h4 class="text-sm font-semibold text-primary-400">{day.day_name}</h4>
+                  {#each day.exercises as ex}
+                    <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
+                      <span class="text-zinc-300">{getExName(ex.exercise_id)}</span>
+                      <span class="text-xs text-zinc-500">{ex.sets}×{ex.reps}</span>
+                    </div>
+                  {/each}
+                </div>
+              {/each}
+            </div>
+            <div class="p-4 border-t border-zinc-800 shrink-0">
+              <button onclick={() => importTemplate(previewTmpl!)} disabled={cloning}
+                      class="btn-primary w-full !py-3 disabled:opacity-50">
+                {cloning ? 'Importing...' : 'Use This Template'}
+              </button>
+            </div>
+          </div>
+        </div>
+      {/if}
+
+    <!-- Custom plan builder: Step 1 -->
+    {:else if currentStep === 1}
       {#if !initialized}
         <div class="card max-w-2xl mx-auto text-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
