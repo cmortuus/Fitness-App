@@ -255,6 +255,7 @@ class FoodItemCreate(BaseModel):
     fat_per_100g: float = Field(ge=0)
     serving_size_g: float = Field(default=100, gt=0)
     serving_label: str | None = None
+    micronutrients: dict | None = None
 
 
 class NutritionEntryCreate(BaseModel):
@@ -267,6 +268,7 @@ class NutritionEntryCreate(BaseModel):
     protein: float = Field(ge=0)
     carbs: float = Field(ge=0)
     fat: float = Field(ge=0)
+    micronutrients: dict | None = None
 
 
 class MacroGoalsUpdate(BaseModel):
@@ -275,6 +277,7 @@ class MacroGoalsUpdate(BaseModel):
     carbs: float = Field(ge=0)
     fat: float = Field(ge=0)
     effective_from: date | None = None
+    micronutrient_goals: dict | None = None
 
 
 class PhaseType(str, Enum):

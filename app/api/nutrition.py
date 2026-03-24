@@ -1,5 +1,6 @@
 """Nutrition tracking API endpoints — food log, custom foods, goals, and search."""
 
+import json
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated
 
@@ -34,6 +35,7 @@ def serialize_food_item(item: FoodItem) -> dict:
         "serving_size_g": item.serving_size_g,
         "serving_label": item.serving_label,
         "is_custom": item.is_custom,
+        "micronutrients": json.loads(item.micronutrients) if item.micronutrients else None,
     }
 
 
@@ -50,6 +52,7 @@ def serialize_entry(entry: NutritionEntry) -> dict:
         "carbs": entry.carbs,
         "fat": entry.fat,
         "logged_at": entry.logged_at.isoformat(),
+        "micronutrients": json.loads(entry.micronutrients) if entry.micronutrients else None,
     }
 
 
@@ -61,6 +64,7 @@ def serialize_goal(goal: MacroGoal) -> dict:
         "carbs": goal.carbs,
         "fat": goal.fat,
         "effective_from": goal.effective_from.isoformat(),
+        "micronutrient_goals": json.loads(goal.micronutrient_goals) if goal.micronutrient_goals else None,
     }
 
 
@@ -120,6 +124,7 @@ async def create_food(
         serving_label=data.serving_label,
         is_custom=True,
         user_id=user.id,
+        micronutrients=json.dumps(data.micronutrients) if data.micronutrients else None,
     )
     db.add(food)
     await db.flush()
@@ -161,6 +166,7 @@ async def list_entries(
 
     meals: dict[str, list[dict]] = {"breakfast": [], "lunch": [], "dinner": [], "snack": []}
     totals = {"calories": 0.0, "protein": 0.0, "carbs": 0.0, "fat": 0.0}
+    micro_totals: dict[str, float] = {}
     for e in entries:
         serialized = serialize_entry(e)
         meals.setdefault(e.meal, []).append(serialized)
@@ -168,8 +174,12 @@ async def list_entries(
         totals["protein"] += e.protein
         totals["carbs"] += e.carbs
         totals["fat"] += e.fat
+        if e.micronutrients:
+            micros = json.loads(e.micronutrients)
+            for key, val in micros.items():
+                micro_totals[key] = micro_totals.get(key, 0.0) + val
 
-    return {"date": target_date.isoformat(), "meals": meals, "totals": totals}
+    return {"date": target_date.isoformat(), "meals": meals, "totals": totals, "micronutrient_totals": micro_totals or None}
 
 
 @router.post("/entries", status_code=status.HTTP_201_CREATED)
@@ -190,6 +200,7 @@ async def add_entry(
         carbs=data.carbs,
         fat=data.fat,
         user_id=user.id,
+        micronutrients=json.dumps(data.micronutrients) if data.micronutrients else None,
     )
     db.add(entry)
     await db.flush()
@@ -235,6 +246,18 @@ async def daily_summary(
     row = result.one()
     totals = {"calories": row[0], "protein": row[1], "carbs": row[2], "fat": row[3]}
 
+    # Micronutrient totals (need to iterate entries since these are JSON)
+    entry_result = await db.execute(
+        select(NutritionEntry.micronutrients)
+        .where(NutritionEntry.date == target_date, NutritionEntry.user_id == user.id)
+    )
+    micro_totals: dict[str, float] = {}
+    for (micro_json,) in entry_result.all():
+        if micro_json:
+            micros = json.loads(micro_json)
+            for key, val in micros.items():
+                micro_totals[key] = micro_totals.get(key, 0.0) + val
+
     # Goals (most recent effective_from <= target_date)
     goal_result = await db.execute(
         select(MacroGoal)
@@ -254,7 +277,7 @@ async def daily_summary(
             "fat": goal.fat - totals["fat"],
         }
 
-    return {"date": target_date.isoformat(), "totals": totals, "goals": goals, "remaining": remaining}
+    return {"date": target_date.isoformat(), "totals": totals, "goals": goals, "remaining": remaining, "micronutrient_totals": micro_totals or None}
 
 
 @router.get("/weekly-report")
@@ -385,11 +408,13 @@ async def set_goals(
     )
     goal = result.scalar_one_or_none()
 
+    micro_goals_json = json.dumps(data.micronutrient_goals) if data.micronutrient_goals else None
     if goal:
         goal.calories = data.calories
         goal.protein = data.protein
         goal.carbs = data.carbs
         goal.fat = data.fat
+        goal.micronutrient_goals = micro_goals_json
     else:
         goal = MacroGoal(
             calories=data.calories,
@@ -398,6 +423,7 @@ async def set_goals(
             fat=data.fat,
             effective_from=effective,
             user_id=user.id,
+            micronutrient_goals=micro_goals_json,
         )
         db.add(goal)
 

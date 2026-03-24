@@ -465,6 +465,27 @@ export async function deleteBodyWeight(entryId: number): Promise<void> {
 
 // ── Nutrition ────────────────────────────────────────────────────────────────
 
+export type Micronutrients = Record<string, number>;
+
+export const MICRO_META: Record<string, { label: string; unit: string; rda: number | null }> = {
+  fiber_g: { label: 'Fiber', unit: 'g', rda: 28 },
+  sugar_g: { label: 'Sugar', unit: 'g', rda: null },
+  sodium_mg: { label: 'Sodium', unit: 'mg', rda: 2300 },
+  calcium_mg: { label: 'Calcium', unit: 'mg', rda: 1000 },
+  iron_mg: { label: 'Iron', unit: 'mg', rda: 18 },
+  magnesium_mg: { label: 'Magnesium', unit: 'mg', rda: 400 },
+  potassium_mg: { label: 'Potassium', unit: 'mg', rda: 2600 },
+  zinc_mg: { label: 'Zinc', unit: 'mg', rda: 11 },
+  phosphorus_mg: { label: 'Phosphorus', unit: 'mg', rda: 700 },
+  vitamin_a_mcg: { label: 'Vitamin A', unit: 'mcg', rda: 900 },
+  vitamin_c_mg: { label: 'Vitamin C', unit: 'mg', rda: 90 },
+  vitamin_d_mcg: { label: 'Vitamin D', unit: 'mcg', rda: 20 },
+  vitamin_e_mg: { label: 'Vitamin E', unit: 'mg', rda: 15 },
+  vitamin_b12_mcg: { label: 'Vitamin B12', unit: 'mcg', rda: 2.4 },
+  cholesterol_mg: { label: 'Cholesterol', unit: 'mg', rda: null },
+  omega3_g: { label: 'Omega-3', unit: 'g', rda: 1.6 },
+};
+
 export interface FoodSearchResult {
   name: string;
   brand: string | null;
@@ -477,6 +498,7 @@ export interface FoodSearchResult {
   fat_per_100g: number | null;
   serving_size_g: number;
   serving_label: string | null;
+  micronutrients?: Micronutrients | null;
 }
 
 export interface FoodItem extends FoodSearchResult {
@@ -495,6 +517,7 @@ export interface NutritionEntry {
   protein: number;
   carbs: number;
   fat: number;
+  micronutrients?: Micronutrients | null;
   logged_at: string;
 }
 

@@ -7,9 +7,10 @@
     searchFoods, lookupBarcode, getCustomFoods, createCustomFood,
     getActivePhase, createPhase, endPhase, recalculatePhase,
   } from '$lib/api';
+  import { MICRO_META } from '$lib/api';
   import type {
     NutritionEntry, DietPhase, DailySummary, DailyEntries,
-    FoodSearchResult, FoodItem,
+    FoodSearchResult, FoodItem, Micronutrients,
   } from '$lib/api';
 
   // ─── State ────────────────────────────────────────────────────────────────
@@ -71,6 +72,9 @@
   let wizProtein = $state<number | null>(null);  // g per lb
   let wizPreview = $state<DietPhase | null>(null);
   let wizCreating = $state(false);
+
+  // Micronutrients
+  let showMicros = $state(false);
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(() => { loadDay(); });
@@ -165,11 +169,19 @@
 
   function macrosForQty(food: FoodSearchResult, qty: number) {
     const scale = qty / 100;
+    let micros: Record<string, number> | undefined;
+    if (food.micronutrients) {
+      micros = {};
+      for (const [k, v] of Object.entries(food.micronutrients)) {
+        micros[k] = Math.round(v * scale * 100) / 100;
+      }
+    }
     return {
       calories: Math.round((food.calories_per_100g ?? 0) * scale),
       protein: Math.round((food.protein_per_100g ?? 0) * scale * 10) / 10,
       carbs: Math.round((food.carbs_per_100g ?? 0) * scale * 10) / 10,
       fat: Math.round((food.fat_per_100g ?? 0) * scale * 10) / 10,
+      micronutrients: micros,
     };
   }
 
@@ -464,6 +476,39 @@
         </div>
       {/if}
     </div>
+
+    <!-- ─── Micronutrients ──────────────────────────────────────────────── -->
+    {#if summary?.micronutrient_totals && Object.keys(summary.micronutrient_totals).length > 0}
+      <div class="card !p-0 overflow-hidden">
+        <button onclick={() => showMicros = !showMicros}
+                class="w-full flex items-center justify-between px-4 py-3 hover:bg-zinc-800/40 transition-colors">
+          <span class="text-sm font-semibold text-white">Micronutrients</span>
+          <span class="text-zinc-500 text-sm transition-transform duration-200" class:rotate-180={showMicros}>▾</span>
+        </button>
+        {#if showMicros}
+          <div class="border-t border-zinc-800 px-4 py-3 space-y-2">
+            {#each Object.entries(MICRO_META) as [key, meta]}
+              {@const val = summary.micronutrient_totals[key] ?? 0}
+              {@const goal = summary.micronutrient_goals?.[key] ?? meta.rda}
+              {@const pct = goal ? Math.min(100, (val / goal) * 100) : 0}
+              {@const color = !goal ? 'bg-zinc-600' : pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-red-500'}
+              <div class="flex items-center gap-3">
+                <span class="text-xs text-zinc-400 w-24 shrink-0">{meta.label}</span>
+                <div class="flex-1 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+                  <div class="{color} h-full rounded-full transition-all duration-300" style="width: {pct}%"></div>
+                </div>
+                <span class="text-xs text-zinc-500 w-20 text-right shrink-0">
+                  {val > 0 ? (val < 10 ? val.toFixed(1) : Math.round(val)) : '0'}{meta.unit}
+                  {#if goal}
+                    <span class="text-zinc-600">/ {goal}{meta.unit}</span>
+                  {/if}
+                </span>
+              </div>
+            {/each}
+          </div>
+        {/if}
+      </div>
+    {/if}
 
     <!-- ─── Food log ─────────────────────────────────────────────────────── -->
     <div class="card !p-0 overflow-hidden">

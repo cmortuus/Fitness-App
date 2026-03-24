@@ -2,7 +2,7 @@
 
 from datetime import date as date_type, datetime, timezone
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -26,6 +26,7 @@ class FoodItem(Base):
     fat_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
     serving_size_g: Mapped[float] = mapped_column(Float, nullable=False, default=100.0)
     serving_label: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    micronutrients: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: per-100g values
     is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
@@ -51,6 +52,7 @@ class NutritionEntry(Base):
     protein: Mapped[float] = mapped_column(Float, nullable=False)
     carbs: Mapped[float] = mapped_column(Float, nullable=False)
     fat: Mapped[float] = mapped_column(Float, nullable=False)
+    micronutrients: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: actual intake values
     logged_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )
@@ -68,6 +70,7 @@ class MacroGoal(Base):
     carbs: Mapped[float] = mapped_column(Float, nullable=False)
     fat: Mapped[float] = mapped_column(Float, nullable=False)
     effective_from: Mapped[date_type] = mapped_column(Date, nullable=False)
+    micronutrient_goals: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: RDA targets
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
     )

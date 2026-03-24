@@ -12,11 +12,50 @@ from app.config import get_settings
 
 _TIMEOUT = httpx.Timeout(10.0, connect=5.0)
 
-# USDA nutrient IDs
+# USDA nutrient IDs — macros
 _USDA_CALORIES = 1008
 _USDA_PROTEIN = 1003
 _USDA_CARBS = 1005
 _USDA_FAT = 1004
+
+# USDA nutrient IDs — micronutrients
+_USDA_MICROS = {
+    1079: "fiber_g",
+    2000: "sugar_g",
+    1093: "sodium_mg",
+    1087: "calcium_mg",
+    1089: "iron_mg",
+    1090: "magnesium_mg",
+    1092: "potassium_mg",
+    1095: "zinc_mg",
+    1091: "phosphorus_mg",
+    1106: "vitamin_a_mcg",
+    1162: "vitamin_c_mg",
+    1114: "vitamin_d_mcg",
+    1109: "vitamin_e_mg",
+    1178: "vitamin_b12_mcg",
+    1253: "cholesterol_mg",
+}
+
+# Open Food Facts nutriment keys → our micro keys
+_OFF_MICROS = {
+    "fiber_100g": "fiber_g",
+    "sugars_100g": "sugar_g",
+    "sodium_100g": "sodium_mg",
+    "calcium_100g": "calcium_mg",
+    "iron_100g": "iron_mg",
+    "magnesium_100g": "magnesium_mg",
+    "potassium_100g": "potassium_mg",
+    "zinc_100g": "zinc_mg",
+    "phosphorus_100g": "phosphorus_mg",
+    "vitamin-a_100g": "vitamin_a_mcg",
+    "vitamin-c_100g": "vitamin_c_mg",
+    "vitamin-d_100g": "vitamin_d_mcg",
+    "vitamin-e_100g": "vitamin_e_mg",
+    "vitamin-b12_100g": "vitamin_b12_mcg",
+    "cholesterol_100g": "cholesterol_mg",
+    "omega-3-fat_100g": "omega3_g",
+}
 
 
 def _normalize_off_product(product: dict) -> dict | None:
@@ -25,6 +64,12 @@ def _normalize_off_product(product: dict) -> dict | None:
     if not name:
         return None
     nuts = product.get("nutriments", {})
+    # Extract micronutrients
+    micros = {}
+    for off_key, our_key in _OFF_MICROS.items():
+        val = nuts.get(off_key)
+        if val is not None and val > 0:
+            micros[our_key] = round(val, 3)
     return {
         "name": name,
         "brand": product.get("brands", "").split(",")[0].strip() or None,
@@ -37,6 +82,7 @@ def _normalize_off_product(product: dict) -> dict | None:
         "fat_per_100g": nuts.get("fat_100g"),
         "serving_size_g": _parse_serving(product.get("serving_size")),
         "serving_label": product.get("serving_size"),
+        "micronutrients": micros or None,
     }
 
 
@@ -46,6 +92,12 @@ def _normalize_usda_food(food: dict) -> dict | None:
     if not name:
         return None
     nutrients = {n["nutrientId"]: n.get("value", 0) for n in food.get("foodNutrients", [])}
+    # Extract micronutrients
+    micros = {}
+    for usda_id, our_key in _USDA_MICROS.items():
+        val = nutrients.get(usda_id)
+        if val is not None and val > 0:
+            micros[our_key] = round(val, 3)
     return {
         "name": name,
         "brand": food.get("brandName") or food.get("brandOwner"),
@@ -58,6 +110,7 @@ def _normalize_usda_food(food: dict) -> dict | None:
         "fat_per_100g": nutrients.get(_USDA_FAT),
         "serving_size_g": 100.0,
         "serving_label": None,
+        "micronutrients": micros or None,
     }
 
 
