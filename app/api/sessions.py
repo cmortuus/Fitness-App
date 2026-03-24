@@ -650,15 +650,35 @@ async def create_session_from_plan(
 
         plan_set_type = exercise_data.get("set_type", "standard")
 
+        # Track set 1's planned values so myo_rep_match sets can copy them
+        set1_weight_kg = None
+        set1_reps = None
+        set1_left = None
+        set1_right = None
+
         for set_num in range(1, sets + 1):
             # Inherit set_type from prior session's matching set (user may have changed it mid-workout)
             prior_sets = prior_set_data.get(exercise_id, {})
             prior_set_for_num = prior_sets.get(set_num, {})
             effective_set_type = prior_set_for_num.get("set_type", plan_set_type)
 
-            # Each set is progressed from its own corresponding prior-session set.
-            weight_kg, suggested_reps, planned_left, planned_right = \
-                _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+            if effective_set_type == "myo_rep_match" and set_num > 1 and set1_weight_kg is not None:
+                # Myo match sets copy set 1 exactly — no independent progression
+                weight_kg = set1_weight_kg
+                suggested_reps = set1_reps
+                planned_left = set1_left
+                planned_right = set1_right
+            else:
+                # Normal progression from prior session's corresponding set
+                weight_kg, suggested_reps, planned_left, planned_right = \
+                    _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+
+            # Save set 1's values for myo_rep_match copying
+            if set_num == 1:
+                set1_weight_kg = weight_kg
+                set1_reps = suggested_reps
+                set1_left = planned_left
+                set1_right = planned_right
 
             exercise_set = ExerciseSet(
                 workout_session_id=workout_session.id,
