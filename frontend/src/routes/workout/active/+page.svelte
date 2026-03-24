@@ -1276,15 +1276,15 @@
                       value={set.setType || 'standard'}
                       onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
                       disabled={set.done}
-                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer appearance-none text-center w-12 py-1 rounded-md transition-colors
+                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer text-center w-16 py-1 rounded-md transition-colors
                              {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
                               set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
                               set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
                               'text-zinc-500'}">
-                      <option value="standard">S{set.setNumber}</option>
-                      <option value="myo_rep">Myo</option>
-                      <option value="myo_rep_match">MyoM</option>
-                      <option value="drop_set">Drop</option>
+                      <option value="standard">Straight</option>
+                      <option value="myo_rep">Myo Rep</option>
+                      <option value="myo_rep_match">Myo Match</option>
+                      <option value="drop_set">Drop Set</option>
                     </select>
 
                     <!-- Weight / Assist -->
@@ -1435,15 +1435,15 @@
                       value={set.setType || 'standard'}
                       onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
                       disabled={set.done}
-                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer appearance-none text-center w-12 py-1 rounded-md transition-colors
+                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer text-center w-16 py-1 rounded-md transition-colors
                              {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
                               set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
                               set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
                               'text-zinc-500'}">
-                      <option value="standard">S{set.setNumber}</option>
-                      <option value="myo_rep">Myo</option>
-                      <option value="myo_rep_match">MyoM</option>
-                      <option value="drop_set">Drop</option>
+                      <option value="standard">Straight</option>
+                      <option value="myo_rep">Myo Rep</option>
+                      <option value="myo_rep_match">Myo Match</option>
+                      <option value="drop_set">Drop Set</option>
                     </select>
 
                     <!-- Weight / Assist -->
