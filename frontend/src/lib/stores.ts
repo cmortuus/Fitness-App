@@ -16,12 +16,22 @@ export interface UserProfile {
   activityLevel: number;          // 1.0-1.8 multiplier
 }
 
+export interface MachineWeights {
+  smithMachine: number;   // lbs (0, 15, 25, 45 common)
+  legPress: number;       // sled weight
+  hackSquat: number;
+  tBarRow: number;
+  barbell: number;        // standard bar weight
+  [key: string]: number;  // custom entries
+}
+
 export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
-  heightUnit: 'in' | 'ft' | 'cm';  // in=inches, ft=feet+inches, cm=centimeters
-  progressionStyle: 'rep' | 'weight';  // prefer rep overload vs immediate weight overload
+  heightUnit: 'in' | 'ft' | 'cm';
+  progressionStyle: 'rep' | 'weight';
   profile: UserProfile;
+  machineWeights: MachineWeights;
 }
 
 const SETTINGS_KEY = 'hgt_settings';
@@ -41,6 +51,13 @@ const defaultSettings: AppSettings = {
     sex: null,
     heightIn: null,
     activityLevel: 1.4,
+  },
+  machineWeights: {
+    smithMachine: 25,
+    legPress: 75,
+    hackSquat: 45,
+    tBarRow: 20,
+    barbell: 45,
   },
 };
 

@@ -128,14 +128,23 @@
   // ─── Plate calculator ──────────────────────────────────────────────────
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
   const PLATES_KG = [20, 15, 10, 5, 2.5, 1.25];
-  const BAR_LBS = 45;
-  const BAR_KG = 20;
 
-  function calcPlates(totalWeight: number, isLbs: boolean): string {
-    const bar = isLbs ? BAR_LBS : BAR_KG;
+  function getBarWeight(exerciseName: string): number {
+    const mw = $settings.machineWeights;
+    if (!mw) return $settings.weightUnit === 'lbs' ? 45 : 20;
+    const n = exerciseName.toLowerCase();
+    if (n.includes('smith')) return mw.smithMachine ?? 25;
+    if (n.includes('leg_press') || n.includes('leg press')) return mw.legPress ?? 75;
+    if (n.includes('hack_squat') || n.includes('hack squat')) return mw.hackSquat ?? 45;
+    if (n.includes('t_bar') || n.includes('t-bar')) return mw.tBarRow ?? 20;
+    return mw.barbell ?? ($settings.weightUnit === 'lbs' ? 45 : 20);
+  }
+
+  function calcPlates(totalWeight: number, isLbs: boolean, barWeight?: number): string {
+    const bar = barWeight ?? (isLbs ? 45 : 20);
     const plates = isLbs ? PLATES_LBS : PLATES_KG;
     const perSide = (totalWeight - bar) / 2;
-    if (perSide <= 0) return totalWeight <= bar ? 'bar only' : '';
+    if (perSide <= 0) return totalWeight <= bar ? `${bar} only` : '';
     let remaining = perSide;
     const result: string[] = [];
     for (const plate of plates) {
@@ -145,7 +154,7 @@
         remaining -= count * plate;
       }
     }
-    if (remaining > 0.1) return ''; // Can't make exact weight
+    if (remaining > 0.1) return '';
     return result.join(' + ') + ' /side';
   }
 
@@ -1525,8 +1534,9 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if showPlates && set.weightLbs != null && set.weightLbs > (unit === 'lbs' ? 45 : 20)}
-                        {@const plates = calcPlates(set.weightLbs, unit === 'lbs')}
+                      {:else if showPlates && set.weightLbs != null}
+                        {@const bw = getBarWeight(exercise?.name ?? '')}
+                        {@const plates = set.weightLbs > bw ? calcPlates(set.weightLbs, unit === 'lbs', bw) : ''}
                         {#if plates}
                           <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
                         {/if}
@@ -1707,8 +1717,9 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if showPlates && set.weightLbs != null && set.weightLbs > (unit === 'lbs' ? 45 : 20)}
-                        {@const plates = calcPlates(set.weightLbs, unit === 'lbs')}
+                      {:else if showPlates && set.weightLbs != null}
+                        {@const bw = getBarWeight(exercise?.name ?? '')}
+                        {@const plates = set.weightLbs > bw ? calcPlates(set.weightLbs, unit === 'lbs', bw) : ''}
                         {#if plates}
                           <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
                         {/if}
