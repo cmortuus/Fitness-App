@@ -1,0 +1,84 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv venv
+          source venv/bin/activate
+          pip install -e .
+
+      - name: Run Alembic migrations
+        run: |
+          source venv/bin/activate
+          alembic upgrade head
+        env:
+          JWT_SECRET_KEY: test-secret-for-ci-only
+
+      - name: Install frontend dependencies
+        run: |
+          cd frontend
+          npm ci
+
+      - name: Install Playwright browsers
+        run: |
+          cd frontend
+          npx playwright install chromium --with-deps
+
+      - name: Run backend unit tests
+        run: |
+          source venv/bin/activate
+          python -m pytest tests/ -q --tb=short
+
+      - name: Start backend
+        run: |
+          source venv/bin/activate
+          uvicorn app.main:app --host 127.0.0.1 --port 8000 &
+          sleep 3
+          curl -sf http://localhost:8000/docs > /dev/null
+        env:
+          JWT_SECRET_KEY: test-secret-for-ci-only
+
+      - name: Start frontend dev server
+        run: |
+          cd frontend
+          npm run dev -- --port 5173 &
+          sleep 5
+          curl -sf http://localhost:5173 > /dev/null || true
+
+      - name: Run Playwright E2E tests
+        run: |
+          cd frontend
+          npx playwright test --reporter=list
+        env:
+          JWT_SECRET_KEY: test-secret-for-ci-only
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: frontend/test-results/
+          retention-days: 7

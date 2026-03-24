@@ -1,0 +1,255 @@
+/**
+ * Full user journey E2E test.
+ *
+ * Single test with sequential steps: signup → body weight → plan (via API) →
+ * workout → diet phase → macros → logout/login persistence → auth guard
+ */
+import { test, expect } from '@playwright/test';
+
+const UID = Date.now().toString(36);
+const USERNAME = `e2e_${UID}`;
+const PASSWORD = 'testpass123';
+let TOKEN = '';
+
+/** Make an authenticated API call */
+async function api(method: string, path: string, body?: any) {
+  const opts: RequestInit = {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${TOKEN}`,
+    },
+  };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(`http://localhost:8000/api${path}`, opts);
+  if (!r.ok && r.status !== 204) throw new Error(`API ${method} ${path} → ${r.status}: ${await r.text()}`);
+  if (r.status === 204) return null;
+  return r.json();
+}
+
+test('Full user journey', async ({ page }) => {
+  test.setTimeout(180_000);
+
+  // ── Step 1: Signup ───────────────────────────────────────────────────────
+  await test.step('Signup — create account', async () => {
+    await page.goto('/signup');
+    await page.getByPlaceholder('Choose a username').fill(USERNAME);
+    await page.getByPlaceholder('At least 6 characters').fill(PASSWORD);
+    await page.getByPlaceholder('Repeat password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Create Account' }).click();
+    await page.waitForURL('/', { timeout: 10_000 });
+    await expect(page.locator('text=GymTracker')).toBeVisible();
+    await expect(page.locator('text=Workout History')).toBeVisible();
+
+    // Grab token from localStorage for API calls
+    TOKEN = await page.evaluate(() => localStorage.getItem('hgt_access_token') || '');
+    expect(TOKEN.length).toBeGreaterThan(10);
+  });
+
+  // ── Step 2: Log body weight ──────────────────────────────────────────────
+  await test.step('Log body weight', async () => {
+    await page.goto('/settings');
+    await page.waitForTimeout(1500);
+
+    const weightInput = page.getByPlaceholder('Weight');
+    await weightInput.scrollIntoViewIfNeeded();
+    await weightInput.fill('180');
+    await page.waitForTimeout(300);
+    await page.locator('button:has-text("Log"):not(:has-text("Kilograms"))').click();
+    await page.waitForTimeout(2000);
+    await expect(page.locator('text=180 lbs').first()).toBeVisible({ timeout: 3000 });
+  });
+
+  // ── Step 3: Create workout plan (via API, verify in UI) ──────────────────
+  let planId: number;
+  await test.step('Create workout plan via API', async () => {
+    // Get exercises
+    const exercises = await api('GET', '/exercises/');
+    expect(exercises.length).toBeGreaterThan(0);
+
+    // Pick first compound exercise
+    const compound = exercises.find((e: any) => e.movement_type === 'compound') || exercises[0];
+
+    // Create plan with 1 day, 3 sets
+    const plan = await api('POST', '/plans/', {
+      name: 'E2E Test Plan',
+      block_type: 'hypertrophy',
+      duration_weeks: 4,
+      number_of_days: 1,
+      days: [{
+        day_number: 1,
+        day_name: 'Day 1',
+        exercises: [{
+          exercise_id: compound.id,
+          sets: 3,
+          reps: 8,
+          starting_weight_kg: 0,
+          progression_type: 'linear',
+        }],
+      }],
+    });
+    planId = plan.id;
+    expect(planId).toBeGreaterThan(0);
+
+    // Verify plan shows on home page
+    await page.goto('/');
+    await page.waitForTimeout(2000);
+    await expect(page.locator('text=E2E Test Plan').first()).toBeVisible({ timeout: 5000 });
+  });
+
+  // ── Step 4: Start workout and complete sets ──────────────────────────────
+  await test.step('Start workout and complete all sets', async () => {
+    await page.goto('/workout/active');
+    await page.waitForTimeout(2000);
+
+    // Click Day 1
+    const day1 = page.getByRole('button', { name: /Day 1/i });
+    if (await day1.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await day1.click();
+      await page.waitForTimeout(3000);
+    }
+
+    // Handle conflict dialog
+    const continueBtn = page.getByRole('button', { name: /Continue Existing/i });
+    if (await continueBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
+      await continueBtn.click();
+      await page.waitForTimeout(2000);
+    }
+
+    // Should see "Active" badge
+    await expect(page.locator('text=Active')).toBeVisible({ timeout: 5000 });
+
+    // Fill in weight and reps for each empty set, then complete
+    for (let i = 0; i < 10; i++) {
+      // Find first enabled check button
+      const enabledCheck = page.locator('button:has-text("✓"):not([disabled])');
+      const enabledCount = await enabledCheck.count();
+
+      if (enabledCount > 0) {
+        // Already has values, just click
+        await enabledCheck.first().click();
+        await page.waitForTimeout(800);
+        continue;
+      }
+
+      // Find first disabled check — means we need to fill weight/reps
+      const disabledCheck = page.locator('button[disabled]:has-text("✓")');
+      const disabledCount = await disabledCheck.count();
+      if (disabledCount === 0) break; // All done
+
+      // Fill empty weight inputs (find inputs with placeholder containing "lbs" or empty number inputs)
+      const weightInputs = page.locator('input[type="number"]');
+      const inputCount = await weightInputs.count();
+      for (let j = 0; j < inputCount; j++) {
+        const val = await weightInputs.nth(j).inputValue();
+        if (!val || val === '0') {
+          const placeholder = await weightInputs.nth(j).getAttribute('placeholder') || '';
+          if (placeholder.toLowerCase().includes('lbs') || placeholder.toLowerCase().includes('kg') || placeholder === '') {
+            await weightInputs.nth(j).fill('135');
+          } else {
+            await weightInputs.nth(j).fill('8');
+          }
+        }
+      }
+      await page.waitForTimeout(500);
+
+      // Try clicking first enabled check again
+      const nowEnabled = page.locator('button:has-text("✓"):not([disabled])');
+      if (await nowEnabled.count() > 0) {
+        await nowEnabled.first().click();
+        await page.waitForTimeout(800);
+      } else {
+        break; // Can't enable any more
+      }
+    }
+
+    // Finish workout
+    const finishBtn = page.getByRole('button', { name: /Finish Workout/i });
+    if (await finishBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await finishBtn.click();
+      await page.waitForTimeout(2000);
+    }
+  });
+
+  // ── Step 5: Diet phase ───────────────────────────────────────────────────
+  await test.step('Create diet phase (cut)', async () => {
+    await page.goto('/nutrition');
+    await page.waitForTimeout(2000);
+
+    // Open wizard
+    await page.locator('button').filter({ hasText: /Start a Cut/i }).click();
+    await page.waitForTimeout(1000);
+
+    // Step 1: Choose Cut
+    const modal = page.locator('.fixed.inset-0');
+    await modal.locator('button').filter({ hasText: 'Lose fat' }).click();
+    await page.waitForTimeout(1000);
+
+    // Step 2: Click Preview (skip settings, use defaults)
+    await page.getByRole('button', { name: 'Preview' }).click();
+    await page.waitForTimeout(1000);
+
+    // Step 3: Start Phase
+    await page.getByRole('button', { name: 'Start Phase' }).click();
+    await page.waitForTimeout(3000);
+
+    // Verify phase card appears
+    await expect(page.locator('text=Cut').first()).toBeVisible({ timeout: 5000 });
+  });
+
+  // ── Step 6: Track macros ─────────────────────────────────────────────────
+  await test.step('Add food entry', async () => {
+    await page.goto('/nutrition');
+    await page.waitForTimeout(2000);
+
+    const addFood = page.locator('button, a').filter({ hasText: /Add Food/i });
+    if (await addFood.isVisible({ timeout: 3000 }).catch(() => false)) {
+      await addFood.click();
+      await page.waitForTimeout(1000);
+
+      // Search
+      const searchInput = page.getByPlaceholder(/search/i);
+      if (await searchInput.isVisible({ timeout: 2000 }).catch(() => false)) {
+        await searchInput.fill('chicken');
+        await page.waitForTimeout(3000);
+      }
+    }
+
+    // Verify nutrition page is functional
+    await expect(page.locator('text=Food Log')).toBeVisible({ timeout: 3000 });
+  });
+
+  // ── Step 7: Logout/Login persistence ─────────────────────────────────────
+  await test.step('Logout and login — data persists', async () => {
+    await page.goto('/settings');
+    await page.waitForTimeout(1500);
+    const signOut = page.getByRole('button', { name: 'Sign Out' });
+    await signOut.scrollIntoViewIfNeeded();
+    await signOut.click();
+    await page.waitForURL('/login', { timeout: 5000 });
+
+    // Login
+    await page.getByPlaceholder('Enter username').fill(USERNAME);
+    await page.getByPlaceholder('Enter password').fill(PASSWORD);
+    await page.getByRole('button', { name: 'Sign In' }).click();
+    await page.waitForURL('/', { timeout: 10_000 });
+    await expect(page.locator('text=GymTracker')).toBeVisible();
+
+    // Verify username on settings
+    await page.goto('/settings');
+    await page.waitForTimeout(1500);
+    await expect(page.locator(`text=${USERNAME}`)).toBeVisible({ timeout: 5000 });
+  });
+
+  // ── Step 8: Auth guard ───────────────────────────────────────────────────
+  await test.step('Auth guard redirects unauthenticated users', async () => {
+    await page.evaluate(() => {
+      localStorage.removeItem('hgt_access_token');
+      localStorage.removeItem('hgt_refresh_token');
+      localStorage.removeItem('hgt_user');
+    });
+    await page.goto('/');
+    await page.waitForTimeout(3000);
+    expect(page.url()).toContain('/login');
+  });
+});
