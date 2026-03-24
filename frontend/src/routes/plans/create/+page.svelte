@@ -46,7 +46,7 @@
     { key: 'home', label: 'Home Gym' },
     { key: 'standard', label: 'Standard' },
     { key: 'well_equipped', label: 'Well-Equipped' },
-    { key: 'elite', label: 'Elite' },
+    { key: 'fully_loaded', label: 'Fully Loaded' },
   ];
 
   // Exercise selection

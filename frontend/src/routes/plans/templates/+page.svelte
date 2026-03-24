@@ -29,7 +29,7 @@
     { key: 'home', label: 'Home Gym', desc: '+ Barbell & Rack' },
     { key: 'standard', label: 'Standard', desc: '+ Cables & Machines' },
     { key: 'well_equipped', label: 'Well-Equipped', desc: '+ Hammer Strength' },
-    { key: 'elite', label: 'Elite', desc: 'Full Commercial' },
+    { key: 'fully_loaded', label: 'Fully Loaded', desc: 'Every Machine' },
   ];
 
   let allExercises = $state<Exercise[]>([]);

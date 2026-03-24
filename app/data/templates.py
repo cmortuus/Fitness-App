@@ -104,10 +104,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Full Body 1-Day (Elite)",
+        "name": "Full Body 1-Day (Fully Loaded)",
         "split_type": "full_body",
         "days_per_week": 1,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "A maximally efficient single session leveraging specialty equipment and machines. For advanced lifters who need a comprehensive stimulus in one workout.",
         "days": [
@@ -267,10 +267,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Full Body 2-Day (Elite)",
+        "name": "Full Body 2-Day (Fully Loaded)",
         "split_type": "full_body",
         "days_per_week": 2,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Two full body sessions using specialty bars and premium machines for maximum stimulus with minimal fatigue. Designed for advanced lifters with limited weekly availability.",
         "days": [
@@ -482,10 +482,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Full Body 3-Day (Elite)",
+        "name": "Full Body 3-Day (Fully Loaded)",
         "split_type": "full_body",
         "days_per_week": 3,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Three full body sessions using specialty bars and premium machines. For advanced lifters who prefer full body frequency with access to top-tier equipment.",
         "days": [
@@ -753,10 +753,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Full Body 4-Day (Elite)",
+        "name": "Full Body 4-Day (Fully Loaded)",
         "split_type": "full_body",
         "days_per_week": 4,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Four full body sessions leveraging every specialty bar and machine available. For advanced lifters seeking maximum muscle frequency with optimized exercise selection.",
         "days": [
@@ -1068,10 +1068,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Full Body 5-Day (Elite)",
+        "name": "Full Body 5-Day (Fully Loaded)",
         "split_type": "full_body",
         "days_per_week": 5,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Five full body sessions using specialty bars and premium machines for maximum frequency with minimal fatigue accumulation. For advanced lifters with elite gym access.",
         "days": [
@@ -1416,10 +1416,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Full Body 6-Day (Elite)",
+        "name": "Full Body 6-Day (Fully Loaded)",
         "split_type": "full_body",
         "days_per_week": 6,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Six brief full body sessions per week using specialty bars and elite machines. Maximum training frequency with minimal fatigue for advanced lifters who recover quickly.",
         "days": [
@@ -1630,10 +1630,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Upper/Lower 2-Day (Elite)",
+        "name": "Upper/Lower 2-Day (Fully Loaded)",
         "split_type": "upper_lower",
         "days_per_week": 2,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "One upper and one lower session using specialty bars and premium machines. For advanced lifters with elite access who can only train twice per week.",
         "days": [
@@ -1855,10 +1855,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Upper/Lower 3-Day (Elite)",
+        "name": "Upper/Lower 3-Day (Fully Loaded)",
         "split_type": "upper_lower",
         "days_per_week": 3,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Three alternating upper/lower sessions with specialty bars and premium machines. For advanced lifters with elite equipment training three times per week.",
         "days": [
@@ -2137,10 +2137,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Upper/Lower 4-Day (Elite)",
+        "name": "Upper/Lower 4-Day (Fully Loaded)",
         "split_type": "upper_lower",
         "days_per_week": 4,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Four-day U/L split with specialty bars, seal rows, and premium machines. For advanced lifters seeking optimal stimulus with full equipment access.",
         "days": [
@@ -2385,10 +2385,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "PPL 3-Day (Elite)",
+        "name": "PPL 3-Day (Fully Loaded)",
         "split_type": "ppl",
         "days_per_week": 3,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Push/pull/legs once per week using specialty bars and premium machines. For advanced lifters with elite gym access who prefer a three-day body-part split.",
         "days": [
@@ -2757,10 +2757,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "PPL 6-Day (Elite)",
+        "name": "PPL 6-Day (Fully Loaded)",
         "split_type": "ppl",
         "days_per_week": 6,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Six-day PPL with A/B variations using specialty bars and every available machine. The ultimate high-volume split for advanced lifters with elite gym access.",
         "days": [
@@ -3077,10 +3077,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Bro Split 4-Day (Elite)",
+        "name": "Bro Split 4-Day (Fully Loaded)",
         "split_type": "bro_split",
         "days_per_week": 4,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Four-day body-part split using specialty bars, seal rows, and premium machines. Maximum volume and variety per muscle group for advanced lifters.",
         "days": [
@@ -3433,10 +3433,10 @@ TEMPLATES = [
         ],
     },
     {
-        "name": "Bro Split 5-Day (Elite)",
+        "name": "Bro Split 5-Day (Fully Loaded)",
         "split_type": "bro_split",
         "days_per_week": 5,
-        "equipment_tier": "elite",
+        "equipment_tier": "fully_loaded",
         "block_type": "hypertrophy",
         "description": "Five-day body-part split with specialty bars and every premium machine available. Maximum volume and exercise variety for advanced bodybuilding-style training.",
         "days": [
