@@ -1247,7 +1247,7 @@
 
             <!-- Column headers — adapt to unilateral / assisted mode -->
             {#if ex.isUnilateral}
-              <div class="grid gap-2 mb-2" style="grid-template-columns: 4rem 5rem 3.5rem 3.5rem 2.5rem">
+              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem">
                 <span class="text-xs text-zinc-500 text-center">#</span>
                 <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Wt (${unit})`}</span>
                 <span class="text-xs text-zinc-500 text-center">Left</span>
@@ -1255,7 +1255,7 @@
                 <span></span>
               </div>
             {:else}
-              <div class="grid gap-2 mb-2" style="grid-template-columns: 4rem 5rem 3.5rem 2.5rem">
+              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 2.5rem">
                 <span class="text-xs text-zinc-500 text-center">#</span>
                 <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Weight (${unit})`}</span>
                 <span class="text-xs text-zinc-500 text-center">Reps</span>
@@ -1270,17 +1270,17 @@
                   <!-- ── Unilateral row ─────────────────────────────── -->
                   <div
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
-                    style="grid-template-columns: 4rem 5rem 3.5rem 3.5rem 2.5rem"
+                    style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem"
                   >
                     <select
                       value={set.setType || 'standard'}
                       onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
                       disabled={set.done}
-                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer text-left w-full py-1 rounded-md transition-colors
-                             {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
-                              set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
-                              set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
-                              'text-zinc-500'}">
+                      class="set-type-select w-full
+                             {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                              set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
+                              set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                              'text-zinc-400'}">
                       <option value="standard">Straight</option>
                       <option value="myo_rep">Myo Rep</option>
                       <option value="myo_rep_match">Myo Match</option>
@@ -1429,17 +1429,17 @@
                   <!-- ── Bilateral row ──────────────────────────────── -->
                   <div
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
-                    style="grid-template-columns: 4rem 5rem 3.5rem 2.5rem"
+                    style="grid-template-columns: 4.5rem 1fr 1fr 2.5rem"
                   >
                     <select
                       value={set.setType || 'standard'}
                       onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
                       disabled={set.done}
-                      class="text-[10px] font-medium bg-transparent border-none cursor-pointer text-left w-full py-1 rounded-md transition-colors
-                             {set.setType === 'myo_rep' ? 'bg-purple-500/20 text-purple-400' :
-                              set.setType === 'myo_rep_match' ? 'bg-blue-500/20 text-blue-400' :
-                              set.setType === 'drop_set' ? 'bg-amber-500/20 text-amber-400' :
-                              'text-zinc-500'}">
+                      class="set-type-select w-full
+                             {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                              set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
+                              set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                              'text-zinc-400'}">
                       <option value="standard">Straight</option>
                       <option value="myo_rep">Myo Rep</option>
                       <option value="myo_rep_match">Myo Match</option>
