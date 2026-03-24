@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.exercise import Exercise
+from app.models.exercise_note import ExerciseNote
 from app.models.user import User
 from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession
 from app.schemas.requests import ExerciseCreate, ExerciseResponse
@@ -231,3 +232,81 @@ async def delete_exercise(
     # Delete the exercise
     await db.execute(delete(Exercise).where(Exercise.id == exercise_id))
     await db.flush()
+
+
+# ── Exercise Notes ────────────────────────────────────────────────────────────
+
+@router.get("/{exercise_id}/notes")
+async def get_exercise_note(
+    exercise_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict | None:
+    """Get the user's note for an exercise."""
+    result = await db.execute(
+        select(ExerciseNote).where(
+            ExerciseNote.exercise_id == exercise_id,
+            ExerciseNote.user_id == user.id,
+        )
+    )
+    note = result.scalar_one_or_none()
+    if not note:
+        return None
+    return {"id": note.id, "exercise_id": note.exercise_id, "note": note.note, "updated_at": note.updated_at.isoformat()}
+
+
+from pydantic import BaseModel as _PydanticBase
+
+class _NoteBody(_PydanticBase):
+    note: str = ""
+
+
+@router.put("/{exercise_id}/notes")
+async def set_exercise_note(
+    exercise_id: int,
+    body: _NoteBody,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Create or update the user's note for an exercise. Empty string deletes."""
+    note = body.note
+
+    result = await db.execute(
+        select(ExerciseNote).where(
+            ExerciseNote.exercise_id == exercise_id,
+            ExerciseNote.user_id == user.id,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if not note.strip():
+        if existing:
+            await db.delete(existing)
+            await db.flush()
+        return {"deleted": True}
+
+    if existing:
+        existing.note = note.strip()
+        await db.flush()
+        return {"id": existing.id, "exercise_id": exercise_id, "note": existing.note, "updated_at": existing.updated_at.isoformat()}
+
+    new_note = ExerciseNote(user_id=user.id, exercise_id=exercise_id, note=note.strip())
+    db.add(new_note)
+    await db.flush()
+    await db.refresh(new_note)
+    return {"id": new_note.id, "exercise_id": exercise_id, "note": new_note.note, "updated_at": new_note.updated_at.isoformat()}
+
+
+@router.get("/notes/all")
+async def get_all_notes(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Get all exercise notes for the current user (keyed by exercise_id)."""
+    result = await db.execute(
+        select(ExerciseNote).where(ExerciseNote.user_id == user.id)
+    )
+    notes = {}
+    for n in result.scalars().all():
+        notes[n.exercise_id] = {"note": n.note, "updated_at": n.updated_at.isoformat()}
+    return notes

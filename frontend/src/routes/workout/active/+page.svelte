@@ -7,7 +7,7 @@
     getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
-    getExerciseHistory,
+    getExerciseHistory, getAllExerciseNotes, setExerciseNote,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
 
@@ -111,6 +111,9 @@
   let workoutName = $state('Workout');
   let allExercises = $state<Exercise[]>([]);
   let uiExercises = $state<UIExercise[]>([]);
+  let exerciseNotes = $state<Record<number, string>>({});
+  let editingNoteId = $state<number | null>(null);
+  let editingNoteText = $state('');
   let finished = $state(false);
   let finishing = $state(false);
   let showCancelConfirm = $state(false);
@@ -145,8 +148,13 @@
       const planId = params.get('plan');
       const dayNumber = parseInt(params.get('day') || '1');
 
-      allExercises = await getExercises();
+      const [exData, notesData] = await Promise.all([getExercises(), getAllExerciseNotes()]);
+      allExercises = exData;
       exerciseStore.set(allExercises);
+      // Convert string keys to numbers
+      for (const [k, v] of Object.entries(notesData)) {
+        exerciseNotes[Number(k)] = v.note;
+      }
 
       try {
         const recent = await getRecentExercises(20);
@@ -1342,6 +1350,30 @@
                 </h3>
                 {#if exercise?.primary_muscles?.length}
                   <p class="text-xs text-zinc-500 mt-0.5 capitalize">{muscleLabel(ex.exerciseId)}</p>
+                {/if}
+                <!-- Persistent exercise note -->
+                {#if editingNoteId === ex.exerciseId}
+                  <div class="flex gap-1 mt-1">
+                    <input type="text" bind:value={editingNoteText}
+                           class="flex-1 text-xs bg-zinc-800 border border-zinc-600 rounded px-2 py-1 text-white"
+                           placeholder="Add a note..." />
+                    <button onclick={async () => {
+                      await setExerciseNote(ex.exerciseId, editingNoteText);
+                      if (editingNoteText.trim()) exerciseNotes[ex.exerciseId] = editingNoteText.trim();
+                      else delete exerciseNotes[ex.exerciseId];
+                      editingNoteId = null;
+                    }} class="text-xs text-primary-400 px-2">Save</button>
+                  </div>
+                {:else if exerciseNotes[ex.exerciseId]}
+                  <button onclick={() => { editingNoteId = ex.exerciseId; editingNoteText = exerciseNotes[ex.exerciseId] || ''; }}
+                          class="text-xs text-amber-400/70 mt-1 text-left hover:text-amber-300 transition-colors">
+                    📝 {exerciseNotes[ex.exerciseId]}
+                  </button>
+                {:else}
+                  <button onclick={() => { editingNoteId = ex.exerciseId; editingNoteText = ''; }}
+                          class="text-[10px] text-zinc-600 mt-1 hover:text-zinc-400 transition-colors">
+                    + note
+                  </button>
                 {/if}
                 <!-- Set types are per-set, configured inline on each set row -->
               </div>

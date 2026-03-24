@@ -350,6 +350,16 @@ export async function getExerciseHistory(exerciseId: number, limit: number = 8):
   return response.data;
 }
 
+// Exercise notes
+export async function getAllExerciseNotes(): Promise<Record<number, { note: string; updated_at: string }>> {
+  const response = await api.get('/exercises/notes/all');
+  return response.data;
+}
+
+export async function setExerciseNote(exerciseId: number, note: string): Promise<void> {
+  await api.put(`/exercises/${exerciseId}/notes`, { note });
+}
+
 // Get recently used exercises
 export async function getRecentExercises(limit: number = 10): Promise<RecentExercise[]> {
   const response = await api.get('/plans/exercises/recent', { params: { limit } });
