@@ -584,12 +584,28 @@
             {/if}
           </div>
 
-          <div>
-            <label class="text-xs text-zinc-400 block mb-1">Quantity (grams)</label>
-            <input type="number" bind:value={selectedQty} min="1" class="input" />
-            {#if selectedFood.serving_label}
-              <p class="text-xs text-zinc-500 mt-1">Serving: {selectedFood.serving_label}</p>
+          <div class="space-y-2">
+            {#if selectedFood.serving_size_g && selectedFood.serving_size_g !== 100}
+              {@const srvG = selectedFood.serving_size_g}
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">
+                  Servings {selectedFood.serving_label ? `(${selectedFood.serving_label})` : `(${srvG}g each)`}
+                </label>
+                <div class="flex gap-2">
+                  {#each [0.5, 1, 1.5, 2, 3] as n}
+                    <button onclick={() => selectedQty = Math.round(srvG * n)}
+                            class="flex-1 py-2 rounded-lg text-sm font-medium transition-colors
+                                   {Math.abs(selectedQty - srvG * n) < 1 ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                      {n}
+                    </button>
+                  {/each}
+                </div>
+              </div>
             {/if}
+            <div>
+              <label class="text-xs text-zinc-400 block mb-1">Grams</label>
+              <input type="number" bind:value={selectedQty} min="1" class="input" />
+            </div>
           </div>
 
           {#if selectedFood}
