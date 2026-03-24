@@ -79,6 +79,7 @@
     repsLeft: number | null;   // unilateral left side
     repsRight: number | null;  // unilateral right side
     done: boolean;
+    skipped: boolean;
     saving: boolean;
     // Epley anchor — 1RM (in user's display unit) from prior session suggestion.
     // Enables bi-directional weight ↔ reps calculation.
@@ -254,7 +255,8 @@
               // falling back to the bilateral planned_reps.
               repsLeft:  (hasDraft && draftLeft != null) ? draftLeft : (suggestedRepsLeft ?? suggestedReps),
               repsRight: (hasDraft && draftRight != null) ? draftRight : (suggestedRepsRight ?? suggestedReps),
-              done: false,
+              done: !!bset?.completed_at,
+              skipped: !!bset?.skipped_at,
               saving: false,
               oneRM,
               initWeight: suggestedWeight,
@@ -519,7 +521,8 @@
   // ─── Progress ─────────────────────────────────────────────────────────────
   let totalSets      = $derived(uiExercises.reduce((s, ex) => s + ex.sets.length, 0));
   let doneSets       = $derived(uiExercises.reduce((s, ex) => s + ex.sets.filter(st => st.done).length, 0));
-  let incompleteSets = $derived(totalSets - doneSets);
+  let skippedSets    = $derived(uiExercises.reduce((s, ex) => s + ex.sets.filter(st => st.skipped).length, 0));
+  let incompleteSets = $derived(totalSets - doneSets - skippedSets);
   let pct = $derived(totalSets > 0 ? Math.round((doneSets / totalSets) * 100) : 0);
 
   // ─── Draft auto-save (cross-device sync) ─────────────────────────────────
@@ -753,6 +756,7 @@
       weightLbs: last?.weightLbs ?? null,
       reps: null, repsLeft: null, repsRight: null,
       done: false,
+      skipped: false,
       saving: false,
       oneRM: last?.oneRM ?? null,
       initWeight: null,
@@ -1044,6 +1048,63 @@
     }
   }
 
+  // ─── Skip / unskip a set ─────────────────────────────────────────────────
+  async function skipSet(exUiId: string, localId: string) {
+    if (!sessionId) return;
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex) return;
+    const set = ex.sets.find(s => s.localId === localId);
+    if (!set || set.done || set.skipped) return;
+
+    set.saving = true;
+    uiExercises = [...uiExercises];
+
+    try {
+      let bId = set.backendId;
+      if (bId === null) {
+        const created = await addSet(sessionId, {
+          exercise_id: ex.exerciseId,
+          set_number: set.setNumber,
+          planned_reps: set.reps ?? undefined,
+          planned_weight_kg: set.weightLbs != null ? toKg(set.weightLbs) : undefined,
+        });
+        bId = created.id;
+        set.backendId = bId;
+      }
+      await updateSet(sessionId, bId, {
+        skipped_at: new Date().toISOString(),
+      } as any);
+      set.skipped = true;
+    } catch (e) {
+      console.error('Failed to skip set:', e);
+    } finally {
+      set.saving = false;
+      uiExercises = [...uiExercises];
+    }
+  }
+
+  async function unskipSet(exUiId: string, localId: string) {
+    if (!sessionId) return;
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex) return;
+    const set = ex.sets.find(s => s.localId === localId);
+    if (!set || !set.skipped || set.backendId === null) return;
+
+    set.saving = true;
+    uiExercises = [...uiExercises];
+    try {
+      await updateSet(sessionId, set.backendId, {
+        skipped_at: null,
+      } as any);
+      set.skipped = false;
+    } catch (e) {
+      console.error('Failed to unskip set:', e);
+    } finally {
+      set.saving = false;
+      uiExercises = [...uiExercises];
+    }
+  }
+
   let summaryVolumeLbs = $derived(
     uiExercises.reduce((total, ex) => {
       const exercise = getEx(ex.exerciseId);
@@ -1266,7 +1327,7 @@
 
         {#each uiExercises as ex (ex.uiId)}
           {@const exercise = getEx(ex.exerciseId)}
-          {@const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done)}
+          {@const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped)}
           {@const isAssistedEx = exercise?.is_assisted ?? false}
 
           <div class="exercise-card {allDone ? 'exercise-card-done' : ''}">
@@ -1336,7 +1397,7 @@
                 {#if ex.isUnilateral}
                   <!-- ── Unilateral row ─────────────────────────────── -->
                   <div
-                    class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
+                    class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
                     style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem"
                   >
                     <select
@@ -1450,9 +1511,15 @@
                       class="set-input"
                     />
 
-                    <!-- Complete / Undo -->
+                    <!-- Complete / Skip / Undo -->
                     {#if set.saving}
                       <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
+                    {:else if set.skipped}
+                      <button
+                        onclick={() => unskipSet(ex.uiId, set.localId)}
+                        class="h-12 w-12 rounded-xl bg-amber-700/20 hover:bg-zinc-700 text-amber-400 text-xs font-medium transition-colors"
+                        title="Undo skip"
+                      >Skip</button>
                     {:else if set.done}
                       <button
                         onclick={() => uncompleteSet(ex.uiId, set.localId)}
@@ -1461,12 +1528,19 @@
                       >✓</button>
                     {:else}
                       {@const canComplete = (set.repsLeft ?? 0) > 0 && (set.repsRight ?? 0) > 0}
-                      <button
-                        onclick={() => completeSet(ex.uiId, set.localId)}
-                        disabled={!canComplete}
-                        class="h-12 w-12 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold text-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title={canComplete ? 'Log this set' : 'Enter reps for both sides first'}
-                      >✓</button>
+                      <div class="flex flex-col gap-1">
+                        <button
+                          onclick={() => completeSet(ex.uiId, set.localId)}
+                          disabled={!canComplete}
+                          class="h-8 w-12 rounded-lg bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={canComplete ? 'Log this set' : 'Enter reps for both sides first'}
+                        >✓</button>
+                        <button
+                          onclick={() => skipSet(ex.uiId, set.localId)}
+                          class="h-4 w-12 text-[9px] text-zinc-600 hover:text-amber-400 transition-colors"
+                          title="Skip this set"
+                        >skip</button>
+                      </div>
                     {/if}
                   </div>
                   <!-- High-rep advisory (unilateral) -->
@@ -1504,7 +1578,7 @@
                 {:else}
                   <!-- ── Bilateral row ──────────────────────────────── -->
                   <div
-                    class="grid gap-2 items-center {set.done ? 'opacity-50' : ''}"
+                    class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
                     style="grid-template-columns: 4.5rem 1fr 1fr 2.5rem"
                   >
                     <select
@@ -1591,9 +1665,15 @@
                       class="set-input"
                     />
 
-                    <!-- Complete / Undo -->
+                    <!-- Complete / Skip / Undo -->
                     {#if set.saving}
                       <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
+                    {:else if set.skipped}
+                      <button
+                        onclick={() => unskipSet(ex.uiId, set.localId)}
+                        class="h-12 w-12 rounded-xl bg-amber-700/20 hover:bg-zinc-700 text-amber-400 text-xs font-medium transition-colors"
+                        title="Undo skip"
+                      >Skip</button>
                     {:else if set.done}
                       <button
                         onclick={() => uncompleteSet(ex.uiId, set.localId)}
@@ -1602,12 +1682,19 @@
                       >✓</button>
                     {:else}
                       {@const canComplete = (set.reps ?? 0) > 0}
-                      <button
-                        onclick={() => completeSet(ex.uiId, set.localId)}
-                        disabled={!canComplete}
-                        class="h-12 w-12 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold text-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                        title={canComplete ? 'Log this set' : 'Enter reps first'}
-                      >✓</button>
+                      <div class="flex flex-col gap-1">
+                        <button
+                          onclick={() => completeSet(ex.uiId, set.localId)}
+                          disabled={!canComplete}
+                          class="h-8 w-12 rounded-lg bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          title={canComplete ? 'Log this set' : 'Enter reps first'}
+                        >✓</button>
+                        <button
+                          onclick={() => skipSet(ex.uiId, set.localId)}
+                          class="h-4 w-12 text-[9px] text-zinc-600 hover:text-amber-400 transition-colors"
+                          title="Skip this set"
+                        >skip</button>
+                      </div>
                     {/if}
                   </div>
                   <!-- High-rep advisory (> 30 reps moves outside the Epley range) -->

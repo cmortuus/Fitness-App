@@ -112,6 +112,7 @@ class SetUpdate(BaseModel):
     draft_reps: int | None = None
     draft_reps_left: int | None = None
     draft_reps_right: int | None = None
+    skipped_at: datetime | None = None
 
 
 class SetResponse(BaseModel):

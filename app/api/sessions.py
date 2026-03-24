@@ -64,6 +64,7 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "draft_reps": exercise_set.draft_reps,
         "draft_reps_left": exercise_set.draft_reps_left,
         "draft_reps_right": exercise_set.draft_reps_right,
+        "skipped_at": exercise_set.skipped_at.isoformat() if exercise_set.skipped_at else None,
     }
 
 
@@ -501,6 +502,8 @@ async def create_session_from_plan(
             select(ExerciseSet).where(ExerciseSet.workout_session_id == prior_session.id)
         )
         for s in prior_sets_result.scalars().all():
+            if s.skipped_at is not None:
+                continue  # Skipped sets don't count for progression
             if s.actual_weight_kg is None or s.actual_reps is None:
                 continue
             ex_id = s.exercise_id

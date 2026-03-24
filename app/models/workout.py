@@ -72,6 +72,7 @@ class ExerciseSet(Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
     workout_session: Mapped["WorkoutSession"] = relationship(
