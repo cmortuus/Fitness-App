@@ -147,7 +147,7 @@
                         {#each day.exercises as ex}
                           <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
                             <span class="text-zinc-300 truncate">{getExerciseName(ex.exercise_id)}</span>
-                            <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets}×{ex.reps}</span>
+                            <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets} {ex.sets === 1 ? 'set' : 'sets'}{ex.reps ? ` × ${ex.reps}` : ''}</span>
                           </div>
                         {/each}
                       {/if}
