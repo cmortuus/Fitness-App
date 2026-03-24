@@ -103,6 +103,7 @@ class SetUpdate(BaseModel):
     actual_weight_kg: float | None = None
     reps_left: int | None = None
     reps_right: int | None = None
+    set_type: str | None = None
     sub_sets: str | None = None  # JSON for drop set entries
     notes: str | None = None
     completed_at: datetime | None = None

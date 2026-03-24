@@ -554,6 +554,7 @@
         completed_at: new Date().toISOString(),
         ...(ex.isUnilateral && { reps_left: set.repsLeft ?? 0, reps_right: set.repsRight ?? 0 }),
         ...(notes && { notes }),
+        ...(set.setType !== 'standard' && { set_type: set.setType }),
         ...(subSetsData && subSetsData.length > 0 && { sub_sets: subSetsData }),
       });
 
@@ -1214,7 +1215,15 @@
                 {#if exercise?.primary_muscles?.length}
                   <p class="text-xs text-zinc-500 mt-0.5 capitalize">{muscleLabel(ex.exerciseId)}</p>
                 {/if}
-                {#if ex.sets[0]?.setType && ex.sets[0].setType !== 'standard'}
+                <select value={ex.sets[0]?.setType || 'standard'}
+                        onchange={(e) => { const v = (e.target as HTMLSelectElement).value; ex.sets.forEach(s => s.setType = v); uiExercises = [...uiExercises]; }}
+                        class="text-[10px] mt-1 bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-zinc-400 cursor-pointer">
+                  <option value="standard">Standard</option>
+                  <option value="myo_rep">Myo Reps</option>
+                  <option value="myo_rep_match">Myo Match</option>
+                  <option value="drop_set">Drop Set</option>
+                </select>
+                {#if false && ex.sets[0]?.setType && ex.sets[0].setType !== 'standard'}
                   <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium uppercase">
                     {ex.sets[0].setType === 'myo_rep' ? 'Myo' : ex.sets[0].setType === 'myo_rep_match' ? 'Myo Match' : 'Drop'}
                   </span>
