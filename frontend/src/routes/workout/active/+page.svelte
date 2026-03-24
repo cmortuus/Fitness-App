@@ -456,6 +456,28 @@
     return roundWeight(oneRM / (1 + reps / 30));
   }
 
+  // Sync myo_rep_match sets: copy weight/reps from set 1 to all match sets
+  function syncMyoMatchSets(ex: typeof uiExercises[0]) {
+    const set1 = ex.sets[0];
+    if (!set1) return;
+    for (let i = 1; i < ex.sets.length; i++) {
+      const s = ex.sets[i];
+      if (s.setType === 'myo_rep_match' && !s.done) {
+        s.weightLbs = set1.weightLbs;
+        s.reps = set1.reps;
+        if (ex.isUnilateral) {
+          s.repsLeft = set1.repsLeft;
+          s.repsRight = set1.repsRight;
+        }
+      }
+    }
+  }
+
+  function isMyoMatchLocked(ex: typeof uiExercises[0], set: typeof ex.sets[0]): boolean {
+    const idx = ex.sets.indexOf(set);
+    return set.setType === 'myo_rep_match' && idx > 0;
+  }
+
   // Returns a warning string if the current values deviate significantly from
   // the initial Epley suggestion, null otherwise.
   function deviationWarning(set: UISet, currentWeight: number | null, currentReps: number | null, isAssisted = false): string | null {
@@ -561,6 +583,9 @@
       set.reps = effectiveReps; // sync reps field for drop-off calc
       set.done = true;
 
+      // Sync myo match sets with set 1's final values
+      syncMyoMatchSets(ex);
+
       // Weight: propagate to all subsequent undone sets that are still blank
       const pendingSets = ex.sets.filter(s => !s.done && s.localId !== localId);
       for (const s of pendingSets) {
@@ -614,7 +639,7 @@
       // Drop-off only applies to sets with no backend-planned weight.
       // Week 2+ sets already have per-set planned values from the server
       // (initWeight !== null) — those should be left untouched.
-      const week1PendingSets = pendingSets.filter(s => s.initWeight === null);
+      const week1PendingSets = pendingSets.filter(s => s.initWeight === null && s.setType !== 'myo_rep_match');
 
       if (ex.isUnilateral) {
         const leftReps  = set.repsLeft  ?? 0;
@@ -1274,8 +1299,8 @@
                   >
                     <select
                       value={set.setType || 'standard'}
-                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
-                      disabled={set.done}
+                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; syncMyoMatchSets(ex); uiExercises = [...uiExercises]; }}
+                      disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
                              {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
@@ -1283,7 +1308,9 @@
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
                       <option value="myo_rep">Myo Rep</option>
-                      <option value="myo_rep_match">Myo Match</option>
+                      {#if ex.sets.indexOf(set) > 0}
+                        <option value="myo_rep_match">Myo Match</option>
+                      {/if}
                       <option value="drop_set">Drop Set</option>
                     </select>
 
@@ -1319,7 +1346,7 @@
                           }
                           uiExercises = [...uiExercises];
                         }}
-                        disabled={set.done} min={isAssistedEx ? undefined : 0}
+                        disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                         placeholder={isAssistedEx ? `-assist` : unit}
                         class="set-input"
                       />
@@ -1347,7 +1374,7 @@
                         }
                         uiExercises = [...uiExercises];
                       }}
-                      disabled={set.done} min="0" placeholder="L"
+                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
                       class="set-input"
                     />
 
@@ -1370,7 +1397,7 @@
                         }
                         uiExercises = [...uiExercises];
                       }}
-                      disabled={set.done} min="0" placeholder="R"
+                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
                       class="set-input"
                     />
 
@@ -1433,8 +1460,8 @@
                   >
                     <select
                       value={set.setType || 'standard'}
-                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; uiExercises = [...uiExercises]; }}
-                      disabled={set.done}
+                      onchange={(e) => { set.setType = (e.target as HTMLSelectElement).value; syncMyoMatchSets(ex); uiExercises = [...uiExercises]; }}
+                      disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
                              {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
@@ -1442,7 +1469,9 @@
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
                       <option value="myo_rep">Myo Rep</option>
-                      <option value="myo_rep_match">Myo Match</option>
+                      {#if ex.sets.indexOf(set) > 0}
+                        <option value="myo_rep_match">Myo Match</option>
+                      {/if}
                       <option value="drop_set">Drop Set</option>
                     </select>
 
@@ -1474,7 +1503,7 @@
                           }
                           uiExercises = [...uiExercises];
                         }}
-                        disabled={set.done} min={isAssistedEx ? undefined : 0}
+                        disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                         placeholder={isAssistedEx ? `-assist` : unit}
                         class="set-input"
                       />
@@ -1502,7 +1531,7 @@
                         }
                         uiExercises = [...uiExercises];
                       }}
-                      disabled={set.done} min="0" placeholder="reps"
+                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
                       class="set-input"
                     />
 
