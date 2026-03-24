@@ -113,7 +113,7 @@
   }
 </script>
 
-<div class="space-y-6 max-w-2xl p-6">
+<div class="space-y-6 max-w-2xl mx-auto p-6">
   <h2 class="text-2xl font-bold">Settings</h2>
 
   <!-- ── Profile ─────────────────────────────────────────────────────── -->
@@ -125,10 +125,14 @@
 
     <div class="grid grid-cols-2 gap-3">
       <div>
-        <label class="text-xs text-zinc-400 block mb-1">Age</label>
-        <input type="number" min="13" max="100" placeholder="—"
+        <label for="settings-age" class="text-xs text-zinc-400 block mb-1">Age</label>
+        <input id="settings-age" type="number" min="13" max="120" placeholder="—"
                value={$settings.profile.age ?? ''}
-               onchange={(e) => settings.update(s => ({ ...s, profile: { ...s.profile, age: e.currentTarget.value ? Number(e.currentTarget.value) : null } }))}
+               onchange={(e) => {
+                 const val = e.currentTarget.value ? Number(e.currentTarget.value) : null;
+                 const clamped = val !== null ? Math.min(120, Math.max(13, val)) : null;
+                 settings.update(s => ({ ...s, profile: { ...s.profile, age: clamped } }));
+               }}
                class="input text-center" />
       </div>
       <div>

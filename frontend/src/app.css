@@ -149,7 +149,7 @@ html, body {
 
 /* ── Page padding (accounts for bottom nav) ─────────────────────────────── */
 .page-content {
-  @apply px-4 pt-4 pb-28;
+  @apply px-4 pt-4 pb-28 max-w-3xl mx-auto w-full;
 }
 
 /* ── Gradient text utility ─────────────────────────────────────────────── */
