@@ -149,6 +149,8 @@ export interface Set {
   notes: string | null;
   started_at: string | null;
   completed_at: string | null;
+  set_type: string | null;
+  sub_sets: { weight_kg: number; reps: number }[] | null;
 }
 
 export interface WorkoutSession {
@@ -173,6 +175,8 @@ export interface PlannedExercise {
   progression_type: string;
   rest_seconds?: number;
   notes?: string | null;
+  set_type?: string;
+  drops?: number | null;
 }
 
 export interface PlannedDay {

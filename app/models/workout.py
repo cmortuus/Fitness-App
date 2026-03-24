@@ -58,6 +58,10 @@ class ExerciseSet(Base):
     reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
     reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Set type and sub-sets (for drop sets)
+    set_type: Mapped[str] = mapped_column(String(20), nullable=False, default="standard")
+    sub_sets: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON for drop set entries
+
     # Notes and timestamps
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

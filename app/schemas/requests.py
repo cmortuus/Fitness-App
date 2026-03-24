@@ -95,6 +95,7 @@ class SetCreate(BaseModel):
     set_number: int
     planned_reps: int | None = None
     planned_weight_kg: float | None = None
+    set_type: str = "standard"
 
 
 class SetUpdate(BaseModel):
@@ -102,6 +103,7 @@ class SetUpdate(BaseModel):
     actual_weight_kg: float | None = None
     reps_left: int | None = None
     reps_right: int | None = None
+    sub_sets: str | None = None  # JSON for drop set entries
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None
@@ -154,6 +156,8 @@ class PlannedExercise(BaseModel):
     reps: int
     starting_weight_kg: float
     progression_type: str = "linear"
+    set_type: str = "standard"
+    drops: int | None = None  # number of drops for drop sets
     rest_seconds: int | None = 90
     notes: str | None = None
 

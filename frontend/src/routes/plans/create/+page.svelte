@@ -83,6 +83,8 @@
 
   // Config values for the exercise being added (sets only — weight/reps set during workout)
   let configSets = $state(3);
+  let configSetType = $state('standard');
+  let configDrops = $state<number | null>(null);
 
   // Drag and drop state
   let draggedExercise = $state<{ dayNum: number; index: number; exercise: PlannedExercise } | null>(null);
@@ -202,6 +204,8 @@
       exercise: exercise
     };
     configSets = 3;
+    configSetType = 'standard';
+    configDrops = null;
   }
 
   function addExerciseToDay() {
@@ -217,7 +221,9 @@
       starting_weight_kg: 0,
       progression_type: 'linear',
       rest_seconds: 90,
-      notes: null
+      notes: null,
+      set_type: configSetType,
+      drops: configSetType === 'drop_set' ? configDrops : null
     };
 
     days[dayIndex].exercises = [...days[dayIndex].exercises, newExercise];
@@ -817,6 +823,9 @@
                             class="w-16 bg-gray-600 border border-gray-500 rounded px-2 py-1 text-sm text-center focus:outline-none focus:border-primary-500"
                             onclick={(e) => e.stopPropagation()}
                           />
+                          {#if ex.set_type && ex.set_type !== 'standard'}
+                            <span class="text-[10px] text-purple-400">{ex.set_type === 'myo_rep' ? 'Myo' : ex.set_type === 'myo_rep_match' ? 'Myo Match' : 'Drop'}</span>
+                          {/if}
                         </div>
                       </div>
                       <button
@@ -872,6 +881,23 @@
             />
             <p class="text-xs text-zinc-500 mt-1">Weight and reps are logged during the workout.</p>
           </div>
+
+          <div>
+            <label class="text-xs text-zinc-500">Set Type</label>
+            <select bind:value={configSetType} class="input !py-1 text-sm">
+              <option value="standard">Standard</option>
+              <option value="myo_rep">Myo Reps</option>
+              <option value="myo_rep_match">Myo Rep Match</option>
+              <option value="drop_set">Drop Set</option>
+            </select>
+          </div>
+
+          {#if configSetType === 'drop_set'}
+            <div>
+              <label class="text-xs text-zinc-500">Drops per set</label>
+              <input type="number" bind:value={configDrops} min="1" max="5" placeholder="On-the-fly" class="input !py-1 text-sm w-20" />
+            </div>
+          {/if}
 
           <div class="flex justify-between gap-3">
             <button

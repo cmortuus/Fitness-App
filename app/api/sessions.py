@@ -1,5 +1,6 @@
 """Workout session API endpoints."""
 
+import json
 from datetime import date, datetime, timezone
 from typing import Annotated
 
@@ -54,6 +55,8 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "actual_weight_kg": exercise_set.actual_weight_kg,
         "reps_left": exercise_set.reps_left,
         "reps_right": exercise_set.reps_right,
+        "set_type": exercise_set.set_type or "standard",
+        "sub_sets": json.loads(exercise_set.sub_sets) if exercise_set.sub_sets else None,
         "notes": exercise_set.notes,
         "started_at": exercise_set.started_at,
         "completed_at": exercise_set.completed_at,
@@ -237,6 +240,7 @@ async def add_set(
         set_number=set_data.set_number,
         planned_reps=set_data.planned_reps,
         planned_weight_kg=set_data.planned_weight_kg,
+        set_type=set_data.set_type,
     )
     db.add(exercise_set)
     await db.flush()
@@ -402,8 +406,6 @@ async def create_session_from_plan(
     body_weight_kg: float = 0.0,
 ) -> dict:
     """Create a new workout session from a plan, pre-populating sets."""
-    import json
-
     # Get the plan
     result = await db.execute(
         select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id)
@@ -517,6 +519,7 @@ async def create_session_from_plan(
                 "reps_right": s.reps_right,
                 "planned_reps_left": s.planned_reps_left,
                 "planned_reps_right": s.planned_reps_right,
+                "set_type": s.set_type or "standard",
             }
 
     def _overload_for_side(
@@ -561,19 +564,30 @@ async def create_session_from_plan(
         )
 
     def _overload_for_set(
-        exercise_id: int, set_num: int, target_reps: int, ex_model
+        exercise_id: int, set_num: int, target_reps: int, ex_model,
+        current_set_type: str = "standard",
     ) -> tuple[float | None, int | None, int | None, int | None]:
         """Return (weight_kg, planned_reps, planned_reps_left, planned_reps_right).
 
         Bilateral exercises: planned_reps_left/right are None.
         Unilateral exercises: each side is progressed independently from its
         own prior reps_left / reps_right; planned_reps is set to the weaker side.
+
+        Only matches prior sets whose set_type matches current_set_type.
         """
         ex_sets = prior_set_data.get(exercise_id)
         if not ex_sets:
             return None, None, None, None
 
-        prior_set = ex_sets.get(set_num) or ex_sets.get(1) or ex_sets[min(ex_sets.keys())]
+        # Filter prior sets to only those matching the current set_type
+        matched_sets = {
+            k: v for k, v in ex_sets.items()
+            if v.get("set_type", "standard") == current_set_type
+        }
+        if not matched_sets:
+            return None, None, None, None
+
+        prior_set = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
 
         left_reps  = prior_set.get("reps_left")
         right_reps = prior_set.get("reps_right")
@@ -634,10 +648,12 @@ async def create_session_from_plan(
 
         ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
+        planned_set_type = exercise_data.get("set_type", "standard")
+
         for set_num in range(1, sets + 1):
             # Each set is progressed from its own corresponding prior-session set.
             weight_kg, suggested_reps, planned_left, planned_right = \
-                _overload_for_set(exercise_id, set_num, reps, ex_model)
+                _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=planned_set_type)
 
             exercise_set = ExerciseSet(
                 workout_session_id=workout_session.id,
@@ -647,6 +663,7 @@ async def create_session_from_plan(
                 planned_reps_left=planned_left,
                 planned_reps_right=planned_right,
                 planned_weight_kg=weight_kg,
+                set_type=exercise_data.get("set_type", "standard"),
             )
             db.add(exercise_set)
 

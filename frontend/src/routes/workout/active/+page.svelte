@@ -86,6 +86,8 @@
     // Original suggestions for deviation warning
     initWeight: number | null;
     initReps: number | null;
+    setType: string;  // 'standard' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
+    drops: { weightLbs: number | null; reps: number | null }[];  // for drop sets only
   }
 
   interface UIExercise {
@@ -250,6 +252,11 @@
               oneRM,
               initWeight: suggestedWeight,
               initReps:   suggestedReps,
+              setType: bset?.set_type || 'standard',
+              drops: bset?.sub_sets ? bset.sub_sets.map((d: any) => ({
+                weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
+                reps: d.reps ?? null,
+              })) : [],
             });
           }
           return {
@@ -388,6 +395,11 @@
             oneRM,
             initWeight: sugW,
             initReps: sugR,
+            setType: bset.set_type || 'standard',
+            drops: bset.sub_sets ? bset.sub_sets.map((d: any) => ({
+              weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
+              reps: d.reps ?? null,
+            })) : [],
           };
         });
 
@@ -529,12 +541,20 @@
         isAssisted      ? `assist:${assistVal}${unit}` : '',
       ].filter(Boolean).join(' ') || undefined;
 
+      const subSetsData = set.setType === 'drop_set' && set.drops.length > 0
+        ? set.drops.filter(d => d.weightLbs || d.reps).map(d => ({
+            weight_kg: d.weightLbs ? toKg(d.weightLbs) : 0,
+            reps: d.reps ?? 0,
+          }))
+        : undefined;
+
       await updateSet(sessionId, bId, {
         actual_reps: effectiveReps,
         actual_weight_kg: weightKg,
         completed_at: new Date().toISOString(),
         ...(ex.isUnilateral && { reps_left: set.repsLeft ?? 0, reps_right: set.repsRight ?? 0 }),
         ...(notes && { notes }),
+        ...(subSetsData && subSetsData.length > 0 && { sub_sets: subSetsData }),
       });
 
       set.reps = effectiveReps; // sync reps field for drop-off calc
@@ -669,6 +689,8 @@
       oneRM: last?.oneRM ?? null,
       initWeight: null,
       initReps: null,
+      setType: ex.sets[0]?.setType || 'standard',
+      drops: [],
     }];
     uiExercises = [...uiExercises];
   }
@@ -771,6 +793,8 @@
       done: false,
       saving: false,
       oneRM: null, initWeight: null, initReps: null,
+      setType: 'standard' as string,
+      drops: [] as { weightLbs: number | null; reps: number | null }[],
     }));
     uiExercises = [...uiExercises, {
       uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
@@ -1190,6 +1214,11 @@
                 {#if exercise?.primary_muscles?.length}
                   <p class="text-xs text-zinc-500 mt-0.5 capitalize">{muscleLabel(ex.exerciseId)}</p>
                 {/if}
+                {#if ex.sets[0]?.setType && ex.sets[0].setType !== 'standard'}
+                  <span class="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-400 font-medium uppercase">
+                    {ex.sets[0].setType === 'myo_rep' ? 'Myo' : ex.sets[0].setType === 'myo_rep_match' ? 'Myo Match' : 'Drop'}
+                  </span>
+                {/if}
               </div>
               <div class="flex items-center gap-1 ml-3 mt-0.5">
                 {#if exercise?.description}
@@ -1371,6 +1400,20 @@
                       </p>
                     </div>
                   {/if}
+                  <!-- Drop set sub-rows (unilateral) -->
+                  {#if set.setType === 'drop_set' && set.done}
+                    {#each set.drops as drop, di}
+                      <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
+                        <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
+                        <input type="number" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
+                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
+                      </div>
+                    {/each}
+                    <button onclick={() => { set.drops = [...set.drops, { weightLbs: null, reps: null }]; uiExercises = [...uiExercises]; }}
+                            class="ml-8 text-xs text-primary-400 hover:text-primary-300 py-1">
+                      + Add Drop
+                    </button>
+                  {/if}
 
                 {:else}
                   <!-- ── Bilateral row ──────────────────────────────── -->
@@ -1475,6 +1518,20 @@
                         ⚠ {devWarnBi}
                       </p>
                     </div>
+                  {/if}
+                  <!-- Drop set sub-rows -->
+                  {#if set.setType === 'drop_set' && set.done}
+                    {#each set.drops as drop, di}
+                      <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
+                        <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
+                        <input type="number" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
+                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
+                      </div>
+                    {/each}
+                    <button onclick={() => { set.drops = [...set.drops, { weightLbs: null, reps: null }]; uiExercises = [...uiExercises]; }}
+                            class="ml-8 text-xs text-primary-400 hover:text-primary-300 py-1">
+                      + Add Drop
+                    </button>
                   {/if}
                 {/if}
               {/each}
