@@ -79,8 +79,23 @@ async def search(q: str = "", page: int = 1) -> list[dict]:
 
 
 @router.get("/barcode/{code}")
-async def barcode_lookup(code: str) -> dict:
-    """Look up a food by barcode (EAN/UPC)."""
+async def barcode_lookup(
+    code: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Look up a food by barcode — checks community library first, then external APIs."""
+    # Check local community library first
+    local_result = await db.execute(
+        select(FoodItem).where(FoodItem.barcode == code).order_by(
+            # Prefer community entries over custom
+            desc(FoodItem.source == "community")
+        ).limit(1)
+    )
+    local_food = local_result.scalar_one_or_none()
+    if local_food:
+        return serialize_food_item(local_food)
+
+    # Fall back to external APIs
     result = await lookup_barcode(code)
     if not result:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Barcode not found")
@@ -124,6 +139,46 @@ async def create_food(
         serving_label=data.serving_label,
         is_custom=True,
         user_id=user.id,
+        micronutrients=json.dumps(data.micronutrients) if data.micronutrients else None,
+    )
+    db.add(food)
+    await db.flush()
+    await db.refresh(food)
+    return serialize_food_item(food)
+
+
+@router.post("/foods/community", status_code=status.HTTP_201_CREATED)
+async def create_community_food(
+    data: FoodItemCreate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Save a food to the shared community library (global, no user_id)."""
+    # If barcode provided, check for existing community entry
+    if data.barcode:
+        existing = await db.execute(
+            select(FoodItem).where(
+                FoodItem.barcode == data.barcode,
+                FoodItem.source == "community",
+            )
+        )
+        found = existing.scalar_one_or_none()
+        if found:
+            return serialize_food_item(found)
+
+    food = FoodItem(
+        name=data.name,
+        brand=data.brand,
+        barcode=data.barcode,
+        source="community",
+        calories_per_100g=data.calories_per_100g,
+        protein_per_100g=data.protein_per_100g,
+        carbs_per_100g=data.carbs_per_100g,
+        fat_per_100g=data.fat_per_100g,
+        serving_size_g=data.serving_size_g,
+        serving_label=data.serving_label,
+        is_custom=False,
+        user_id=None,  # Global — shared across all users
         micronutrients=json.dumps(data.micronutrients) if data.micronutrients else None,
     )
     db.add(food)

@@ -558,6 +558,22 @@ export async function lookupBarcode(code: string): Promise<FoodSearchResult> {
   return response.data;
 }
 
+export async function createCommunityFood(data: {
+  name: string;
+  brand?: string;
+  barcode?: string;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+  serving_size_g?: number;
+  serving_label?: string;
+  micronutrients?: Record<string, number>;
+}): Promise<FoodItem> {
+  const response = await api.post('/nutrition/foods/community', data);
+  return response.data;
+}
+
 // Custom foods
 export async function getCustomFoods(q: string = ''): Promise<FoodItem[]> {
   const response = await api.get('/nutrition/foods', { params: { q } });

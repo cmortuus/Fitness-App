@@ -4,7 +4,7 @@
   import {
     getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
     getDailySummary, setMacroGoals,
-    searchFoods, lookupBarcode, getCustomFoods, createCustomFood,
+    searchFoods, lookupBarcode, getCustomFoods, createCustomFood, createCommunityFood,
     getActivePhase, createPhase, endPhase, recalculatePhase,
   } from '$lib/api';
   import { MICRO_META } from '$lib/api';
@@ -21,7 +21,7 @@
 
   // Add food modal
   let showAddModal = $state(false);
-  let activeTab = $state<'search' | 'scan' | 'manual' | 'custom'>('search');
+  let activeTab = $state<'search' | 'scan' | 'label' | 'manual' | 'custom'>('search');
 
   // Search tab
   let searchQuery = $state('');
@@ -57,6 +57,17 @@
   // Barcode scanner
   let scannerActive = $state(false);
   let scanError = $state('');
+
+  // OCR Label scanner
+  let ocrProcessing = $state(false);
+  let ocrError = $state('');
+  let ocrResult = $state<{
+    name: string; brand: string; barcode: string;
+    servingSize: number; servingLabel: string;
+    calories: number; protein: number; carbs: number; fat: number;
+    fiber: number; sodium: number; sugar: number;
+  } | null>(null);
+  let ocrSaving = $state(false);
 
   // Phase wizard
   let showPhaseWizard = $state(false);
@@ -233,6 +244,86 @@
   }
 
   // Custom foods
+  // ─── OCR Label Scanner ──────────────────────────────────────────────────
+  function parseNutritionLabel(text: string) {
+    const num = (pattern: RegExp) => {
+      const m = text.match(pattern);
+      return m ? parseFloat(m[1]) : 0;
+    };
+    const servingMatch = text.match(/serving\s*size[:\s]*(.+?)(?:\n|$)/i);
+    const servingText = servingMatch?.[1]?.trim() || '';
+    const servingG = num(/(\d+\.?\d*)\s*g/i) || 100;
+
+    return {
+      name: '', brand: '', barcode: '',
+      servingSize: servingG,
+      servingLabel: servingText || `${servingG}g`,
+      calories: num(/calories[:\s]*(\d+)/i),
+      fat: num(/total\s*fat[:\s]*(\d+\.?\d*)\s*g/i),
+      carbs: num(/total\s*carbohydrate[s]?[:\s]*(\d+\.?\d*)\s*g/i),
+      protein: num(/protein[:\s]*(\d+\.?\d*)\s*g/i),
+      fiber: num(/dietary\s*fiber[:\s]*(\d+\.?\d*)\s*g/i),
+      sodium: num(/sodium[:\s]*(\d+)\s*mg/i),
+      sugar: num(/(?:total\s*)?sugars?[:\s]*(\d+\.?\d*)\s*g/i),
+    };
+  }
+
+  async function processLabelImage(file: File) {
+    ocrProcessing = true;
+    ocrError = '';
+    ocrResult = null;
+    try {
+      const { createWorker } = await import('tesseract.js');
+      const worker = await createWorker('eng');
+      const { data } = await worker.recognize(file);
+      await worker.terminate();
+
+      const parsed = parseNutritionLabel(data.text);
+      if (parsed.calories <= 0 && parsed.protein <= 0 && parsed.carbs <= 0) {
+        ocrError = 'Could not read nutrition values. Try a clearer photo with good lighting.';
+      } else {
+        ocrResult = parsed;
+      }
+    } catch (e) {
+      ocrError = 'OCR failed. Try again with a clearer image.';
+      console.error('OCR error:', e);
+    }
+    ocrProcessing = false;
+  }
+
+  async function saveCommunityFood() {
+    if (!ocrResult) return;
+    ocrSaving = true;
+    try {
+      const srv = ocrResult.servingSize || 100;
+      const scale = 100 / srv; // Convert per-serving to per-100g
+      const micros: Record<string, number> = {};
+      if (ocrResult.fiber > 0) micros.fiber_g = Math.round(ocrResult.fiber * scale * 10) / 10;
+      if (ocrResult.sodium > 0) micros.sodium_mg = Math.round(ocrResult.sodium * scale);
+      if (ocrResult.sugar > 0) micros.sugar_g = Math.round(ocrResult.sugar * scale * 10) / 10;
+
+      const food = await createCommunityFood({
+        name: ocrResult.name || 'Scanned Food',
+        brand: ocrResult.brand || undefined,
+        barcode: ocrResult.barcode || undefined,
+        calories_per_100g: Math.round(ocrResult.calories * scale),
+        protein_per_100g: Math.round(ocrResult.protein * scale * 10) / 10,
+        carbs_per_100g: Math.round(ocrResult.carbs * scale * 10) / 10,
+        fat_per_100g: Math.round(ocrResult.fat * scale * 10) / 10,
+        serving_size_g: srv,
+        serving_label: ocrResult.servingLabel,
+        micronutrients: Object.keys(micros).length > 0 ? micros : undefined,
+      });
+      // Select it for logging
+      selectedFood = food;
+      selectedQty = srv;
+      ocrResult = null;
+    } catch (e) {
+      ocrError = 'Failed to save food. Please try again.';
+    }
+    ocrSaving = false;
+  }
+
   async function loadCustomFoods() {
     try { customFoods = await getCustomFoods(customQuery); } catch { customFoods = []; }
   }
@@ -636,7 +727,7 @@
       {:else}
         <!-- Tabs -->
         <div class="flex border-b border-zinc-800 shrink-0">
-          {#each [['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
+          {#each [['search', 'Search'], ['scan', 'Scan'], ['label', 'Label'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
             <button onclick={() => { activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); }}
                     class="flex-1 py-2.5 text-xs font-medium transition-colors
                            {activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-zinc-500 hover:text-zinc-300'}">
@@ -688,6 +779,109 @@
                 <p class="text-sm text-amber-400 text-center">{scanError}</p>
               {/if}
               <p class="text-xs text-zinc-500 text-center">Point camera at a food barcode</p>
+            </div>
+
+          <!-- Label OCR tab -->
+          {:else if activeTab === 'label'}
+            <div class="p-4 space-y-3">
+              {#if ocrResult}
+                <!-- Show extracted values for editing -->
+                <div class="space-y-3">
+                  <p class="text-xs text-zinc-400">Edit extracted values, then save to library</p>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="ocr-name" class="text-[10px] text-zinc-500">Name</label>
+                      <input id="ocr-name" type="text" bind:value={ocrResult.name} placeholder="Product name" class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-brand" class="text-[10px] text-zinc-500">Brand</label>
+                      <input id="ocr-brand" type="text" bind:value={ocrResult.brand} placeholder="Brand" class="input !py-1.5 text-sm" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-2 gap-2">
+                    <div>
+                      <label for="ocr-serving" class="text-[10px] text-zinc-500">Serving (g)</label>
+                      <input id="ocr-serving" type="number" bind:value={ocrResult.servingSize} class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-barcode" class="text-[10px] text-zinc-500">Barcode (optional)</label>
+                      <input id="ocr-barcode" type="text" bind:value={ocrResult.barcode} placeholder="Scan or type" class="input !py-1.5 text-sm" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-4 gap-2">
+                    <div>
+                      <label for="ocr-cal" class="text-[10px] text-zinc-500">Calories</label>
+                      <input id="ocr-cal" type="number" bind:value={ocrResult.calories} class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-pro" class="text-[10px] text-zinc-500">Protein (g)</label>
+                      <input id="ocr-pro" type="number" bind:value={ocrResult.protein} class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-carb" class="text-[10px] text-zinc-500">Carbs (g)</label>
+                      <input id="ocr-carb" type="number" bind:value={ocrResult.carbs} class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-fat" class="text-[10px] text-zinc-500">Fat (g)</label>
+                      <input id="ocr-fat" type="number" bind:value={ocrResult.fat} class="input !py-1.5 text-sm" />
+                    </div>
+                  </div>
+                  <div class="grid grid-cols-3 gap-2">
+                    <div>
+                      <label for="ocr-fiber" class="text-[10px] text-zinc-500">Fiber (g)</label>
+                      <input id="ocr-fiber" type="number" bind:value={ocrResult.fiber} class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-sodium" class="text-[10px] text-zinc-500">Sodium (mg)</label>
+                      <input id="ocr-sodium" type="number" bind:value={ocrResult.sodium} class="input !py-1.5 text-sm" />
+                    </div>
+                    <div>
+                      <label for="ocr-sugar" class="text-[10px] text-zinc-500">Sugar (g)</label>
+                      <input id="ocr-sugar" type="number" bind:value={ocrResult.sugar} class="input !py-1.5 text-sm" />
+                    </div>
+                  </div>
+                  <div class="flex gap-2">
+                    <button onclick={() => ocrResult = null} class="btn-ghost flex-1">Retake</button>
+                    <button onclick={saveCommunityFood} disabled={ocrSaving}
+                            class="btn-primary flex-1 disabled:opacity-50">
+                      {ocrSaving ? 'Saving...' : 'Save to Library & Log'}
+                    </button>
+                  </div>
+                </div>
+              {:else}
+                <!-- Camera / file input -->
+                <div class="text-center space-y-3">
+                  {#if ocrProcessing}
+                    <div class="py-8">
+                      <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary-500 mx-auto"></div>
+                      <p class="text-sm text-zinc-400 mt-3">Reading nutrition label...</p>
+                    </div>
+                  {:else}
+                    <p class="text-sm text-zinc-400">Take a photo of the Nutrition Facts label</p>
+                    <label class="btn-primary block w-full !py-3 cursor-pointer text-center">
+                      Take Photo
+                      <input type="file" accept="image/*" capture="environment"
+                             onchange={(e) => {
+                               const f = (e.target as HTMLInputElement).files?.[0];
+                               if (f) processLabelImage(f);
+                             }}
+                             class="hidden" />
+                    </label>
+                    <label class="block w-full py-3 text-sm text-zinc-400 hover:text-zinc-300 cursor-pointer border border-zinc-800 rounded-xl text-center transition-colors">
+                      Choose from Gallery
+                      <input type="file" accept="image/*"
+                             onchange={(e) => {
+                               const f = (e.target as HTMLInputElement).files?.[0];
+                               if (f) processLabelImage(f);
+                             }}
+                             class="hidden" />
+                    </label>
+                    {#if ocrError}
+                      <p class="text-xs text-red-400">{ocrError}</p>
+                    {/if}
+                  {/if}
+                </div>
+              {/if}
             </div>
 
           <!-- Manual tab -->
