@@ -105,9 +105,8 @@ migrate_to_docker() {
     sudo systemctl disable nginx 2>/dev/null || true
   fi
 
-  # 5. Ensure .env exists and export vars for docker compose
+  # 5. Ensure .env exists (docker compose reads it via env_file directive)
   ensure_env
-  set -a; source "$APP_DIR/.env"; set +a
 
   # 6. Ensure dev branch exists
   ensure_dev_branch
@@ -159,10 +158,7 @@ docker_deploy() {
   log "Starting Docker deployment at $TIMESTAMP"
   mkdir -p "$BACKUP_DIR"
 
-  # Load env vars for docker compose
-  if [ -f "$APP_DIR/.env" ]; then
-    set -a; source "$APP_DIR/.env"; set +a
-  fi
+  # docker compose reads .env via env_file directive
 
   # 1. Pull latest code
   log "Pulling latest code..."
@@ -259,12 +255,15 @@ docker_rollback() {
 
 ensure_env() {
   if [ ! -f "$APP_DIR/.env" ]; then
-    log "Creating .env with random JWT secret..."
+    log "Creating .env..."
+    touch "$APP_DIR/.env"
+  fi
+  # Ensure JWT_SECRET_KEY exists in .env (append if missing)
+  if ! grep -q '^JWT_SECRET_KEY=' "$APP_DIR/.env"; then
+    log "Adding JWT_SECRET_KEY to .env..."
     local jwt_secret
     jwt_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
-    cat > "$APP_DIR/.env" <<ENVEOF
-JWT_SECRET_KEY=${jwt_secret}
-ENVEOF
+    echo "JWT_SECRET_KEY=${jwt_secret}" >> "$APP_DIR/.env"
   fi
 }
 

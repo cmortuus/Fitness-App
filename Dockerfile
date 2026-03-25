@@ -27,9 +27,9 @@ WORKDIR /app
 COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Frontend runtime deps (cached unless package.json changes)
-COPY --from=frontend-build /app/frontend/package.json ./frontend/
-RUN cd frontend && npm install --omit=dev --ignore-scripts 2>/dev/null || true
+# Frontend runtime deps (cached unless package.json/lock changes)
+COPY frontend/package.json frontend/package-lock.json ./frontend/
+RUN cd frontend && npm ci --omit=dev --ignore-scripts
 
 # Rarely changing config files (cached)
 COPY alembic.ini ./
