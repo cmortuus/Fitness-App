@@ -169,21 +169,36 @@ docker_deploy() {
   log "Pulling latest code..."
   git fetch origin
 
+  # Build a specific branch into a temp dir and build its Docker image
+  build_branch() {
+    local branch="$1"
+    local service="$2"
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    log "Extracting $branch into temp build dir..."
+    git archive "origin/$branch" | tar -x -C "$tmpdir"
+    docker compose build --build-arg BUILDKIT_INLINE_CACHE=1 "$service"
+    # Build with the branch's code as context
+    docker build -t "fitness-app-${service}" "$tmpdir"
+    rm -rf "$tmpdir"
+  }
+
   if [ "$target" = "dev" ]; then
     log "Updating dev branch only..."
-    local current_branch
-    current_branch=$(git branch --show-current)
-    git checkout dev 2>/dev/null || git checkout -b dev origin/dev
-    git reset --hard origin/dev
-    git checkout "$current_branch"
+    git fetch origin dev
 
     log "Rebuilding dev container..."
-    docker compose build dev
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    git archive origin/dev | tar -x -C "$tmpdir"
+    docker build -t fitness-app-dev "$tmpdir"
+    rm -rf "$tmpdir"
     docker compose up -d dev
     docker_health_check_async dev
     return
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
+    git fetch origin main
     git reset --hard origin/main
 
     log "Rebuilding main container..."
@@ -193,19 +208,19 @@ docker_deploy() {
     return
   else
     log "Updating all branches..."
+    git fetch origin
     git reset --hard origin/main
 
-    # Also update dev branch
-    local current_branch
-    current_branch=$(git branch --show-current)
-    if git rev-parse --verify origin/dev &>/dev/null; then
-      git checkout dev 2>/dev/null || git checkout -b dev origin/dev
-      git reset --hard origin/dev
-      git checkout "$current_branch"
-    fi
+    log "Rebuilding main container..."
+    docker compose build main
 
-    log "Rebuilding containers..."
-    docker compose build
+    log "Rebuilding dev container..."
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    git archive origin/dev | tar -x -C "$tmpdir"
+    docker build -t fitness-app-dev "$tmpdir"
+    rm -rf "$tmpdir"
+
     docker compose up -d
   fi
 
