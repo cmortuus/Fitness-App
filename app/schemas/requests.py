@@ -58,6 +58,7 @@ class ExerciseCreate(BaseModel):
     display_name: str
     movement_type: MovementType = MovementType.COMPOUND
     body_region: BodyRegion = BodyRegion.UPPER
+    equipment_type: str = "other"
     is_unilateral: bool = False
     is_assisted: bool = False
     description: str | None = None
@@ -80,6 +81,7 @@ class ExerciseResponse(BaseModel):
     display_name: str
     movement_type: str
     body_region: str
+    equipment_type: str = "other"
     is_unilateral: bool = False
     is_assisted:   bool = False
     description: str | None

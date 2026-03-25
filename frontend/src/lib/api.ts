@@ -130,6 +130,7 @@ export interface Exercise {
   display_name: string;
   movement_type: 'compound' | 'isolation';
   body_region: 'upper' | 'lower' | 'full_body';
+  equipment_type: 'barbell' | 'dumbbell' | 'cable' | 'machine' | 'plate_loaded' | 'bodyweight' | 'band' | 'kettlebell' | 'other';
   is_unilateral: boolean;
   is_assisted: boolean;
   description: string | null;
