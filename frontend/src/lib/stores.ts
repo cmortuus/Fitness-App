@@ -16,13 +16,24 @@ export interface UserProfile {
   activityLevel: number;          // 1.0-1.8 multiplier
 }
 
+export interface EquipmentWeight {
+  actual: number;     // true unloaded weight
+  display: number;    // weight used for plate math (user preference, often 45)
+}
+
 export interface MachineWeights {
-  smithMachine: number;   // lbs (0, 15, 25, 45 common)
-  legPress: number;       // sled weight
+  smithMachine: number;
+  legPress: number;
   hackSquat: number;
   tBarRow: number;
-  barbell: number;        // standard bar weight
-  [key: string]: number;  // custom entries
+  barbell: number;
+  ezBar: number;
+  ezBarRackable: number;
+  safetySquatBar: number;
+  trapBar: number;
+  // Per-equipment display base overrides (for plate math)
+  // Key format: "{equipmentKey}_displayBase"
+  [key: string]: number;
 }
 
 export interface AppSettings {
@@ -53,11 +64,15 @@ const defaultSettings: AppSettings = {
     activityLevel: 1.4,
   },
   machineWeights: {
+    barbell: 45,
+    ezBar: 25,
+    ezBarRackable: 35,
+    safetySquatBar: 65,
+    trapBar: 45,
     smithMachine: 25,
     legPress: 75,
     hackSquat: 45,
     tBarRow: 20,
-    barbell: 45,
   },
 };
 

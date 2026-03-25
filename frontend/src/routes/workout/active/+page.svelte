@@ -137,6 +137,7 @@
     return exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded';
   }
 
+  /** Get the bar/sled weight for plate math — uses display base if set, otherwise actual weight. */
   function getBarWeight(exercise: Exercise | undefined): number {
     const mw = $settings.machineWeights;
     const defaultBar = $settings.weightUnit === 'lbs' ? 45 : 20;
@@ -144,12 +145,21 @@
 
     if (exercise.equipment_type === 'plate_loaded') {
       const n = exercise.name.toLowerCase();
-      if (n.includes('smith')) return mw.smithMachine ?? 25;
-      if (n.includes('leg_press') || n.includes('leg press')) return mw.legPress ?? 75;
-      if (n.includes('hack_squat') || n.includes('hack squat')) return mw.hackSquat ?? 45;
-      if (n.includes('t_bar') || n.includes('t-bar')) return mw.tBarRow ?? 20;
-      return mw.barbell ?? defaultBar;
+      let key = 'barbell';
+      if (n.includes('smith')) key = 'smithMachine';
+      else if (n.includes('leg_press') || n.includes('leg press')) key = 'legPress';
+      else if (n.includes('hack_squat') || n.includes('hack squat')) key = 'hackSquat';
+      else if (n.includes('t_bar') || n.includes('t-bar')) key = 'tBarRow';
+      // Use display base for plate math if set, otherwise fall back to actual weight
+      return mw[`${key}_displayBase`] ?? mw[key] ?? defaultBar;
     }
+    // Specialty bars
+    const n = exercise.name.toLowerCase();
+    if (n.includes('ez_bar') || n.includes('ez bar') || n.includes('curl_bar')) {
+      return n.includes('rackable') ? (mw.ezBarRackable ?? 35) : (mw.ezBar ?? 25);
+    }
+    if (n.includes('safety_squat') || n.includes('ssb')) return mw.safetySquatBar ?? 65;
+    if (n.includes('trap_bar') || n.includes('hex_bar')) return mw.trapBar ?? 45;
     return mw.barbell ?? defaultBar;
   }
 

@@ -394,37 +394,92 @@
   </div>
 
   <!-- ── Machine / Bar Weights ──────────────────────────────────────── -->
-  <div class="card space-y-4">
+  <div class="card space-y-5">
     <div>
-      <h3 class="text-lg font-semibold">Machine & Bar Weights</h3>
-      <p class="text-sm text-zinc-400 mt-1">Set the unloaded weight of your equipment for accurate plate calculations.</p>
+      <h3 class="text-lg font-semibold">Equipment Weights</h3>
+      <p class="text-sm text-zinc-400 mt-1">Set the unloaded weight of your equipment. Use "plate math base" to override the base weight used for plate calculations (e.g. count from 45 on a leg press).</p>
     </div>
 
-    {#each [
-      ['barbell', 'Standard Barbell'],
-      ['smithMachine', 'Smith Machine'],
-      ['legPress', 'Leg Press Sled'],
-      ['hackSquat', 'Hack Squat Sled'],
-      ['tBarRow', 'T-Bar Row'],
-    ] as [key, label]}
-      <div class="flex items-center justify-between gap-4">
-        <label for="mw-{key}" class="text-sm text-zinc-300 flex-1">{label}</label>
-        <div class="flex items-center gap-2">
-          <input id="mw-{key}" type="number" inputmode="decimal"
-                 value={$settings.machineWeights?.[key] ?? 0}
-                 onchange={(e) => {
-                   const val = parseFloat((e.target as HTMLInputElement).value) || 0;
-                   settings.update(s => ({
-                     ...s,
-                     machineWeights: { ...s.machineWeights, [key]: val }
-                   }));
-                 }}
-                 class="w-20 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-2 text-white"
-                 style="font-size: 16px;" />
-          <span class="text-xs text-zinc-500 w-6">{$settings.weightUnit}</span>
-        </div>
+    <!-- Barbells -->
+    <div>
+      <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Bars</h4>
+      <div class="space-y-2">
+        {#each [
+          ['barbell', 'Standard Barbell (Olympic)'],
+          ['ezBar', 'EZ Curl Bar'],
+          ['ezBarRackable', 'Rackable EZ Bar'],
+          ['safetySquatBar', 'Safety Squat Bar'],
+          ['trapBar', 'Trap / Hex Bar'],
+        ] as [key, label]}
+          <div class="flex items-center justify-between gap-3">
+            <label for="mw-{key}" class="text-sm text-zinc-300 flex-1">{label}</label>
+            <div class="flex items-center gap-2">
+              <input id="mw-{key}" type="number" inputmode="decimal"
+                     value={$settings.machineWeights?.[key] ?? 0}
+                     onchange={(e) => {
+                       const val = parseFloat((e.target as HTMLInputElement).value) || 0;
+                       settings.update(s => ({
+                         ...s,
+                         machineWeights: { ...s.machineWeights, [key]: val }
+                       }));
+                     }}
+                     class="w-20 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-2 text-white"
+                     style="font-size: 16px;" />
+              <span class="text-xs text-zinc-500 w-6">{$settings.weightUnit}</span>
+            </div>
+          </div>
+        {/each}
       </div>
-    {/each}
+    </div>
+
+    <!-- Plate-loaded machines -->
+    <div>
+      <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Plate-Loaded Machines</h4>
+      <p class="text-[10px] text-zinc-600 mb-2">Actual = true sled/carriage weight. Plate math base = what you want to count from (most people use 45).</p>
+      <div class="space-y-3">
+        {#each [
+          ['smithMachine', 'Smith Machine'],
+          ['legPress', 'Leg Press'],
+          ['hackSquat', 'Hack Squat'],
+          ['tBarRow', 'T-Bar Row'],
+        ] as [key, label]}
+          <div class="space-y-1">
+            <span class="text-sm text-zinc-300">{label}</span>
+            <div class="flex items-center gap-3 pl-3">
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-zinc-500 w-12">Actual</span>
+                <input type="number" inputmode="decimal"
+                       value={$settings.machineWeights?.[key] ?? 0}
+                       onchange={(e) => {
+                         const val = parseFloat((e.target as HTMLInputElement).value) || 0;
+                         settings.update(s => ({
+                           ...s,
+                           machineWeights: { ...s.machineWeights, [key]: val }
+                         }));
+                       }}
+                       class="w-16 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-1 py-1.5 text-white text-sm"
+                       style="font-size: 16px;" />
+              </div>
+              <div class="flex items-center gap-1.5">
+                <span class="text-[10px] text-zinc-500 w-16">Plate base</span>
+                <input type="number" inputmode="decimal"
+                       value={$settings.machineWeights?.[`${key}_displayBase`] ?? $settings.machineWeights?.[key] ?? 0}
+                       onchange={(e) => {
+                         const val = parseFloat((e.target as HTMLInputElement).value) || 0;
+                         settings.update(s => ({
+                           ...s,
+                           machineWeights: { ...s.machineWeights, [`${key}_displayBase`]: val }
+                         }));
+                       }}
+                       class="w-16 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-1 py-1.5 text-white text-sm"
+                       style="font-size: 16px;" />
+              </div>
+              <span class="text-xs text-zinc-500">{$settings.weightUnit}</span>
+            </div>
+          </div>
+        {/each}
+      </div>
+    </div>
   </div>
 
   <!-- ── Rest Timer ──────────────────────────────────────────────────── -->
