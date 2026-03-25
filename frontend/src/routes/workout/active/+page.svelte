@@ -1103,6 +1103,21 @@
     finishing = false;
   }
 
+  async function doDiscard() {
+    if (!sessionId) { goto('/'); return; }
+    const confirmed = confirm('Discard this workout? All progress will be permanently deleted.');
+    if (!confirmed) return;
+    try {
+      await deleteSession(sessionId);
+    } catch (e) {
+      console.error('Failed to delete session:', e);
+    }
+    if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+    if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
+    currentSession.set(null);
+    goto('/');
+  }
+
   // ─── PR detection ─────────────────────────────────────────────────────────
   interface PR { exerciseName: string; type: 'weight' | 'reps' | '1rm'; value: string; }
   let prs = $state<PR[]>([]);
@@ -2051,21 +2066,28 @@
           + Add Exercise
         </button>
 
-        <!-- Finish workout button — enabled only when all sets are done -->
-        {#if incompleteSets > 0}
-          <button disabled
-                  class="w-full py-4 bg-zinc-700 text-zinc-500 font-bold text-lg rounded-2xl
-                         cursor-not-allowed opacity-60">
-            {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
+        <!-- Finish / Discard buttons -->
+        <div class="flex gap-3">
+          <button onclick={doDiscard}
+                  class="py-4 px-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-red-400
+                         font-medium rounded-2xl transition-colors text-sm">
+            Discard
           </button>
-        {:else}
-          <button onclick={doFinish} disabled={finishing}
-                  class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
-                         text-white font-bold text-lg rounded-2xl transition-colors
-                         disabled:opacity-50 shadow-sm">
-            {finishing ? 'Saving…' : '✓ Finish Workout'}
-          </button>
-        {/if}
+          {#if incompleteSets > 0}
+            <button disabled
+                    class="flex-1 py-4 bg-zinc-700 text-zinc-500 font-bold text-lg rounded-2xl
+                           cursor-not-allowed opacity-60">
+              {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
+            </button>
+          {:else}
+            <button onclick={doFinish} disabled={finishing}
+                    class="flex-1 py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
+                           text-white font-bold text-lg rounded-2xl transition-colors
+                           disabled:opacity-50 shadow-sm">
+              {finishing ? 'Saving…' : '✓ Finish Workout'}
+            </button>
+          {/if}
+        </div>
 
       </div>
     </div><!-- /scrollable -->
