@@ -924,6 +924,31 @@
     return d.upperIsolation;
   }
 
+  /** Play a short chime using Web Audio API (no audio file needed) */
+  function playRestChime() {
+    try {
+      const ctx = new AudioContext();
+      // Two-tone chime: C5 then E5
+      const notes = [523.25, 659.25]; // Hz
+      notes.forEach((freq, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.3, ctx.currentTime + i * 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.15 + 0.4);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + i * 0.15);
+        osc.stop(ctx.currentTime + i * 0.15 + 0.4);
+      });
+      // Clean up after sounds finish
+      setTimeout(() => ctx.close(), 1000);
+    } catch {
+      // Audio not available (e.g. no user gesture yet) — silently ignore
+    }
+  }
+
   function startRestTimer(exUiId: string) {
     restSecs = restDurationForExercise(exUiId);
     restActive = true;
@@ -934,6 +959,7 @@
         clearInterval(restInterval!);
         restInterval = null;
         restActive = false;
+        playRestChime();
       }
     }, 1000);
   }
