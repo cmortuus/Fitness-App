@@ -252,10 +252,25 @@
     if (draftSaveInterval) clearInterval(draftSaveInterval);
   });
 
-  // Save drafts when app goes to background (iOS PWA close, tab switch)
+  // Save drafts when app goes to background; recalculate rest timer on foreground
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && sessionId) saveDrafts();
+      if (document.hidden) {
+        if (sessionId) saveDrafts();
+      } else {
+        // App came back to foreground — catch up the rest timer
+        if (restActive && restEndTime > 0) {
+          const remaining = Math.ceil((restEndTime - Date.now()) / 1000);
+          if (remaining <= 0) {
+            restSecs = 0;
+            if (restInterval) { clearInterval(restInterval); restInterval = null; }
+            restActive = false;
+            playRestChime();
+          } else {
+            restSecs = remaining;
+          }
+        }
+      }
     });
     window.addEventListener('beforeunload', () => {
       if (sessionId) saveDrafts();
@@ -952,12 +967,16 @@
     }
   }
 
+  let restEndTime = $state<number>(0); // absolute ms timestamp when rest ends
+
   function startRestTimer(exUiId: string) {
     restSecs = restDurationForExercise(exUiId);
+    restEndTime = Date.now() + restSecs * 1000;
     restActive = true;
     if (restInterval) clearInterval(restInterval);
     restInterval = setInterval(() => {
-      restSecs--;
+      const remaining = Math.ceil((restEndTime - Date.now()) / 1000);
+      restSecs = Math.max(0, remaining);
       if (restSecs <= 0) {
         clearInterval(restInterval!);
         restInterval = null;
@@ -970,6 +989,7 @@
   function skipRest() {
     if (restInterval) { clearInterval(restInterval); restInterval = null; }
     restActive = false;
+    restEndTime = 0;
   }
 
   // ─── Add exercise modal ───────────────────────────────────────────────────
@@ -2102,9 +2122,9 @@
           <span class="text-3xl font-mono font-bold tracking-tight text-white">{formatRest(restSecs)}</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <button onclick={() => { restSecs = Math.max(1, restSecs - 15); }}
+          <button onclick={() => { restEndTime = Math.max(Date.now() + 1000, restEndTime - 15000); restSecs = Math.max(1, Math.ceil((restEndTime - Date.now()) / 1000)); }}
                   class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">−15s</button>
-          <button onclick={() => { restSecs += 15; }}
+          <button onclick={() => { restEndTime += 15000; restSecs = Math.ceil((restEndTime - Date.now()) / 1000); }}
                   class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">+15s</button>
           <button onclick={skipRest}
                   class="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[40px]">Skip</button>
