@@ -294,6 +294,23 @@
         raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
       } catch (e: any) {
         if (e?.response?.status === 409) {
+          // Session already in progress — resume it instead of showing conflict dialog
+          const detail = e?.response?.data?.detail;
+          const existingId: number | null =
+            detail && typeof detail === 'object' ? detail.session_id ?? null : null;
+          if (existingId != null) {
+            currentSession.set(await getSession(existingId));
+            await resumeSession();
+            return;
+          }
+          // Fallback: check for any in-progress session
+          const sessions = await getSessions({ limit: 5 });
+          const inProgress = sessions.find(s => s.started_at && !s.completed_at);
+          if (inProgress) {
+            currentSession.set(inProgress);
+            await resumeSession();
+            return;
+          }
           await handleConflict(e, () => startFromPlan(planId, dayNumber));
           return;
         }
