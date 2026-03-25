@@ -909,7 +909,7 @@
       {:else}
         <!-- Tabs -->
         <div class="flex border-b border-zinc-800 shrink-0">
-          {#each [['search', 'Search'], ['scan', 'Scan'], ['label', 'Label'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
+          {#each [['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
             <button onclick={() => { if (activeTab === 'scan') stopScanner(); activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); }}
                     class="flex-1 py-2.5 text-xs font-medium transition-colors
                            {activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-zinc-500 hover:text-zinc-300'}">
