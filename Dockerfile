@@ -40,6 +40,7 @@ RUN chmod +x docker-entrypoint.sh
 # Code that changes frequently (last = minimal cache busting)
 COPY app/ ./app/
 COPY alembic/ ./alembic/
+COPY scripts/ ./scripts/
 COPY --from=frontend-build /app/frontend/build ./frontend/build
 
 # Data directory for SQLite
