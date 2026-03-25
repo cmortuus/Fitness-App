@@ -22,6 +22,9 @@ export function swipeable(node: HTMLElement, options: SwipeableOptions) {
 
   function onTouchStart(e: TouchEvent) {
     if (opts.disabled) return;
+    // Don't start swipe while keyboard is open (input/select focused)
+    const active = document.activeElement;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) return;
     startX = e.touches[0].clientX;
     startY = e.touches[0].clientY;
     currentX = 0;
