@@ -23,26 +23,24 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
 
 WORKDIR /app
 
-# Python dependencies
-COPY requirements.txt ./
+# Python dependencies (cached unless requirements.txt changes)
+COPY requirements.txt pyproject.toml ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy backend
-COPY app/ ./app/
-COPY alembic/ ./alembic/
-COPY alembic.ini ./
-COPY pyproject.toml ./
-
-# Copy built frontend
-COPY --from=frontend-build /app/frontend/build ./frontend/build
+# Frontend runtime deps (cached unless package.json changes)
 COPY --from=frontend-build /app/frontend/package.json ./frontend/
+RUN cd frontend && npm install --omit=dev --ignore-scripts 2>/dev/null || true
 
-# Internal nginx config (routes / → node:3000, /api → uvicorn:8000)
+# Rarely changing config files (cached)
+COPY alembic.ini ./
 COPY nginx/container.conf /etc/nginx/sites-available/default
-
-# Entrypoint
 COPY docker-entrypoint.sh ./
 RUN chmod +x docker-entrypoint.sh
+
+# Code that changes frequently (last = minimal cache busting)
+COPY app/ ./app/
+COPY alembic/ ./alembic/
+COPY --from=frontend-build /app/frontend/build ./frontend/build
 
 # Data directory for SQLite
 RUN mkdir -p /app/data
