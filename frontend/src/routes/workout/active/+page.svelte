@@ -151,6 +151,7 @@
       else if (n.includes('leg_press') || n.includes('leg press')) key = 'legPress';
       else if (n.includes('hack_squat') || n.includes('hack squat')) key = 'hackSquat';
       else if (n.includes('t_bar') || n.includes('t-bar')) key = 'tBarRow';
+      else if (n.includes('belt_squat') || n.includes('belt squat')) key = 'beltSquat';
       // Use display base for plate math if configured, otherwise actual weight
       return mw[`${key}_displayBase`] ?? mw[key] ?? defaultBar;
     }

@@ -17,6 +17,7 @@ EQUIPMENT_MAP = {
     "machine": "machine",
     "band": "band",
     "tbar": "plate_loaded",
+    "belt": "plate_loaded",
     "weighted": "bodyweight",  # weighted pullups/dips are still bodyweight category
     "assist": "machine",       # assisted pullups/dips use a machine
     "press": "machine",        # calf press machines
@@ -104,6 +105,10 @@ def generate_all_exercises():
     for i in ci:
         for s in cs:
             ex.append({"name": f"{i}_{s}_calf", "display": f"{i.title()} {s.title()} Calf", "type": "isolation", "primary": ["gastrocnemius", "soleus"], "secondary": ["tibialis"]})
+
+    # BELT SQUAT
+    for s in ["standard", "wide", "narrow", "marching", "calf_raise"]:
+        ex.append({"name": f"belt_{s}_squat", "display": f"Belt {s.replace('_', ' ').title()} Squat", "type": "squat", "primary": ["quads", "glutes"], "secondary": ["hamstrings"]})
 
     return ex
 
