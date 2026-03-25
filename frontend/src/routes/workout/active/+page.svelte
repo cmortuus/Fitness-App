@@ -462,14 +462,26 @@
         const sets: UISet[] = backendSets.map(bset => {
           const isDone = bset.completed_at != null;
           let weightVal: number | null = null;
-          const srcWeightKg = isDone ? bset.actual_weight_kg : bset.planned_weight_kg;
-          if (srcWeightKg != null && srcWeightKg > 0) {
-            // Assisted exercises store the assist amount directly in kg.
-            // All other exercises store the bilateral weight in kg.
-            // Both cases: just convert from kg to display unit.
-            weightVal = fromKg(srcWeightKg);
+
+          if (isDone) {
+            // Completed: use actual values
+            if (bset.actual_weight_kg != null && bset.actual_weight_kg > 0) {
+              weightVal = fromKg(bset.actual_weight_kg);
+            }
+          } else if (bset.draft_weight_kg != null) {
+            // Incomplete with draft: user was mid-edit before navigating away
+            weightVal = fromKg(bset.draft_weight_kg);
+          } else if (bset.planned_weight_kg != null && bset.planned_weight_kg > 0) {
+            // Incomplete: use planned/suggested weight
+            weightVal = fromKg(bset.planned_weight_kg);
           }
-          const repsVal = isDone ? bset.actual_reps : (bset.planned_reps ?? null);
+
+          let repsVal: number | null;
+          if (isDone) {
+            repsVal = bset.actual_reps;
+          } else {
+            repsVal = bset.draft_reps ?? bset.planned_reps ?? null;
+          }
 
           // Parse L/R from notes for completed unilateral sets
           let repsLeft  = isUni ? repsVal : null;
@@ -479,6 +491,9 @@
             const rm = bset.notes.match(/R:(\d+)/);
             if (lm) repsLeft  = parseInt(lm[1]);
             if (rm) repsRight = parseInt(rm[1]);
+          } else if (!isDone && isUni) {
+            repsLeft = bset.draft_reps_left ?? repsVal;
+            repsRight = bset.draft_reps_right ?? repsVal;
           }
 
           // Assisted exercises store the assist amount directly — no BW math needed.
