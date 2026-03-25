@@ -125,6 +125,7 @@ class SetResponse(BaseModel):
     planned_weight_kg: float | None
     actual_reps: int | None
     actual_weight_kg: float | None
+    set_type: str = "standard"
     notes: str | None
 
     model_config = {"from_attributes": True}
