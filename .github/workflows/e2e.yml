@@ -24,12 +24,26 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Python dependencies
+      - name: Install all dependencies (parallel)
         run: |
+          # Python deps
           python -m venv venv
           source venv/bin/activate
-          pip install -e .
-          pip install pytest pytest-asyncio httpx
+          pip install -e . pytest pytest-asyncio httpx &
+          PIP_PID=$!
+
+          # Frontend deps + Playwright browser (parallel)
+          cd frontend
+          npm ci &
+          NPM_PID=$!
+
+          # Wait for npm before installing Playwright (needs npx)
+          wait $NPM_PID
+          npx playwright install chromium --with-deps &
+          PW_PID=$!
+
+          # Wait for everything
+          wait $PIP_PID $PW_PID
 
       - name: Run Alembic migrations
         run: |
@@ -37,16 +51,6 @@ jobs:
           alembic upgrade head
         env:
           JWT_SECRET_KEY: test-secret-for-ci-only
-
-      - name: Install frontend dependencies
-        run: |
-          cd frontend
-          npm ci
-
-      - name: Install Playwright browsers
-        run: |
-          cd frontend
-          npx playwright install chromium --with-deps
 
       - name: Run backend unit tests
         run: |

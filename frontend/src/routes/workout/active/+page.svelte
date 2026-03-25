@@ -10,6 +10,7 @@
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
+  import { swipeable } from '$lib/actions/swipeable';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -80,6 +81,8 @@
     repsRight: number | null;  // unilateral right side
     done: boolean;
     skipped: boolean;
+    doneLeft: boolean;      // unilateral: left side completed
+    doneRight: boolean;     // unilateral: right side completed
     saving: boolean;
     // Epley anchor — 1RM (in user's display unit) from prior session suggestion.
     // Enables bi-directional weight ↔ reps calculation.
@@ -129,15 +132,25 @@
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
   const PLATES_KG = [20, 15, 10, 5, 2.5, 1.25];
 
-  function getBarWeight(exerciseName: string): number {
+  function shouldShowPlates(exercise: Exercise | undefined): boolean {
+    if (!exercise) return false;
+    return exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded';
+  }
+
+  function getBarWeight(exercise: Exercise | undefined): number {
     const mw = $settings.machineWeights;
-    if (!mw) return $settings.weightUnit === 'lbs' ? 45 : 20;
-    const n = exerciseName.toLowerCase();
-    if (n.includes('smith')) return mw.smithMachine ?? 25;
-    if (n.includes('leg_press') || n.includes('leg press')) return mw.legPress ?? 75;
-    if (n.includes('hack_squat') || n.includes('hack squat')) return mw.hackSquat ?? 45;
-    if (n.includes('t_bar') || n.includes('t-bar')) return mw.tBarRow ?? 20;
-    return mw.barbell ?? ($settings.weightUnit === 'lbs' ? 45 : 20);
+    const defaultBar = $settings.weightUnit === 'lbs' ? 45 : 20;
+    if (!exercise || !mw) return defaultBar;
+
+    if (exercise.equipment_type === 'plate_loaded') {
+      const n = exercise.name.toLowerCase();
+      if (n.includes('smith')) return mw.smithMachine ?? 25;
+      if (n.includes('leg_press') || n.includes('leg press')) return mw.legPress ?? 75;
+      if (n.includes('hack_squat') || n.includes('hack squat')) return mw.hackSquat ?? 45;
+      if (n.includes('t_bar') || n.includes('t-bar')) return mw.tBarRow ?? 20;
+      return mw.barbell ?? defaultBar;
+    }
+    return mw.barbell ?? defaultBar;
   }
 
   function calcPlates(totalWeight: number, isLbs: boolean, barWeight?: number): string {
@@ -157,8 +170,6 @@
     if (remaining > 0.1) return '';
     return result.join(' + ') + ' /side';
   }
-
-  let showPlates = $state(false);
 
   // Rest timer
   let restActive = $state(false);
@@ -311,6 +322,8 @@
               repsRight: (hasDraft && draftRight != null) ? draftRight : (suggestedRepsRight ?? suggestedReps),
               done: !!bset?.completed_at,
               skipped: !!bset?.skipped_at,
+              doneLeft: !!bset?.completed_at,
+              doneRight: !!bset?.completed_at,
               saving: false,
               oneRM,
               initWeight: suggestedWeight,
@@ -454,6 +467,9 @@
             repsLeft,
             repsRight,
             done: isDone,
+            skipped: !!bset.skipped_at,
+            doneLeft: isDone,
+            doneRight: isDone,
             saving: false,
             oneRM,
             initWeight: sugW,
@@ -798,6 +814,40 @@
     }
   }
 
+  // ─── Per-side completion for unilateral exercises ───────────────────────
+  async function completeSide(exUiId: string, localId: string, side: 'left' | 'right') {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex || !ex.isUnilateral) return;
+    const set = ex.sets.find(s => s.localId === localId);
+    if (!set || set.done || set.skipped) return;
+
+    const reps = side === 'left' ? (set.repsLeft ?? 0) : (set.repsRight ?? 0);
+    if (reps <= 0) return;
+
+    if (side === 'left') set.doneLeft = true;
+    else set.doneRight = true;
+    uiExercises = [...uiExercises];
+
+    // Start rest timer after completing either side
+    startRestTimer(exUiId);
+
+    // If both sides are now resolved, trigger the full backend save
+    if (set.doneLeft && set.doneRight) {
+      await completeSet(exUiId, localId);
+    }
+  }
+
+  function undoSide(exUiId: string, localId: string, side: 'left' | 'right') {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex) return;
+    const set = ex.sets.find(s => s.localId === localId);
+    if (!set || set.done) return; // if fully done, use uncompleteSet instead
+
+    if (side === 'left') set.doneLeft = false;
+    else set.doneRight = false;
+    uiExercises = [...uiExercises];
+  }
+
   async function removeSet(exUiId: string, localId: string) {
     if (!sessionId) return;
     const ex = uiExercises.find(e => e.uiId === exUiId);
@@ -826,6 +876,8 @@
       reps: null, repsLeft: null, repsRight: null,
       done: false,
       skipped: false,
+      doneLeft: false,
+      doneRight: false,
       saving: false,
       oneRM: last?.oneRM ?? null,
       initWeight: null,
@@ -932,6 +984,9 @@
       weightLbs: null,
       reps: null, repsLeft: null, repsRight: null,
       done: false,
+      skipped: false,
+      doneLeft: false,
+      doneRight: false,
       saving: false,
       oneRM: null, initWeight: null, initReps: null,
       setType: 'standard' as string,
@@ -1109,6 +1164,8 @@
         completed_at: null,
       } as any);
       set.done = false;
+      set.doneLeft = false;
+      set.doneRight = false;
     } catch (e) {
       console.error('Failed to uncomplete set:', e);
     } finally {
@@ -1367,10 +1424,6 @@
           <div class="flex items-center gap-3 mt-0.5">
             <span class="text-base font-mono font-bold text-primary-400">{formatClock(elapsed)}</span>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
-            <button onclick={() => showPlates = !showPlates}
-                    class="text-xs px-1.5 py-0.5 rounded transition-colors {showPlates ? 'bg-primary-600/20 text-primary-400' : 'text-zinc-600 hover:text-zinc-400'}">
-              🏋️ plates
-            </button>
           </div>
         </div>
 
@@ -1500,6 +1553,11 @@
                 {#if ex.isUnilateral}
                   <!-- ── Unilateral row ─────────────────────────────── -->
                   <div
+                    use:swipeable={{
+                      onSwipeLeft: () => { if (!set.done && !set.skipped) skipSet(ex.uiId, set.localId); },
+                      onSwipeRight: () => { if (!set.done) removeSet(ex.uiId, set.localId); },
+                      disabled: set.done || set.skipped,
+                    }}
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
                     style="grid-template-columns: 4.5rem 1fr 1fr 1fr 5.5rem"
                   >
@@ -1565,8 +1623,8 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if showPlates && set.weightLbs != null}
-                        {@const bw = getBarWeight(exercise?.name ?? '')}
+                      {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                        {@const bw = getBarWeight(exercise)}
                         {@const plates = set.weightLbs > bw ? calcPlates(set.weightLbs, unit === 'lbs', bw) : ''}
                         {#if plates}
                           <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
@@ -1593,8 +1651,8 @@
                         }
                         uiExercises = [...uiExercises];
                       }}
-                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
-                      class="set-input"
+                      disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
+                      class="set-input {set.doneLeft && !set.done ? 'opacity-50' : ''}"
                     />
 
                     <!-- Right reps -->
@@ -1616,11 +1674,11 @@
                         }
                         uiExercises = [...uiExercises];
                       }}
-                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
-                      class="set-input"
+                      disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
+                      class="set-input {set.doneRight && !set.done ? 'opacity-50' : ''}"
                     />
 
-                    <!-- Complete / Skip / Undo -->
+                    <!-- Complete L/R / Skip / Undo -->
                     {#if set.saving}
                       <div class="flex gap-1 justify-center"><span class="text-zinc-400 text-xs">…</span></div>
                     {:else if set.skipped}
@@ -1636,17 +1694,42 @@
                         title="Undo — mark as incomplete"
                       >✓</button>
                     {:else}
-                      {@const canComplete = (set.repsLeft ?? 0) > 0 && (set.repsRight ?? 0) > 0}
-                      <div class="flex gap-1.5">
-                        <button
-                          onclick={() => completeSet(ex.uiId, set.localId)}
-                          disabled={!canComplete}
-                          class="h-12 flex-1 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold text-base transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                          title={canComplete ? 'Log this set' : 'Enter reps first'}
-                        >✓</button>
+                      <div class="flex flex-col gap-1">
+                        <!-- Per-side check buttons -->
+                        <div class="flex gap-1">
+                          {#if set.doneLeft}
+                            <button
+                              onclick={() => undoSide(ex.uiId, set.localId, 'left')}
+                              class="h-6 flex-1 rounded-lg bg-green-700/30 text-green-400 text-[10px] font-bold transition-colors hover:bg-zinc-700"
+                              title="Undo left side"
+                            >L ✓</button>
+                          {:else}
+                            <button
+                              onclick={() => completeSide(ex.uiId, set.localId, 'left')}
+                              disabled={(set.repsLeft ?? 0) <= 0}
+                              class="h-6 flex-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-[10px] font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                              title={(set.repsLeft ?? 0) > 0 ? 'Log left side' : 'Enter left reps first'}
+                            >L ✓</button>
+                          {/if}
+                          {#if set.doneRight}
+                            <button
+                              onclick={() => undoSide(ex.uiId, set.localId, 'right')}
+                              class="h-6 flex-1 rounded-lg bg-green-700/30 text-green-400 text-[10px] font-bold transition-colors hover:bg-zinc-700"
+                              title="Undo right side"
+                            >R ✓</button>
+                          {:else}
+                            <button
+                              onclick={() => completeSide(ex.uiId, set.localId, 'right')}
+                              disabled={(set.repsRight ?? 0) <= 0}
+                              class="h-6 flex-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-[10px] font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                              title={(set.repsRight ?? 0) > 0 ? 'Log right side' : 'Enter right reps first'}
+                            >R ✓</button>
+                          {/if}
+                        </div>
+                        <!-- Single skip for entire set -->
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-12 flex-1 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
+                          class="h-5 w-full rounded-lg bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-[10px] font-medium transition-colors"
                           title="Skip this set"
                         >Skip</button>
                       </div>
@@ -1691,6 +1774,11 @@
                 {:else}
                   <!-- ── Bilateral row ──────────────────────────────── -->
                   <div
+                    use:swipeable={{
+                      onSwipeLeft: () => { if (!set.done && !set.skipped) skipSet(ex.uiId, set.localId); },
+                      onSwipeRight: () => { if (!set.done) removeSet(ex.uiId, set.localId); },
+                      disabled: set.done || set.skipped,
+                    }}
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
                     style="grid-template-columns: 4.5rem 1fr 1fr 5.5rem"
                   >
@@ -1752,8 +1840,8 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if showPlates && set.weightLbs != null}
-                        {@const bw = getBarWeight(exercise?.name ?? '')}
+                      {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                        {@const bw = getBarWeight(exercise)}
                         {@const plates = set.weightLbs > bw ? calcPlates(set.weightLbs, unit === 'lbs', bw) : ''}
                         {#if plates}
                           <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>

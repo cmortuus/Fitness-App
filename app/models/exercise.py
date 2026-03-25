@@ -28,6 +28,20 @@ class BodyRegion(str, Enum):
     FULL_BODY = "full_body"
 
 
+class EquipmentType(str, Enum):
+    """Type of equipment used for an exercise."""
+
+    BARBELL = "barbell"
+    DUMBBELL = "dumbbell"
+    CABLE = "cable"
+    MACHINE = "machine"             # selectorized / pin-loaded stack
+    PLATE_LOADED = "plate_loaded"   # smith, hack squat, leg press, etc.
+    BODYWEIGHT = "bodyweight"
+    BAND = "band"
+    KETTLEBELL = "kettlebell"
+    OTHER = "other"
+
+
 class Exercise(Base):
     """Exercise definition model."""
 
@@ -38,6 +52,7 @@ class Exercise(Base):
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
     movement_type: Mapped[str] = mapped_column(String(50), default="compound")
     body_region: Mapped[str] = mapped_column(String(50), default="upper")
+    equipment_type: Mapped[str] = mapped_column(String(30), default="other", nullable=False, server_default="other")
     is_unilateral: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_assisted:   Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
