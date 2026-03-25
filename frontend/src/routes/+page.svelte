@@ -4,6 +4,14 @@
   import { getSessions, archivePlan, getPlans, getDailySummary, getInsights } from '$lib/api';
   import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
+  const KG_TO_LBS = 2.20462;
+  function volDisplay(kg: number): number {
+    return $settings.weightUnit === 'lbs' ? kg * KG_TO_LBS : kg;
+  }
+  function volUnit(): string {
+    return $settings.weightUnit === 'lbs' ? 'lbs' : 'kg';
+  }
+
   interface NextWorkout {
     plan: WorkoutPlan;
     day: PlannedDay;
@@ -154,7 +162,7 @@
     const weekStr = isoDate(weekAgo);
     return allSessions
       .filter(s => s.date >= weekStr && s.status === 'completed')
-      .reduce((sum, s) => sum + (s.total_volume_kg ?? 0), 0);
+      .reduce((sum, s) => sum + volDisplay(s.total_volume_kg ?? 0), 0);
   })());
 
   let weeklyWorkouts = $derived((() => {
@@ -192,7 +200,7 @@
         <p class="text-2xl font-bold text-accent-400">
           {weeklyVolume > 999 ? (weeklyVolume / 1000).toFixed(1) + 'k' : weeklyVolume.toFixed(0)}
         </p>
-        <p class="text-xs text-zinc-500 mt-0.5">{$settings.weightUnit === 'lbs' ? 'lbs' : 'kg'} volume</p>
+        <p class="text-xs text-zinc-500 mt-0.5">{volUnit()} volume</p>
       </div>
     </div>
   {/if}
@@ -416,7 +424,7 @@
               <p class="text-xs text-zinc-500 mt-0.5">{s.total_sets} sets · {s.total_reps} reps</p>
             </div>
             <div class="text-right">
-              <p class="text-sm font-semibold text-primary-400">{s.total_volume_kg?.toFixed(0)} kg</p>
+              <p class="text-sm font-semibold text-primary-400">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
             </div>
           </div>
         {/each}
@@ -442,7 +450,7 @@
             </div>
             <div class="text-right shrink-0 ml-4">
               <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
-              <p class="text-xs text-zinc-500">{s.total_volume_kg?.toFixed(0)} kg</p>
+              <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
             </div>
           </div>
         {/each}
