@@ -187,7 +187,7 @@
   let restSecs = $state($settings.restDurations.upperCompound);
   let restInterval: ReturnType<typeof setInterval> | null = null;
 
-  // Add-exercise modal
+  // Add-exercise modal (also used for swap)
   let showAddModal    = $state(false);
   let searchQuery     = $state('');
   let searchInputEl   = $state<HTMLInputElement | null>(null);
@@ -197,6 +197,8 @@
   let filterType = $state<'all' | 'compound' | 'isolation'>('all');
   let pickingExercise = $state<Exercise | null>(null);
   let recentExercises = $state<Exercise[]>([]);
+  // Swap mode: when set, the modal replaces this exercise instead of adding
+  let swapTargetUiId = $state<string | null>(null);
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(async () => {
@@ -1015,28 +1017,69 @@
 
   function confirmAdd() {
     if (!pickingExercise) return;
-    const sets: UISet[] = Array.from({ length: pendingSets }, (_, i) => ({
-      localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
-      backendId: null,
-      setNumber: i + 1,
-      weightLbs: null,
-      reps: null, repsLeft: null, repsRight: null,
-      done: false,
-      skipped: false,
-      doneLeft: false,
-      doneRight: false,
-      saving: false,
-      oneRM: null, initWeight: null, initReps: null,
-      setType: 'standard' as string,
-      drops: [] as { weightLbs: number | null; reps: number | null }[],
-    }));
-    uiExercises = [...uiExercises, {
-      uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
-      exerciseId: pickingExercise.id,
-      sets,
-      isUnilateral: pickingExercise.is_unilateral,
-      customRestSecs: null,
-    }];
+
+    if (swapTargetUiId) {
+      // ── Swap mode: replace exercise in-place, keeping set count ────
+      const idx = uiExercises.findIndex(e => e.uiId === swapTargetUiId);
+      if (idx >= 0) {
+        const oldEx = uiExercises[idx];
+        const numSets = Math.max(oldEx.sets.length, 1);
+        const newSets: UISet[] = Array.from({ length: numSets }, (_, i) => ({
+          localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
+          backendId: null,
+          setNumber: i + 1,
+          weightLbs: null,
+          reps: null, repsLeft: null, repsRight: null,
+          done: false,
+          skipped: false,
+          doneLeft: false,
+          doneRight: false,
+          saving: false,
+          oneRM: null, initWeight: null, initReps: null,
+          setType: 'standard' as string,
+          drops: [] as { weightLbs: number | null; reps: number | null }[],
+        }));
+        // Delete old backend sets
+        for (const s of oldEx.sets) {
+          if (s.backendId && sessionId) {
+            deleteSet(sessionId, s.backendId).catch(() => {});
+          }
+        }
+        uiExercises[idx] = {
+          uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+          exerciseId: pickingExercise.id,
+          sets: newSets,
+          isUnilateral: pickingExercise.is_unilateral,
+          customRestSecs: null,
+        };
+        uiExercises = [...uiExercises];
+      }
+      swapTargetUiId = null;
+    } else {
+      // ── Normal add mode ────────────────────────────────────────────
+      const sets: UISet[] = Array.from({ length: pendingSets }, (_, i) => ({
+        localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
+        backendId: null,
+        setNumber: i + 1,
+        weightLbs: null,
+        reps: null, repsLeft: null, repsRight: null,
+        done: false,
+        skipped: false,
+        doneLeft: false,
+        doneRight: false,
+        saving: false,
+        oneRM: null, initWeight: null, initReps: null,
+        setType: 'standard' as string,
+        drops: [] as { weightLbs: number | null; reps: number | null }[],
+      }));
+      uiExercises = [...uiExercises, {
+        uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+        exerciseId: pickingExercise.id,
+        sets,
+        isUnilateral: pickingExercise.is_unilateral,
+        customRestSecs: null,
+      }];
+    }
     showAddModal = false;
     pickingExercise = null;
     searchQuery = '';
@@ -1553,6 +1596,11 @@
                   title="View history for this exercise"
                 >History</button>
                 <button
+                  onclick={() => { swapTargetUiId = ex.uiId; showAddModal = true; searchQuery = ''; pickingExercise = null; }}
+                  class="text-xs text-zinc-500 hover:text-amber-400 px-2 py-0.5 rounded transition-colors hover:bg-zinc-800"
+                  title="Swap for a different exercise"
+                >Swap</button>
+                <button
                   onclick={() => removeExercise(ex.uiId)}
                   class="text-gray-600 hover:text-red-400 text-xl leading-none"
                   title="Remove exercise"
@@ -2062,11 +2110,13 @@
         <h3 class="font-semibold">
           {#if pickingExercise}
             {pickingExercise.display_name}
+          {:else if swapTargetUiId}
+            Swap Exercise
           {:else}
             Add Exercise
           {/if}
         </h3>
-        <button onclick={() => showAddModal = false} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        <button onclick={() => { showAddModal = false; swapTargetUiId = null; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
       </div>
 
       {#if !pickingExercise}
@@ -2152,7 +2202,7 @@
 
         <div class="px-4 pb-5 flex gap-3 shrink-0">
           <button onclick={() => pickingExercise = null} class="btn-secondary flex-1">← Back</button>
-          <button onclick={confirmAdd} class="btn-primary flex-1">Add to Workout</button>
+          <button onclick={confirmAdd} class="btn-primary flex-1">{swapTargetUiId ? 'Swap Exercise' : 'Add to Workout'}</button>
         </div>
       {/if}
     </div>
