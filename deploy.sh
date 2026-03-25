@@ -188,6 +188,9 @@ docker_deploy() {
     log "Rebuilding dev container..."
     docker compose build $build_flags dev
     docker compose up -d dev
+    sleep 15
+    docker_health_check dev
+    return
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
     git reset --hard origin/main
@@ -201,6 +204,9 @@ docker_deploy() {
     log "Rebuilding main container..."
     docker compose build $build_flags main
     docker compose up -d main
+    sleep 15
+    docker_health_check main
+    return
   else
     log "Updating all branches..."
     git reset --hard origin/main
@@ -242,20 +248,40 @@ docker_deploy() {
 # ── Docker health check ──────────────────────────────────────────────────────
 
 docker_health_check() {
-  log "Running health check..."
+  local target="${1:-all}"
+  log "Running health check (target: $target)..."
   local retries=30
-  local delay=3
+  local delay=5
 
   for i in $(seq 1 $retries); do
-    if curl -sf http://localhost/ > /dev/null 2>&1 && \
-       curl -sf http://localhost/api/exercises/ > /dev/null 2>&1; then
+    local ok=true
+
+    if [ "$target" = "dev" ] || [ "$target" = "all" ]; then
+      # Check dev container directly by service name
+      if ! docker compose exec -T dev curl -sf http://localhost:8000/api/exercises/ > /dev/null 2>&1; then
+        ok=false
+      fi
+    fi
+
+    if [ "$target" = "main" ] || [ "$target" = "all" ]; then
+      # Check main container directly
+      if ! docker compose exec -T main curl -sf http://localhost:8000/api/exercises/ > /dev/null 2>&1; then
+        ok=false
+      fi
+    fi
+
+    if $ok; then
       log "App is healthy (attempt $i/$retries)"
       return 0
+    fi
+
+    if [ "$i" -eq 1 ]; then
+      log "Waiting for containers to start..."
     fi
     sleep $delay
   done
 
-  warn "Health check didn't pass after ${retries} attempts."
+  warn "Health check didn't pass after ${retries} attempts ($(( retries * delay ))s)."
   warn "Check logs: docker compose logs -f"
   return 1
 }
