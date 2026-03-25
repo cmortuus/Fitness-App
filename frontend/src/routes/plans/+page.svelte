@@ -1,9 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
-  import { workoutPlans, exercises } from '$lib/stores';
-  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate } from '$lib/api';
-  import type { Exercise, WorkoutPlan, WorkoutTemplate } from '$lib/api';
+  import { workoutPlans, exercises, settings } from '$lib/stores';
+  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate, getSessions } from '$lib/api';
+  import type { Exercise, WorkoutPlan, WorkoutTemplate, WorkoutSession, PlannedDay } from '$lib/api';
+
+  let avgSetDuration = $state(30); // seconds per set from history, default 30s
 
   let allExercises = $state<Exercise[]>([]);
   let localPlans   = $state<WorkoutPlan[]>([]);
@@ -45,6 +47,28 @@
       allExercises = exercisesData;
       localPlans = JSON.parse(JSON.stringify(plansData));
       templates = tmplData;
+
+      // Compute average set duration from recent completed sessions
+      try {
+        const sessions = await getSessions({ limit: 10 });
+        const completed = sessions.filter((s: WorkoutSession) => s.started_at && s.completed_at);
+        if (completed.length > 0) {
+          let totalSets = 0;
+          let totalDurSecs = 0;
+          for (const s of completed) {
+            const durMs = new Date(s.completed_at!).getTime() - new Date(s.started_at!).getTime();
+            const sets = s.sets?.length ?? s.total_sets ?? 0;
+            if (sets > 0 && durMs > 0) {
+              totalSets += sets;
+              totalDurSecs += durMs / 1000;
+            }
+          }
+          if (totalSets > 0) {
+            // This includes rest time, so it's "time per set including rest"
+            avgSetDuration = Math.round(totalDurSecs / totalSets);
+          }
+        }
+      } catch { /* history not available yet */ }
     } catch (error) {
       showError('Failed to load plans.');
       console.error('Failed to load data:', error);
@@ -114,6 +138,35 @@
     return plan.days.reduce((sum, d) => sum + d.exercises.length, 0);
   }
 
+  /** Estimate workout duration for a given day in minutes */
+  function estimateDayMinutes(day: PlannedDay): number {
+    const rd = $settings.restDurations;
+    let totalSecs = 0;
+    for (const ex of day.exercises) {
+      const exercise = allExercises.find(e => e.id === ex.exercise_id);
+      const isCompound = exercise?.movement_type === 'compound' || exercise?.movement_type === 'squat' || exercise?.movement_type === 'hinge';
+      const isUpper = exercise?.body_region === 'upper';
+      // Pick rest duration based on exercise type
+      let restSec: number;
+      if (isCompound) {
+        restSec = isUpper ? rd.upperCompound : rd.lowerCompound;
+      } else {
+        restSec = isUpper ? rd.upperIsolation : rd.lowerIsolation;
+      }
+      const sets = ex.sets ?? 3;
+      // Each set: time to perform + rest (no rest after last set)
+      totalSecs += sets * avgSetDuration + (sets - 1) * restSec;
+    }
+    return Math.round(totalSecs / 60);
+  }
+
+  function formatDuration(mins: number): string {
+    if (mins < 60) return `~${mins}m`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `~${h}h ${m}m` : `~${h}h`;
+  }
+
   function togglePlan(planId: number) {
     expandedPlan = expandedPlan === planId ? null : planId;
   }
@@ -177,6 +230,7 @@
                     <div class="flex items-center gap-2">
                       <span class="text-sm font-medium text-primary-400">{day.day_name}</span>
                       <span class="text-xs text-zinc-600">{day.exercises.length} exercises</span>
+                      <span class="text-xs text-zinc-600">· {formatDuration(estimateDayMinutes(day))}</span>
                     </div>
                     <span class="text-zinc-600 text-sm transition-transform duration-200"
                           class:rotate-180={isDayExpanded(plan.id, day.day_number)}>▾</span>
