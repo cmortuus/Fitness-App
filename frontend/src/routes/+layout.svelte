@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { activeDietPhase, currentSession, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
+  import { activeDietPhase, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import { getExercises, getLatestBodyWeight, getPlans, getActivePhase, isAuthenticated, getStoredUser, clearAuthTokens } from '$lib/api';
   import type { AuthUser } from '$lib/api';
 
@@ -100,16 +100,6 @@
       <span class="text-lg font-bold gradient-text tracking-tight">GymTracker</span>
 
       <div class="flex items-center gap-3">
-        {#if $currentSession}
-          <a href="/workout/active"
-             class="flex items-center gap-1.5 text-xs font-semibold text-primary-400
-                    bg-primary-500/10 border border-primary-500/30 rounded-full px-3 py-1.5
-                    animate-pulse hover:bg-primary-500/20 transition-colors">
-            <span class="w-1.5 h-1.5 rounded-full bg-primary-400"></span>
-            Active
-          </a>
-        {/if}
-
         <!-- Desktop nav links (hidden on mobile) -->
         <nav class="hidden md:flex items-center gap-1">
           {#each staticNavItems as item}
