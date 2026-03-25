@@ -53,11 +53,15 @@ const defaultSettings: AppSettings = {
     activityLevel: 1.4,
   },
   machineWeights: {
+    barbell: 45,
+    ezBar: 25,
+    ezBarRackable: 35,
+    safetySquatBar: 65,
+    trapBar: 45,
     smithMachine: 25,
     legPress: 75,
     hackSquat: 45,
     tBarRow: 20,
-    barbell: 45,
   },
 };
 
