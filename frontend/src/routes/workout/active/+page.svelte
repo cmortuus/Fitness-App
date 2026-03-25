@@ -222,13 +222,21 @@
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
       } else if ($currentSession) {
-        // ── Resume in-progress session ───────────────────────────────────
+        // ── Resume in-progress session (store still set) ────────────────
         await resumeSession();
       } else {
-        // ── No plan param: show plan picker ──────────────────────────────
-        plans = await getPlans();
-        showPicker = true;
-        loading = false;
+        // ── Check API for in-progress session (navigated away & back) ───
+        const recent = await getSessions({ limit: 5 });
+        const inProgress = recent.find(s => s.started_at && !s.completed_at);
+        if (inProgress) {
+          currentSession.set(inProgress);
+          await resumeSession();
+        } else {
+          // ── No active session: show plan picker ────────────────────────
+          plans = await getPlans();
+          showPicker = true;
+          loading = false;
+        }
       }
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
@@ -252,16 +260,9 @@
     });
   }
 
-  // Warn before leaving the page if there's an active session with incomplete sets
-  beforeNavigate(({ cancel }) => {
-    if (!$currentSession) return;
-    const hasUnsaved = uiExercises.some(ex => ex.sets.some(s => !s.done));
-    if (hasUnsaved) {
-      const confirmed = confirm(
-        'You have an active workout with unfinished sets. Leave anyway? Your progress so far is saved.'
-      );
-      if (!confirmed) cancel();
-    }
+  // Save drafts before navigating away — session will auto-resume when you come back
+  beforeNavigate(() => {
+    if (sessionId) saveDrafts();
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────
