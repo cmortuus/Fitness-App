@@ -105,8 +105,9 @@ migrate_to_docker() {
     sudo systemctl disable nginx 2>/dev/null || true
   fi
 
-  # 5. Ensure .env exists
+  # 5. Ensure .env exists and export vars for docker compose
   ensure_env
+  set -a; source "$APP_DIR/.env"; set +a
 
   # 6. Ensure dev branch exists
   ensure_dev_branch
@@ -157,6 +158,11 @@ docker_deploy() {
 
   log "Starting Docker deployment at $TIMESTAMP"
   mkdir -p "$BACKUP_DIR"
+
+  # Load env vars for docker compose
+  if [ -f "$APP_DIR/.env" ]; then
+    set -a; source "$APP_DIR/.env"; set +a
+  fi
 
   # 1. Pull latest code
   log "Pulling latest code..."
