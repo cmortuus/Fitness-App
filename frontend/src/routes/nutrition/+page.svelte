@@ -523,10 +523,23 @@
   ];
 
   // Barcode scanning
+  let manualBarcode = $state('');
+
   async function startScanner() {
     await stopScanner(); // Clean up any existing instance
     scannerActive = true;
     scanError = '';
+
+    // Wait for DOM element to exist
+    await new Promise(r => setTimeout(r, 100));
+
+    const readerEl = document.getElementById('barcode-reader');
+    if (!readerEl) {
+      scanError = 'Scanner container not found. Please try again.';
+      scannerActive = false;
+      return;
+    }
+
     try {
       const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import('html5-qrcode');
       const scanner = new Html5Qrcode('barcode-reader', {
@@ -541,30 +554,66 @@
         ],
       });
       scannerInstance = scanner;
-      await scanner.start(
-        { facingMode: 'environment' },
-        { fps: 15, qrbox: { width: 300, height: 150 } },
-        async (decodedText) => {
-          await stopScanner();
-          try {
-            const result = await lookupBarcode(decodedText);
-            selectedFood = result;
-            selectedQty = result.serving_size_g || 100;
-          } catch {
-            // Barcode not in any database — switch to label OCR
-            lastScannedBarcode = decodedText;
-            scanError = `Barcode ${decodedText} not in database. Scan the nutrition label to add it.`;
-            // Auto-switch to label tab
-            activeTab = 'label';
-            startLabelScanner();
-          }
-        },
-        () => {}
-      );
-    } catch {
-      scanError = 'Camera access denied or not available.';
+
+      // Try environment camera first, fall back to any camera
+      let cameraConfig: any = { facingMode: 'environment' };
+      try {
+        await scanner.start(
+          cameraConfig,
+          { fps: 10, qrbox: { width: 280, height: 140 } },
+          onBarcodeScanned,
+          () => {}
+        );
+      } catch {
+        // Environment camera failed — try any available camera
+        try {
+          cameraConfig = { facingMode: 'user' };
+          await scanner.start(
+            cameraConfig,
+            { fps: 10, qrbox: { width: 280, height: 140 } },
+            onBarcodeScanned,
+            () => {}
+          );
+        } catch (innerErr: any) {
+          throw innerErr; // Let outer catch handle it
+        }
+      }
+    } catch (e: any) {
+      const msg = e?.message || String(e);
+      if (msg.includes('NotAllowed') || msg.includes('Permission')) {
+        scanError = 'Camera permission denied. Please allow camera access in your browser settings.';
+      } else if (msg.includes('NotFound') || msg.includes('DevicesNotFound')) {
+        scanError = 'No camera found. Try entering the barcode manually below.';
+      } else if (msg.includes('NotReadable') || msg.includes('TrackStartError')) {
+        scanError = 'Camera is in use by another app. Close other camera apps and try again.';
+      } else {
+        scanError = `Camera error: ${msg}. Try entering the barcode manually.`;
+      }
       await stopScanner();
     }
+  }
+
+  async function onBarcodeScanned(decodedText: string) {
+    await stopScanner();
+    await lookupAndHandleBarcode(decodedText);
+  }
+
+  async function lookupAndHandleBarcode(code: string) {
+    try {
+      const result = await lookupBarcode(code);
+      selectedFood = result;
+      selectedQty = result.serving_size_g || 100;
+    } catch {
+      lastScannedBarcode = code;
+      scanError = '';
+    }
+  }
+
+  async function submitManualBarcode() {
+    const code = manualBarcode.trim();
+    if (!code) return;
+    await lookupAndHandleBarcode(code);
+    manualBarcode = '';
   }
 </script>
 
@@ -904,16 +953,44 @@
           <!-- Scan tab -->
           {:else if activeTab === 'scan'}
             <div class="p-4 space-y-4">
-              {#if !scannerActive}
-                <button onclick={startScanner} class="btn-primary w-full">Open Camera</button>
+              {#if lastScannedBarcode}
+                <!-- Barcode not found state -->
+                <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                  <p class="text-xs text-amber-400">Barcode {lastScannedBarcode} not found.</p>
+                  <p class="text-xs text-zinc-400 mt-1">Scan the nutrition label to add it, or try another barcode.</p>
+                </div>
+                <div class="flex gap-2">
+                  <button onclick={() => { lastScannedBarcode = ''; startScanner(); }} class="btn-primary flex-1">Scan Another</button>
+                  <button onclick={() => { activeTab = 'label'; startLabelScanner(); }} class="btn-ghost flex-1">Scan Label</button>
+                </div>
               {:else}
-                <button onclick={stopScanner} class="btn-ghost w-full text-sm">Close Camera</button>
+                {#if !scannerActive}
+                  <button onclick={startScanner} class="btn-primary w-full">📸 Scan Barcode</button>
+                {:else}
+                  <button onclick={stopScanner} class="btn-ghost w-full text-sm">Close Camera</button>
+                {/if}
+                <div id="barcode-reader" class="rounded-xl overflow-hidden"></div>
+                {#if scanError}
+                  <p class="text-sm text-amber-400 text-center">{scanError}</p>
+                {/if}
+                {#if !scannerActive && !scanError}
+                  <p class="text-xs text-zinc-500 text-center">Point camera at a food barcode</p>
+                {/if}
               {/if}
-              <div id="barcode-reader" class="rounded-xl overflow-hidden"></div>
-              {#if scanError}
-                <p class="text-sm text-amber-400 text-center">{scanError}</p>
-              {/if}
-              <p class="text-xs text-zinc-500 text-center">Point camera at a food barcode</p>
+
+              <!-- Manual barcode entry (always visible) -->
+              <div class="border-t border-zinc-800 pt-3">
+                <p class="text-xs text-zinc-500 mb-1.5">Or enter barcode manually:</p>
+                <div class="flex gap-2">
+                  <input type="text" inputmode="numeric" bind:value={manualBarcode}
+                         placeholder="Enter barcode number"
+                         onkeydown={(e) => { if (e.key === 'Enter') submitManualBarcode(); }}
+                         class="input flex-1" style="font-size: 16px;" />
+                  <button onclick={submitManualBarcode}
+                          disabled={!manualBarcode.trim()}
+                          class="btn-primary px-4 disabled:opacity-30">Look Up</button>
+                </div>
+              </div>
             </div>
 
           <!-- Label OCR tab -->
