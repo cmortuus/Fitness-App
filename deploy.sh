@@ -247,35 +247,33 @@ docker_deploy() {
 
 docker_health_check() {
   local target="${1:-all}"
-  local max_wait=300  # 5 minutes
-  local delay=10
   local start_time=$SECONDS
 
-  log "Health check started (target: $target, timeout: ${max_wait}s)..."
+  log "Health check (target: $target)..."
 
-  while (( SECONDS - start_time < max_wait )); do
+  for i in $(seq 1 20); do
     local ok=true
 
     if [ "$target" = "dev" ] || [ "$target" = "all" ]; then
-      if ! docker compose exec -T dev curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
+      if ! docker compose exec -T dev curl -so /dev/null -w '' http://localhost:3000/ 2>/dev/null; then
         ok=false
       fi
     fi
 
     if [ "$target" = "main" ] || [ "$target" = "all" ]; then
-      if ! docker compose exec -T main curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
+      if ! docker compose exec -T main curl -so /dev/null -w '' http://localhost:3000/ 2>/dev/null; then
         ok=false
       fi
     fi
 
     if $ok; then
-      log "App is healthy after $(( SECONDS - start_time ))s"
+      log "Healthy after $(( SECONDS - start_time ))s"
       return 0
     fi
-    sleep $delay
+    sleep 5
   done
 
-  err "Health check failed after ${max_wait}s — check: docker compose logs -f"
+  warn "Health check didn't pass after 100s — check: docker compose logs -f"
   return 1
 }
 

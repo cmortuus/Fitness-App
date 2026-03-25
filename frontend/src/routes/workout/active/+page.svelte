@@ -1781,7 +1781,7 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
                           <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
@@ -2010,7 +2010,7 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
                           <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />

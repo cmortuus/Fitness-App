@@ -7,6 +7,10 @@
 
   const currentUser = getStoredUser();
 
+  // Collapsible sections
+  let showBars = $state(false);
+  let showPlateLoaded = $state(false);
+
   function logout() {
     clearAuthTokens();
     window.location.href = '/login';
@@ -405,10 +409,15 @@
       <p class="text-sm text-zinc-400 mt-1">Set the unloaded weight of your equipment for accurate plate calculations.</p>
     </div>
 
-    <!-- Bars -->
+    <!-- Bars (collapsible) -->
     <div>
-      <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Bars</h4>
-      <div class="space-y-2">
+      <button onclick={() => showBars = !showBars}
+              class="w-full flex items-center justify-between py-1">
+        <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Bars</h4>
+        <span class="text-zinc-500 text-sm transition-transform duration-200" class:rotate-180={showBars}>▾</span>
+      </button>
+      {#if showBars}
+      <div class="space-y-2 mt-2">
         {#each [
           ['barbell', 'Standard Barbell (Olympic)'],
           ['ezBar', 'EZ Curl Bar'],
@@ -435,12 +444,18 @@
           </div>
         {/each}
       </div>
+      {/if}
     </div>
 
-    <!-- Plate-loaded machines -->
+    <!-- Plate-loaded machines (collapsible) -->
     <div>
-      <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Plate-Loaded Machines</h4>
-      <div class="space-y-3">
+      <button onclick={() => showPlateLoaded = !showPlateLoaded}
+              class="w-full flex items-center justify-between py-1">
+        <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Plate-Loaded Machines</h4>
+        <span class="text-zinc-500 text-sm transition-transform duration-200" class:rotate-180={showPlateLoaded}>▾</span>
+      </button>
+      {#if showPlateLoaded}
+      <div class="space-y-3 mt-2">
         {#each [
           ['smithMachine', 'Smith Machine'],
           ['legPress', 'Leg Press'],
@@ -486,6 +501,7 @@
           </div>
         {/each}
       </div>
+      {/if}
     </div>
   </div>
 
