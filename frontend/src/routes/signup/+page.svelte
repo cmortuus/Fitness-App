@@ -65,7 +65,14 @@
                class="input" placeholder="Repeat password" />
       </div>
 
-      <button type="submit" disabled={loading || !username || !password || !confirmPassword}
+      {#if password && password.length < 6}
+        <p class="text-xs text-amber-400">Password must be at least 6 characters ({6 - password.length} more needed)</p>
+      {/if}
+      {#if password && confirmPassword && password !== confirmPassword}
+        <p class="text-xs text-red-400">Passwords do not match</p>
+      {/if}
+
+      <button type="submit" disabled={loading || !username || !password || password.length < 6 || !confirmPassword || password !== confirmPassword}
               class="btn-primary w-full !py-3 disabled:opacity-50">
         {loading ? 'Creating account...' : 'Create Account'}
       </button>
