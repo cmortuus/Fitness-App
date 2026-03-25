@@ -188,8 +188,7 @@ docker_deploy() {
     log "Rebuilding dev container..."
     docker compose build $build_flags dev
     docker compose up -d dev
-    sleep 15
-    docker_health_check dev
+    docker_health_check_async dev
     return
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
@@ -204,8 +203,7 @@ docker_deploy() {
     log "Rebuilding main container..."
     docker compose build $build_flags main
     docker compose up -d main
-    sleep 15
-    docker_health_check main
+    docker_health_check_async main
     return
   else
     log "Updating all branches..."
@@ -232,12 +230,11 @@ docker_deploy() {
     docker compose up -d
   fi
 
-  sleep 10
-  docker_health_check
+  docker_health_check_async all
 
   log ""
   log "========================================="
-  log " Docker deployment successful!"
+  log " Docker deployment complete — health check running in background"
   log " Commit (main): $(git log --oneline -1 origin/main)"
   if git rev-parse --verify origin/dev &>/dev/null; then
     log " Commit (dev):  $(git log --oneline -1 origin/dev)"
@@ -249,41 +246,42 @@ docker_deploy() {
 
 docker_health_check() {
   local target="${1:-all}"
-  log "Running health check (target: $target)..."
-  local retries=30
-  local delay=5
+  local max_wait=300  # 5 minutes
+  local delay=10
+  local start_time=$SECONDS
 
-  for i in $(seq 1 $retries); do
+  log "Health check started (target: $target, timeout: ${max_wait}s)..."
+
+  while (( SECONDS - start_time < max_wait )); do
     local ok=true
 
     if [ "$target" = "dev" ] || [ "$target" = "all" ]; then
-      # Check dev container directly by service name
       if ! docker compose exec -T dev curl -sf http://localhost:8000/api/exercises/ > /dev/null 2>&1; then
         ok=false
       fi
     fi
 
     if [ "$target" = "main" ] || [ "$target" = "all" ]; then
-      # Check main container directly
       if ! docker compose exec -T main curl -sf http://localhost:8000/api/exercises/ > /dev/null 2>&1; then
         ok=false
       fi
     fi
 
     if $ok; then
-      log "App is healthy (attempt $i/$retries)"
+      log "App is healthy after $(( SECONDS - start_time ))s"
       return 0
-    fi
-
-    if [ "$i" -eq 1 ]; then
-      log "Waiting for containers to start..."
     fi
     sleep $delay
   done
 
-  warn "Health check didn't pass after ${retries} attempts ($(( retries * delay ))s)."
-  warn "Check logs: docker compose logs -f"
+  err "Health check failed after ${max_wait}s — check: docker compose logs -f"
   return 1
+}
+
+# Run health check in background — doesn't block the watch loop
+docker_health_check_async() {
+  local target="${1:-all}"
+  docker_health_check "$target" &
 }
 
 # ── Docker rollback ───────────────────────────────────────────────────────────
