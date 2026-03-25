@@ -112,6 +112,16 @@ export function clearAuthTokens(): void {
   localStorage.removeItem('hgt_user');
 }
 
+// Settings (stored in DB, synced across devices)
+export async function getSettings(): Promise<Record<string, any>> {
+  const response = await api.get('/auth/settings');
+  return response.data;
+}
+
+export async function saveSettings(settings: Record<string, any>): Promise<void> {
+  await api.put('/auth/settings', settings);
+}
+
 export function getStoredUser(): AuthUser | null {
   if (typeof localStorage === 'undefined') return null;
   const raw = localStorage.getItem('hgt_user');

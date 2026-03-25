@@ -66,43 +66,74 @@ const defaultSettings: AppSettings = {
   },
 };
 
+function deepMergeSettings(stored: any): AppSettings {
+  return {
+    ...defaultSettings,
+    ...stored,
+    restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
+    profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
+    machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
+  };
+}
+
 function loadSettings(): AppSettings {
   if (typeof localStorage === 'undefined') return defaultSettings;
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
     if (!raw) return defaultSettings;
-    const stored = JSON.parse(raw);
-    // Deep merge: ensure nested objects get default values for missing keys
-    return {
-      ...defaultSettings,
-      ...stored,
-      restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
-      profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
-      machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
-    };
+    return deepMergeSettings(JSON.parse(raw));
   } catch {
     return defaultSettings;
   }
 }
 
+// Debounce timer for DB saves
+let dbSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
 function createSettingsStore() {
   const { subscribe, set, update } = writable<AppSettings>(loadSettings());
+
+  function persist(value: AppSettings) {
+    // Always save to localStorage (instant, offline-capable)
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(value));
+    }
+    // Debounce save to DB (500ms) — avoids hammering API on rapid changes
+    if (dbSaveTimer) clearTimeout(dbSaveTimer);
+    dbSaveTimer = setTimeout(async () => {
+      try {
+        const { saveSettings } = await import('$lib/api');
+        await saveSettings(value);
+      } catch { /* offline or not logged in — localStorage has it */ }
+    }, 500);
+  }
+
   return {
     subscribe,
     set(value: AppSettings) {
-      if (typeof localStorage !== 'undefined') {
-        localStorage.setItem(SETTINGS_KEY, JSON.stringify(value));
-      }
+      persist(value);
       set(value);
     },
     update(fn: (s: AppSettings) => AppSettings) {
       update(s => {
         const next = fn(s);
-        if (typeof localStorage !== 'undefined') {
-          localStorage.setItem(SETTINGS_KEY, JSON.stringify(next));
-        }
+        persist(next);
         return next;
       });
+    },
+    /** Load settings from DB (call after login) */
+    async loadFromDb() {
+      try {
+        const { getSettings } = await import('$lib/api');
+        const remote = await getSettings();
+        if (remote && Object.keys(remote).length > 0) {
+          const merged = deepMergeSettings(remote);
+          if (typeof localStorage !== 'undefined') {
+            localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
+          }
+          set(merged);
+        }
+      } catch { /* not logged in or offline — use localStorage */ }
     },
   };
 }
