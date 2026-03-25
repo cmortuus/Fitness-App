@@ -24,7 +24,11 @@
           if (e.data && e.data.type === 'SW_UPDATED') {
             var banner = document.createElement('div');
             banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:12px 16px;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-family:system-ui';
-            banner.innerHTML = '<span>A new version is available</span><button onclick="window.location.reload()" style="background:#fff;color:#1d4ed8;border:none;padding:6px 16px;border-radius:8px;font-weight:600;cursor:pointer">Update</button>';
+            banner.innerHTML = '<span>A new version is available</span><button id="sw-update-btn" style="background:#fff;color:#1d4ed8;border:none;padding:6px 16px;border-radius:8px;font-weight:600;cursor:pointer">Update</button>';
+            document.getElementById('sw-update-btn').onclick = async function() {
+              if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k) { return caches.delete(k); })); }
+              window.location.reload();
+            };
             document.body.appendChild(banner);
           }
         });

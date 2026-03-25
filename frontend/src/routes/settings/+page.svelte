@@ -583,6 +583,29 @@
           Switch to {onDev ? 'main' : 'dev'}
         </button>
       </div>
+      <!-- Force update -->
+      <div class="flex items-center justify-between pt-2 border-t border-zinc-800">
+        <div>
+          <p class="text-sm text-zinc-300">Force update</p>
+          <p class="text-xs text-zinc-500">Clear cache and load the latest version</p>
+        </div>
+        <button
+          onclick={async () => {
+            if ('caches' in window) {
+              const keys = await caches.keys();
+              await Promise.all(keys.map(k => caches.delete(k)));
+            }
+            if ('serviceWorker' in navigator) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(r => r.unregister()));
+            }
+            window.location.reload();
+          }}
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-primary-600/20 text-primary-400 hover:bg-primary-600/30"
+        >
+          Update Now
+        </button>
+      </div>
     </div>
   {/if}
 
