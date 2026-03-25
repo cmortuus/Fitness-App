@@ -235,13 +235,13 @@ docker_health_check() {
     local ok=true
 
     if [ "$target" = "dev" ] || [ "$target" = "all" ]; then
-      if ! docker compose exec -T dev curl -sf http://localhost:8000/api/exercises/ > /dev/null 2>&1; then
+      if ! docker compose exec -T dev curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
         ok=false
       fi
     fi
 
     if [ "$target" = "main" ] || [ "$target" = "all" ]; then
-      if ! docker compose exec -T main curl -sf http://localhost:8000/api/exercises/ > /dev/null 2>&1; then
+      if ! docker compose exec -T main curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
         ok=false
       fi
     fi
