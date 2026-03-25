@@ -1,200 +1,257 @@
 #!/bin/bash
 #
-# deploy.sh — Safe deployment script for Home Gym Tracker
+# deploy.sh — Deployment script for Home Gym Tracker
 #
-# Works for both first-time install and updates.
-# Backs up the database before any migration, and supports instant rollback.
+# Run 1 (migration): Installs Docker, stops bare-metal services,
+#                     migrates DB into Docker volumes, starts containers.
+# Run 2+ (update):   Pulls latest code, rebuilds & restarts containers.
 #
 # Usage:
-#   First install:  ./deploy.sh
-#   Update:         ./deploy.sh
-#   Rollback:       ./deploy.sh --rollback
+#   Deploy/update:     ./deploy.sh
+#   Update dev only:   ./deploy.sh --dev
+#   Rollback:          ./deploy.sh --rollback
 #
-# Requirements: git, python3, node/npm
+# Both main and dev branches run simultaneously as Docker containers.
+# Users switch between them via Settings → Developer → "Use dev version".
 #
 
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$APP_DIR"  # All commands expect to run from project root
+cd "$APP_DIR"
 BACKUP_DIR="$APP_DIR/backups"
-DB_FILE="$APP_DIR/homegym.db"
-VENV_DIR="$APP_DIR/venv"
-FRONTEND_DIR="$APP_DIR/frontend"
-PID_FILE="$APP_DIR/.deploy-pids"
-ROLLBACK_REF_FILE="$APP_DIR/.last-good-ref"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
 err()  { echo -e "${RED}[error]${NC} $*" >&2; }
+info() { echo -e "${CYAN}[info]${NC} $*"; }
 
-# ── Maintenance mode (nginx serves static page during restart) ────────────────
+# ── Check if Docker is running ────────────────────────────────────────────────
 
-enable_maintenance() {
-  local nginx_conf="/etc/nginx/sites-available/gymtracker"
-  if [ -f "$nginx_conf" ] && [ -f "$APP_DIR/maintenance.html" ]; then
-    log "Enabling maintenance page..."
-    # Add maintenance location block before the main location
-    sudo cp "$nginx_conf" "${nginx_conf}.bak"
-    # Create a temp config that serves maintenance.html for all non-API routes
-    sudo tee /etc/nginx/conf.d/maintenance.conf > /dev/null 2>&1 <<MEOF
-# Temporary maintenance mode — auto-removed by deploy.sh
-location / {
-    root ${APP_DIR};
-    try_files /maintenance.html =503;
+is_docker_mode() {
+  [ -f "$APP_DIR/.docker-mode" ]
 }
-MEOF
-    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null || true
+
+docker_available() {
+  command -v docker &>/dev/null && docker info &>/dev/null
+}
+
+# ── Install Docker if needed ──────────────────────────────────────────────────
+
+install_docker() {
+  if docker_available; then
+    log "Docker already installed"
+    return 0
   fi
+
+  log "Installing Docker..."
+  curl -fsSL https://get.docker.com | sh || {
+    err "Docker installation failed. Install manually: https://docs.docker.com/engine/install/"
+    exit 1
+  }
+
+  # Add current user to docker group (avoids sudo for future runs)
+  sudo usermod -aG docker "$USER" 2>/dev/null || true
+
+  # Start Docker service
+  sudo systemctl enable docker 2>/dev/null || true
+  sudo systemctl start docker 2>/dev/null || true
+
+  log "Docker installed successfully"
 }
 
-disable_maintenance() {
-  if [ -f /etc/nginx/conf.d/maintenance.conf ]; then
-    log "Disabling maintenance page..."
-    sudo rm -f /etc/nginx/conf.d/maintenance.conf
-    sudo nginx -t 2>/dev/null && sudo systemctl reload nginx 2>/dev/null || true
+# ── Migrate from bare-metal to Docker ─────────────────────────────────────────
+
+migrate_to_docker() {
+  log "═══════════════════════════════════════════════"
+  log " Migrating from bare-metal to Docker"
+  log "═══════════════════════════════════════════════"
+
+  # 1. Install Docker
+  install_docker
+
+  # 2. Backup current database
+  mkdir -p "$BACKUP_DIR"
+  if [ -f "$APP_DIR/homegym.db" ]; then
+    local backup_path="$BACKUP_DIR/homegym_pre_docker_${TIMESTAMP}.db"
+    log "Backing up database to: $(basename "$backup_path")"
+    cp "$APP_DIR/homegym.db" "$backup_path"
   fi
-}
 
-# ── Stop running services ────────────────────────────────────────────────────
-
-stop_services() {
-  log "Stopping running services..."
-  if [ -f "$PID_FILE" ]; then
+  # 3. Stop old bare-metal services
+  log "Stopping bare-metal services..."
+  if [ -f "$APP_DIR/.deploy-pids" ]; then
     while read -r pid; do
       kill "$pid" 2>/dev/null || true
-    done < "$PID_FILE"
-    rm -f "$PID_FILE"
+    done < "$APP_DIR/.deploy-pids"
+    rm -f "$APP_DIR/.deploy-pids"
   fi
-  # Also kill any uvicorn/node on our ports
   lsof -ti :8000 2>/dev/null | xargs kill 2>/dev/null || true
   lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null || true
   sleep 1
-}
 
-# ── Rollback ─────────────────────────────────────────────────────────────────
-
-rollback() {
-  err "Rolling back to last known good state..."
-
-  # 1. Restore git ref
-  if [ -f "$ROLLBACK_REF_FILE" ]; then
-    local ref
-    ref=$(cat "$ROLLBACK_REF_FILE")
-    log "Checking out last good commit: $ref"
-    git -C "$APP_DIR" checkout "$ref" -- .
-  else
-    warn "No rollback ref found — using git stash"
-    git -C "$APP_DIR" checkout -- .
+  # 4. Disable old nginx config (Docker handles routing now)
+  if [ -f /etc/nginx/sites-enabled/gymtracker ]; then
+    log "Removing old nginx site config (Docker takes over routing)..."
+    sudo rm -f /etc/nginx/sites-enabled/gymtracker
+    sudo systemctl stop nginx 2>/dev/null || true
+    sudo systemctl disable nginx 2>/dev/null || true
   fi
 
-  # 2. Restore database backup
-  local latest_backup
-  latest_backup=$(ls -t "$BACKUP_DIR"/homegym_*.db 2>/dev/null | head -1)
-  if [ -n "$latest_backup" ]; then
-    log "Restoring database from: $(basename "$latest_backup")"
-    cp "$latest_backup" "$DB_FILE"
-  else
-    warn "No database backup found to restore"
+  # 5. Ensure .env exists
+  ensure_env
+
+  # 6. Ensure dev branch exists
+  ensure_dev_branch
+
+  # 7. Build and start Docker containers
+  log "Building Docker containers (this takes a few minutes the first time)..."
+  docker compose build || {
+    err "Docker build failed"
+    exit 1
+  }
+
+  # 8. Copy existing database into Docker volumes
+  if [ -f "$APP_DIR/homegym.db" ]; then
+    log "Copying existing database into main container volume..."
+    # Create volumes and copy data
+    docker compose up -d main
+    sleep 2
+    docker compose cp "$APP_DIR/homegym.db" main:/app/data/homegym.db
+    docker compose restart main
   fi
 
-  # 3. Rebuild and restart
-  log "Rebuilding after rollback..."
-  source "$VENV_DIR/bin/activate"
-  pip install -e . --quiet
-  cd "$FRONTEND_DIR" && npm install --silent && NODE_OPTIONS="--max-old-space-size=512" npm run build
-  cd "$APP_DIR"
+  # 9. Start everything
+  docker compose up -d
+  sleep 3
 
-  start_services
-  log "Rollback complete."
+  # 10. Mark as Docker mode
+  touch "$APP_DIR/.docker-mode"
+
+  # 11. Health check
+  docker_health_check
+
+  log ""
+  log "═══════════════════════════════════════════════"
+  log " Migration complete! Now running on Docker."
+  log ""
+  log " Main:  http://localhost (default)"
+  log " Dev:   http://localhost (toggle in Settings)"
+  log ""
+  log " Logs:  docker compose logs -f"
+  log " Stop:  docker compose down"
+  log "═══════════════════════════════════════════════"
 }
 
-# ── Start services ───────────────────────────────────────────────────────────
+# ── Docker deploy (update) ────────────────────────────────────────────────────
 
-start_services() {
-  log "Starting services..."
-  source "$VENV_DIR/bin/activate"
+docker_deploy() {
+  local target="${1:-all}"
 
-  # Backend
-  cd "$APP_DIR"
-  nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 \
-    > "$APP_DIR/logs/backend.log" 2>&1 &
-  echo $! > "$PID_FILE"
-  log "Backend started (PID: $!)"
+  log "Starting Docker deployment at $TIMESTAMP"
+  mkdir -p "$BACKUP_DIR"
 
-  # Frontend (production build served by node)
-  cd "$FRONTEND_DIR"
-  nohup node build/index.js \
-    > "$APP_DIR/logs/frontend.log" 2>&1 &
-  echo $! >> "$PID_FILE"
-  log "Frontend started (PID: $!)"
-  cd "$APP_DIR"
+  # 1. Pull latest code
+  log "Pulling latest code..."
+  git fetch origin
+
+  if [ "$target" = "dev" ]; then
+    log "Updating dev branch only..."
+    # Stash current branch, update dev, come back
+    local current_branch
+    current_branch=$(git branch --show-current)
+    git checkout dev 2>/dev/null || git checkout -b dev origin/dev
+    git reset --hard origin/dev
+    git checkout "$current_branch"
+
+    # Rebuild only the dev container
+    log "Rebuilding dev container..."
+    docker compose build dev
+    docker compose up -d dev
+  else
+    log "Updating all branches..."
+    git reset --hard origin/main
+
+    # Also update dev branch
+    local current_branch
+    current_branch=$(git branch --show-current)
+    if git rev-parse --verify origin/dev &>/dev/null; then
+      git checkout dev 2>/dev/null || git checkout -b dev origin/dev
+      git reset --hard origin/dev
+      git checkout "$current_branch"
+    fi
+
+    # Rebuild both containers
+    log "Rebuilding containers..."
+    docker compose build
+    docker compose up -d
+  fi
+
+  sleep 3
+  docker_health_check
+
+  log ""
+  log "========================================="
+  log " Docker deployment successful!"
+  log " Commit (main): $(git log --oneline -1 origin/main)"
+  if git rev-parse --verify origin/dev &>/dev/null; then
+    log " Commit (dev):  $(git log --oneline -1 origin/dev)"
+  fi
+  log "========================================="
 }
 
-# ── Health check ─────────────────────────────────────────────────────────────
+# ── Docker health check ──────────────────────────────────────────────────────
 
-health_check() {
+docker_health_check() {
   log "Running health check..."
-  local retries=10
+  local retries=15
   local delay=2
 
   for i in $(seq 1 $retries); do
-    if curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
-      log "Backend is healthy (attempt $i/$retries)"
+    if curl -sf http://localhost/api/health > /dev/null 2>&1 || \
+       curl -sf http://localhost/api/docs > /dev/null 2>&1; then
+      log "App is healthy (attempt $i/$retries)"
       return 0
     fi
     sleep $delay
   done
 
-  err "Health check failed after $retries attempts"
+  warn "Health check didn't pass — containers may still be starting."
+  warn "Check logs: docker compose logs -f"
   return 1
 }
 
-# ── Main deploy ──────────────────────────────────────────────────────────────
+# ── Docker rollback ───────────────────────────────────────────────────────────
 
-main() {
-  # Handle --rollback flag
-  if [ "${1:-}" = "--rollback" ]; then
-    stop_services
-    rollback
-    exit 0
-  fi
+docker_rollback() {
+  log "Rolling back Docker deployment..."
 
-  log "Starting deployment at $TIMESTAMP"
-  mkdir -p "$BACKUP_DIR" "$APP_DIR/logs"
-
-  # 1. Save current git ref for rollback
-  local current_ref
-  current_ref=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "none")
-  log "Current commit: $current_ref"
-
-  # 2. Back up database FIRST (while services still running)
-  if [ -f "$DB_FILE" ]; then
-    local backup_path="$BACKUP_DIR/homegym_${TIMESTAMP}.db"
-    log "Backing up database to: $(basename "$backup_path")"
-    cp "$DB_FILE" "$backup_path"
-
-    # Keep only last 10 backups
-    ls -t "$BACKUP_DIR"/homegym_*.db 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+  if [ -f "$APP_DIR/.last-good-ref" ]; then
+    local ref
+    ref=$(cat "$APP_DIR/.last-good-ref")
+    log "Checking out last good commit: $ref"
+    git checkout "$ref" -- .
   else
-    log "No existing database — fresh install"
+    warn "No rollback ref found"
   fi
 
-  # 3. Pull latest code (old services still running — users unaffected)
-  log "Pulling latest code..."
-  git -C "$APP_DIR" fetch origin
-  git -C "$APP_DIR" reset --hard origin/main || {
-    err "Git reset to origin/main failed. Aborting."
-    exit 1
-  }
+  docker compose build
+  docker compose up -d
+  sleep 3
+  docker_health_check
+  log "Rollback complete."
+}
 
-  # 4. Ensure .env exists with a secure JWT secret
+# ── Ensure .env ───────────────────────────────────────────────────────────────
+
+ensure_env() {
   if [ ! -f "$APP_DIR/.env" ]; then
     log "Creating .env with random JWT secret..."
     local jwt_secret
@@ -203,71 +260,116 @@ main() {
 JWT_SECRET_KEY=${jwt_secret}
 ENVEOF
   fi
+}
 
-  # 5. Python venv + deps (old services still running)
-  if [ ! -d "$VENV_DIR" ]; then
-    log "Creating virtual environment..."
-    python3 -m venv "$VENV_DIR"
+# ── Ensure dev branch exists ──────────────────────────────────────────────────
+
+ensure_dev_branch() {
+  if ! git rev-parse --verify origin/dev &>/dev/null; then
+    log "Creating dev branch from main..."
+    git branch dev origin/main 2>/dev/null || true
+    git push origin dev 2>/dev/null || true
   fi
-  source "$VENV_DIR/bin/activate"
+}
 
-  log "Installing Python dependencies..."
-  pip install -e . --quiet || {
-    err "pip install failed"
-    rollback
-    exit 1
-  }
+# ── Legacy bare-metal deploy (fallback if not in Docker mode) ─────────────────
+# Kept for compatibility. Once migrated to Docker, this is never used.
 
-  # 6. Build frontend to temp dir (old services still running — zero downtime)
-  log "Building frontend (old version still serving)..."
-  cd "$FRONTEND_DIR"
+legacy_deploy() {
+  warn "Running legacy bare-metal deploy. Run again to migrate to Docker."
+  # ... (original deploy logic preserved below for one more run)
+
+  log "Starting legacy deployment at $TIMESTAMP"
+  mkdir -p "$BACKUP_DIR" "$APP_DIR/logs"
+
+  local current_ref
+  current_ref=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "none")
+
+  if [ -f "$APP_DIR/homegym.db" ]; then
+    cp "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_${TIMESTAMP}.db"
+    ls -t "$BACKUP_DIR"/homegym_*.db 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
+  fi
+
+  git fetch origin
+  git reset --hard origin/main
+
+  ensure_env
+
+  if [ ! -d "$APP_DIR/venv" ]; then
+    python3 -m venv "$APP_DIR/venv"
+  fi
+  source "$APP_DIR/venv/bin/activate"
+  pip install -e . --quiet
+
+  cd "$APP_DIR/frontend"
   npm install --silent
-
-  # Build to a temp output so old build stays intact until swap
-  NODE_OPTIONS="--max-old-space-size=512" npm run build || {
-    err "Frontend build failed — rolling back"
-    cd "$APP_DIR"
-    rollback
-    exit 1
-  }
+  NODE_OPTIONS="--max-old-space-size=512" npm run build
   cd "$APP_DIR"
 
-  # ─── BRIEF DOWNTIME STARTS HERE (~5 seconds) ──────────────────────────
-  log "Swapping to new version..."
-  enable_maintenance
-  stop_services
-
-  # 7. Run database migrations (fast, usually <1 second)
-  log "Running database migrations..."
-  alembic upgrade head || {
-    err "Migration failed — rolling back"
-    rollback
-    exit 1
-  }
-
-  # 8. Start services with new code
-  start_services
-  disable_maintenance
-  # ─── DOWNTIME ENDS HERE ────────────────────────────────────────────────
-
-  # 9. Health check
-  if health_check; then
-    # Save this as the last known good state
-    echo "$(git -C "$APP_DIR" rev-parse HEAD)" > "$ROLLBACK_REF_FILE"
-    log ""
-    log "========================================="
-    log " Deployment successful!"
-    log " Commit: $(git -C "$APP_DIR" log --oneline -1)"
-    log " Backend:  http://localhost:8000"
-    log " Frontend: http://localhost:3000"
-    log " DB backup: backups/homegym_${TIMESTAMP}.db"
-    log "========================================="
-  else
-    err "Deployment failed health check — rolling back"
-    stop_services
-    rollback
-    exit 1
+  # Stop old services
+  if [ -f "$APP_DIR/.deploy-pids" ]; then
+    while read -r pid; do kill "$pid" 2>/dev/null || true; done < "$APP_DIR/.deploy-pids"
+    rm -f "$APP_DIR/.deploy-pids"
   fi
+  lsof -ti :8000 2>/dev/null | xargs kill 2>/dev/null || true
+  lsof -ti :3000 2>/dev/null | xargs kill 2>/dev/null || true
+  sleep 1
+
+  alembic upgrade head
+
+  # Start services
+  source "$APP_DIR/venv/bin/activate"
+  cd "$APP_DIR"
+  nohup uvicorn app.main:app --host 0.0.0.0 --port 8000 > "$APP_DIR/logs/backend.log" 2>&1 &
+  echo $! > "$APP_DIR/.deploy-pids"
+  cd "$APP_DIR/frontend"
+  nohup node build/index.js > "$APP_DIR/logs/frontend.log" 2>&1 &
+  echo $! >> "$APP_DIR/.deploy-pids"
+  cd "$APP_DIR"
+
+  echo "$(git rev-parse HEAD)" > "$APP_DIR/.last-good-ref"
+  log "Legacy deploy complete. Run ./deploy.sh again to migrate to Docker."
+}
+
+# ── Main ──────────────────────────────────────────────────────────────────────
+
+main() {
+  case "${1:-}" in
+    --rollback)
+      if is_docker_mode; then
+        docker_rollback
+      else
+        err "Rollback only supported in Docker mode. Run deploy.sh first to migrate."
+      fi
+      ;;
+    --dev)
+      if is_docker_mode; then
+        docker_deploy dev
+      else
+        err "Dev deploy only available in Docker mode. Run deploy.sh first to migrate."
+      fi
+      ;;
+    *)
+      if is_docker_mode; then
+        # Already on Docker — just update
+        docker_deploy all
+      else
+        # First run: pull latest code (which includes Dockerfile), then migrate
+        log "Pulling latest code..."
+        git fetch origin
+        git reset --hard origin/main
+
+        # Now check if Dockerfile exists (it will after this commit)
+        if [ -f "$APP_DIR/Dockerfile" ]; then
+          migrate_to_docker
+        else
+          # Dockerfile not yet in main — do legacy deploy
+          # Next deploy after Dockerfile lands will trigger migration
+          legacy_deploy
+        fi
+      fi
+      ;;
+  esac
 }
 
 main "$@"

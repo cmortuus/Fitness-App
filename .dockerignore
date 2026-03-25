@@ -1,0 +1,16 @@
+node_modules
+.git
+__pycache__
+*.pyc
+*.pyo
+frontend/.svelte-kit
+frontend/build
+frontend/node_modules
+.env
+homegym.db
+backups/
+logs/
+venv/
+.claude/
+test-results/
+*.db-journal
