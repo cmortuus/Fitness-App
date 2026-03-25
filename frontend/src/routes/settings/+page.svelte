@@ -446,6 +446,7 @@
           ['legPress', 'Leg Press'],
           ['hackSquat', 'Hack Squat'],
           ['tBarRow', 'T-Bar Row'],
+          ['beltSquat', 'Belt Squat'],
         ] as [key, label]}
           <div class="space-y-1">
             <div class="flex items-center justify-between gap-4">

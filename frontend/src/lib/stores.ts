@@ -58,6 +58,7 @@ const defaultSettings: AppSettings = {
     ezBarRackable: 35,
     safetySquatBar: 65,
     trapBar: 45,
+    beltSquat: 0,
     smithMachine: 25,
     legPress: 75,
     hackSquat: 45,
