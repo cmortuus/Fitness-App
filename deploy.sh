@@ -226,7 +226,7 @@ docker_deploy() {
     docker compose up -d
   fi
 
-  sleep 3
+  sleep 10
   docker_health_check
 
   log ""
@@ -243,19 +243,19 @@ docker_deploy() {
 
 docker_health_check() {
   log "Running health check..."
-  local retries=15
-  local delay=2
+  local retries=30
+  local delay=3
 
   for i in $(seq 1 $retries); do
-    if curl -sf http://localhost/api/health > /dev/null 2>&1 || \
-       curl -sf http://localhost/api/docs > /dev/null 2>&1; then
+    if curl -sf http://localhost/ > /dev/null 2>&1 && \
+       curl -sf http://localhost/api/exercises/ > /dev/null 2>&1; then
       log "App is healthy (attempt $i/$retries)"
       return 0
     fi
     sleep $delay
   done
 
-  warn "Health check didn't pass — containers may still be starting."
+  warn "Health check didn't pass after ${retries} attempts."
   warn "Check logs: docker compose logs -f"
   return 1
 }
@@ -276,7 +276,7 @@ docker_rollback() {
 
   docker compose build
   docker compose up -d
-  sleep 3
+  sleep 10
   docker_health_check
   log "Rollback complete."
 }

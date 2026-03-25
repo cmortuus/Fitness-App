@@ -187,7 +187,7 @@
   let restSecs = $state($settings.restDurations.upperCompound);
   let restInterval: ReturnType<typeof setInterval> | null = null;
 
-  // Add-exercise modal
+  // Add-exercise modal (also used for swap)
   let showAddModal    = $state(false);
   let searchQuery     = $state('');
   let searchInputEl   = $state<HTMLInputElement | null>(null);
@@ -197,6 +197,8 @@
   let filterType = $state<'all' | 'compound' | 'isolation'>('all');
   let pickingExercise = $state<Exercise | null>(null);
   let recentExercises = $state<Exercise[]>([]);
+  // Swap mode: when set, the modal replaces this exercise instead of adding
+  let swapTargetUiId = $state<string | null>(null);
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(async () => {
@@ -222,13 +224,21 @@
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
       } else if ($currentSession) {
-        // ── Resume in-progress session ───────────────────────────────────
+        // ── Resume in-progress session (store still set) ────────────────
         await resumeSession();
       } else {
-        // ── No plan param: show plan picker ──────────────────────────────
-        plans = await getPlans();
-        showPicker = true;
-        loading = false;
+        // ── Check API for in-progress session (navigated away & back) ───
+        const recent = await getSessions({ limit: 5 });
+        const inProgress = recent.find(s => s.started_at && !s.completed_at);
+        if (inProgress) {
+          currentSession.set(inProgress);
+          await resumeSession();
+        } else {
+          // ── No active session: show plan picker ────────────────────────
+          plans = await getPlans();
+          showPicker = true;
+          loading = false;
+        }
       }
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
@@ -242,26 +252,34 @@
     if (draftSaveInterval) clearInterval(draftSaveInterval);
   });
 
-  // Save drafts when app goes to background (iOS PWA close, tab switch)
+  // Save drafts when app goes to background; recalculate rest timer on foreground
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden && sessionId) saveDrafts();
+      if (document.hidden) {
+        if (sessionId) saveDrafts();
+      } else {
+        // App came back to foreground — catch up the rest timer
+        if (restActive && restEndTime > 0) {
+          const remaining = Math.ceil((restEndTime - Date.now()) / 1000);
+          if (remaining <= 0) {
+            restSecs = 0;
+            if (restInterval) { clearInterval(restInterval); restInterval = null; }
+            restActive = false;
+            playRestChime();
+          } else {
+            restSecs = remaining;
+          }
+        }
+      }
     });
     window.addEventListener('beforeunload', () => {
       if (sessionId) saveDrafts();
     });
   }
 
-  // Warn before leaving the page if there's an active session with incomplete sets
-  beforeNavigate(({ cancel }) => {
-    if (!$currentSession) return;
-    const hasUnsaved = uiExercises.some(ex => ex.sets.some(s => !s.done));
-    if (hasUnsaved) {
-      const confirmed = confirm(
-        'You have an active workout with unfinished sets. Leave anyway? Your progress so far is saved.'
-      );
-      if (!confirmed) cancel();
-    }
+  // Save drafts before navigating away — session will auto-resume when you come back
+  beforeNavigate(() => {
+    if (sessionId) saveDrafts();
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────
@@ -949,12 +967,16 @@
     }
   }
 
+  let restEndTime = $state<number>(0); // absolute ms timestamp when rest ends
+
   function startRestTimer(exUiId: string) {
     restSecs = restDurationForExercise(exUiId);
+    restEndTime = Date.now() + restSecs * 1000;
     restActive = true;
     if (restInterval) clearInterval(restInterval);
     restInterval = setInterval(() => {
-      restSecs--;
+      const remaining = Math.ceil((restEndTime - Date.now()) / 1000);
+      restSecs = Math.max(0, remaining);
       if (restSecs <= 0) {
         clearInterval(restInterval!);
         restInterval = null;
@@ -967,6 +989,7 @@
   function skipRest() {
     if (restInterval) { clearInterval(restInterval); restInterval = null; }
     restActive = false;
+    restEndTime = 0;
   }
 
   // ─── Add exercise modal ───────────────────────────────────────────────────
@@ -1014,28 +1037,69 @@
 
   function confirmAdd() {
     if (!pickingExercise) return;
-    const sets: UISet[] = Array.from({ length: pendingSets }, (_, i) => ({
-      localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
-      backendId: null,
-      setNumber: i + 1,
-      weightLbs: null,
-      reps: null, repsLeft: null, repsRight: null,
-      done: false,
-      skipped: false,
-      doneLeft: false,
-      doneRight: false,
-      saving: false,
-      oneRM: null, initWeight: null, initReps: null,
-      setType: 'standard' as string,
-      drops: [] as { weightLbs: number | null; reps: number | null }[],
-    }));
-    uiExercises = [...uiExercises, {
-      uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
-      exerciseId: pickingExercise.id,
-      sets,
-      isUnilateral: pickingExercise.is_unilateral,
-      customRestSecs: null,
-    }];
+
+    if (swapTargetUiId) {
+      // ── Swap mode: replace exercise in-place, keeping set count ────
+      const idx = uiExercises.findIndex(e => e.uiId === swapTargetUiId);
+      if (idx >= 0) {
+        const oldEx = uiExercises[idx];
+        const numSets = Math.max(oldEx.sets.length, 1);
+        const newSets: UISet[] = Array.from({ length: numSets }, (_, i) => ({
+          localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
+          backendId: null,
+          setNumber: i + 1,
+          weightLbs: null,
+          reps: null, repsLeft: null, repsRight: null,
+          done: false,
+          skipped: false,
+          doneLeft: false,
+          doneRight: false,
+          saving: false,
+          oneRM: null, initWeight: null, initReps: null,
+          setType: 'standard' as string,
+          drops: [] as { weightLbs: number | null; reps: number | null }[],
+        }));
+        // Delete old backend sets
+        for (const s of oldEx.sets) {
+          if (s.backendId && sessionId) {
+            deleteSet(sessionId, s.backendId).catch(() => {});
+          }
+        }
+        uiExercises[idx] = {
+          uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+          exerciseId: pickingExercise.id,
+          sets: newSets,
+          isUnilateral: pickingExercise.is_unilateral,
+          customRestSecs: null,
+        };
+        uiExercises = [...uiExercises];
+      }
+      swapTargetUiId = null;
+    } else {
+      // ── Normal add mode ────────────────────────────────────────────
+      const sets: UISet[] = Array.from({ length: pendingSets }, (_, i) => ({
+        localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
+        backendId: null,
+        setNumber: i + 1,
+        weightLbs: null,
+        reps: null, repsLeft: null, repsRight: null,
+        done: false,
+        skipped: false,
+        doneLeft: false,
+        doneRight: false,
+        saving: false,
+        oneRM: null, initWeight: null, initReps: null,
+        setType: 'standard' as string,
+        drops: [] as { weightLbs: number | null; reps: number | null }[],
+      }));
+      uiExercises = [...uiExercises, {
+        uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+        exerciseId: pickingExercise.id,
+        sets,
+        isUnilateral: pickingExercise.is_unilateral,
+        customRestSecs: null,
+      }];
+    }
     showAddModal = false;
     pickingExercise = null;
     searchQuery = '';
@@ -1057,6 +1121,21 @@
     prs = detectPRs();
     finished = true;
     finishing = false;
+  }
+
+  async function doDiscard() {
+    if (!sessionId) { goto('/'); return; }
+    const confirmed = confirm('Discard this workout? All progress will be permanently deleted.');
+    if (!confirmed) return;
+    try {
+      await deleteSession(sessionId);
+    } catch (e) {
+      console.error('Failed to delete session:', e);
+    }
+    if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+    if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
+    currentSession.set(null);
+    goto('/');
   }
 
   // ─── PR detection ─────────────────────────────────────────────────────────
@@ -1552,6 +1631,11 @@
                   title="View history for this exercise"
                 >History</button>
                 <button
+                  onclick={() => { swapTargetUiId = ex.uiId; showAddModal = true; searchQuery = ''; pickingExercise = null; }}
+                  class="text-xs text-zinc-500 hover:text-amber-400 px-2 py-0.5 rounded transition-colors hover:bg-zinc-800"
+                  title="Swap for a different exercise"
+                >Swap</button>
+                <button
                   onclick={() => removeExercise(ex.uiId)}
                   class="text-gray-600 hover:text-red-400 text-xl leading-none"
                   title="Remove exercise"
@@ -2002,21 +2086,28 @@
           + Add Exercise
         </button>
 
-        <!-- Finish workout button — enabled only when all sets are done -->
-        {#if incompleteSets > 0}
-          <button disabled
-                  class="w-full py-4 bg-zinc-700 text-zinc-500 font-bold text-lg rounded-2xl
-                         cursor-not-allowed opacity-60">
-            {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
+        <!-- Finish / Discard buttons -->
+        <div class="flex gap-3">
+          <button onclick={doDiscard}
+                  class="py-4 px-6 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 hover:text-red-400
+                         font-medium rounded-2xl transition-colors text-sm">
+            Discard
           </button>
-        {:else}
-          <button onclick={doFinish} disabled={finishing}
-                  class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
-                         text-white font-bold text-lg rounded-2xl transition-colors
-                         disabled:opacity-50 shadow-sm">
-            {finishing ? 'Saving…' : '✓ Finish Workout'}
-          </button>
-        {/if}
+          {#if incompleteSets > 0}
+            <button disabled
+                    class="flex-1 py-4 bg-zinc-700 text-zinc-500 font-bold text-lg rounded-2xl
+                           cursor-not-allowed opacity-60">
+              {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
+            </button>
+          {:else}
+            <button onclick={doFinish} disabled={finishing}
+                    class="flex-1 py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
+                           text-white font-bold text-lg rounded-2xl transition-colors
+                           disabled:opacity-50 shadow-sm">
+              {finishing ? 'Saving…' : '✓ Finish Workout'}
+            </button>
+          {/if}
+        </div>
 
       </div>
     </div><!-- /scrollable -->
@@ -2031,9 +2122,9 @@
           <span class="text-3xl font-mono font-bold tracking-tight text-white">{formatRest(restSecs)}</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
-          <button onclick={() => { restSecs = Math.max(1, restSecs - 15); }}
+          <button onclick={() => { restEndTime = Math.max(Date.now() + 1000, restEndTime - 15000); restSecs = Math.max(1, Math.ceil((restEndTime - Date.now()) / 1000)); }}
                   class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">−15s</button>
-          <button onclick={() => { restSecs += 15; }}
+          <button onclick={() => { restEndTime += 15000; restSecs = Math.ceil((restEndTime - Date.now()) / 1000); }}
                   class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">+15s</button>
           <button onclick={skipRest}
                   class="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[40px]">Skip</button>
@@ -2061,11 +2152,13 @@
         <h3 class="font-semibold">
           {#if pickingExercise}
             {pickingExercise.display_name}
+          {:else if swapTargetUiId}
+            Swap Exercise
           {:else}
             Add Exercise
           {/if}
         </h3>
-        <button onclick={() => showAddModal = false} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        <button onclick={() => { showAddModal = false; swapTargetUiId = null; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
       </div>
 
       {#if !pickingExercise}
@@ -2151,7 +2244,7 @@
 
         <div class="px-4 pb-5 flex gap-3 shrink-0">
           <button onclick={() => pickingExercise = null} class="btn-secondary flex-1">← Back</button>
-          <button onclick={confirmAdd} class="btn-primary flex-1">Add to Workout</button>
+          <button onclick={confirmAdd} class="btn-primary flex-1">{swapTargetUiId ? 'Swap Exercise' : 'Add to Workout'}</button>
         </div>
       {/if}
     </div>
