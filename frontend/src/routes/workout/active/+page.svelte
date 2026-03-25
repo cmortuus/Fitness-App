@@ -153,6 +153,13 @@
       // Use display base for plate math if configured, otherwise actual weight
       return mw[`${key}_displayBase`] ?? mw[key] ?? defaultBar;
     }
+    // Specialty bars
+    const n = exercise.name.toLowerCase();
+    if (n.includes('ez_bar') || n.includes('ez bar') || n.includes('curl_bar')) {
+      return n.includes('rackable') ? (mw.ezBarRackable ?? 35) : (mw.ezBar ?? 25);
+    }
+    if (n.includes('safety_squat') || n.includes('ssb')) return mw.safetySquatBar ?? 65;
+    if (n.includes('trap_bar') || n.includes('hex_bar')) return mw.trapBar ?? 45;
     return mw.barbell ?? defaultBar;
   }
 
