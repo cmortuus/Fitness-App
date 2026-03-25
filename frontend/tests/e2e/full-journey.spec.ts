@@ -116,29 +116,29 @@ test('Full user journey', async ({ page }) => {
       await page.waitForTimeout(2000);
     }
 
-    // Should see "Active" badge
-    await expect(page.locator('text=Active')).toBeVisible({ timeout: 5000 });
+    // Should see exercise cards (active workout view)
+    await expect(page.locator('.exercise-card').first()).toBeVisible({ timeout: 5000 });
 
     // Fill in weight and reps for each empty set, then complete
+    // Use title selectors to distinguish completion vs undo buttons
     for (let i = 0; i < 10; i++) {
-      // Find first enabled check button
-      const enabledCheck = page.locator('button:has-text("✓"):not([disabled])');
-      const enabledCount = await enabledCheck.count();
+      // Find first "Log this set" button (completion, not undo)
+      const logBtn = page.locator('button[title="Log this set"]');
+      const logCount = await logBtn.count();
 
-      if (enabledCount > 0) {
-        // Already has values, just click
-        await enabledCheck.first().click();
+      if (logCount > 0) {
+        await logBtn.first().click();
         await page.waitForTimeout(800);
         continue;
       }
 
       // Find first disabled check — means we need to fill weight/reps
-      const disabledCheck = page.locator('button[disabled]:has-text("✓")');
-      const disabledCount = await disabledCheck.count();
-      if (disabledCount === 0) break; // All done
+      const enterRepsBtn = page.locator('button[title="Enter reps first"]');
+      const enterRepsCount = await enterRepsBtn.count();
+      if (enterRepsCount === 0) break; // All done
 
-      // Fill empty weight inputs (find inputs with placeholder containing "lbs" or empty number inputs)
-      const weightInputs = page.locator('input[type="number"]');
+      // Fill empty number inputs
+      const weightInputs = page.locator('.exercise-card input[type="number"]');
       const inputCount = await weightInputs.count();
       for (let j = 0; j < inputCount; j++) {
         const val = await weightInputs.nth(j).inputValue();
@@ -153,13 +153,13 @@ test('Full user journey', async ({ page }) => {
       }
       await page.waitForTimeout(500);
 
-      // Try clicking first enabled check again
-      const nowEnabled = page.locator('button:has-text("✓"):not([disabled])');
-      if (await nowEnabled.count() > 0) {
-        await nowEnabled.first().click();
+      // Try clicking "Log this set" again
+      const nowReady = page.locator('button[title="Log this set"]');
+      if (await nowReady.count() > 0) {
+        await nowReady.first().click();
         await page.waitForTimeout(800);
       } else {
-        break; // Can't enable any more
+        break;
       }
     }
 
@@ -173,6 +173,24 @@ test('Full user journey', async ({ page }) => {
 
   // ── Step 4b: Myo rep match set type persists week-to-week ───────────────
   await test.step('Myo rep match type persists to week 2', async () => {
+    // Clean up any in-progress sessions first
+    const sessions = await api('GET', '/sessions/');
+    for (const s of sessions) {
+      if (s.status === 'in_progress') {
+        // Complete all sets then finish
+        const full = await api('GET', `/sessions/${s.id}`);
+        for (const set of (full.sets || [])) {
+          if (!set.completed_at) {
+            await api('PATCH', `/sessions/${s.id}/sets/${set.id}`, {
+              actual_weight_kg: 60, actual_reps: 8,
+              completed_at: new Date().toISOString(),
+            });
+          }
+        }
+        await api('POST', `/sessions/${s.id}/complete`);
+      }
+    }
+
     // Create a fresh session via API with 3 sets
     const exercises = await api('GET', '/exercises/');
     const compound = exercises.find((e: any) => e.movement_type === 'compound') || exercises[0];
