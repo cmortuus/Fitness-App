@@ -21,14 +21,14 @@ services:
     expose:
       - "80"
     volumes:
-      - shared_data:/app/data
+      - main_data:/app/data
     env_file: .env
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/homegym.db
       - DATABASE_SYNC_URL=sqlite:///./data/homegym.db
     restart: unless-stopped
 
-  # Dev branch — built from the dev branch checkout
+  # Dev branch — separate DB to avoid SQLite write conflicts
   dev:
     build:
       context: .
@@ -36,7 +36,7 @@ services:
     expose:
       - "80"
     volumes:
-      - shared_data:/app/data
+      - dev_data:/app/data
     env_file: .env
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/homegym.db
@@ -44,4 +44,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  shared_data:
+  main_data:
+  dev_data:
