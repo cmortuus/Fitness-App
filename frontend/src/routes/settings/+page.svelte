@@ -121,9 +121,14 @@
 
   <!-- ── Profile ─────────────────────────────────────────────────────── -->
   <div class="card space-y-4">
-    <div>
-      <h3 class="text-lg font-semibold">Profile</h3>
-      <p class="text-sm text-zinc-400 mt-1">Used for TDEE estimates and macro calculations.</p>
+    <div class="flex items-center justify-between">
+      <div>
+        <h3 class="text-lg font-semibold">Profile</h3>
+        <p class="text-sm text-zinc-400 mt-1">Used for TDEE estimates and macro calculations.</p>
+      </div>
+      {#if $settings.profile.age && $settings.profile.sex && $settings.profile.heightIn}
+        <span class="text-xs text-green-400 bg-green-500/10 px-2 py-1 rounded-full">✓ Saved</span>
+      {/if}
     </div>
 
     <div class="grid grid-cols-2 gap-3">

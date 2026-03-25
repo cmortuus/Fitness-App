@@ -65,7 +65,16 @@ function loadSettings(): AppSettings {
   if (typeof localStorage === 'undefined') return defaultSettings;
   try {
     const raw = localStorage.getItem(SETTINGS_KEY);
-    return raw ? { ...defaultSettings, ...JSON.parse(raw) } : defaultSettings;
+    if (!raw) return defaultSettings;
+    const stored = JSON.parse(raw);
+    // Deep merge: ensure nested objects get default values for missing keys
+    return {
+      ...defaultSettings,
+      ...stored,
+      restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
+      profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
+      machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
+    };
   } catch {
     return defaultSettings;
   }
