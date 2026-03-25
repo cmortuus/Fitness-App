@@ -158,7 +158,9 @@ docker_deploy() {
   log "Starting Docker deployment at $TIMESTAMP"
   mkdir -p "$BACKUP_DIR"
 
-  # docker compose reads .env via env_file directive
+  # Save current HEAD to detect infra changes after pull
+  local prev_head
+  prev_head=$(git rev-parse HEAD 2>/dev/null || echo "none")
 
   # 1. Pull latest code
   log "Pulling latest code..."
@@ -173,9 +175,15 @@ docker_deploy() {
     git reset --hard origin/dev
     git checkout "$current_branch"
 
-    # Rebuild only the dev container
+    # Check if infra files changed (need --no-cache)
+    local build_flags=""
+    if git diff --name-only "$prev_head" origin/dev 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
+      log "Infrastructure files changed — rebuilding without cache..."
+      build_flags="--no-cache"
+    fi
+
     log "Rebuilding dev container..."
-    docker compose build dev
+    docker compose build $build_flags dev
     docker compose up -d dev
   else
     log "Updating all branches..."
@@ -190,9 +198,15 @@ docker_deploy() {
       git checkout "$current_branch"
     fi
 
-    # Rebuild both containers
+    # Check if infra files changed
+    local build_flags=""
+    if git diff --name-only "$prev_head" HEAD 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
+      log "Infrastructure files changed — rebuilding without cache..."
+      build_flags="--no-cache"
+    fi
+
     log "Rebuilding containers..."
-    docker compose build
+    docker compose build $build_flags
     docker compose up -d
   fi
 
