@@ -1637,16 +1637,16 @@
                       >✓</button>
                     {:else}
                       {@const canComplete = (set.repsLeft ?? 0) > 0 && (set.repsRight ?? 0) > 0}
-                      <div class="flex gap-1">
+                      <div class="flex gap-1.5">
                         <button
                           onclick={() => completeSet(ex.uiId, set.localId)}
                           disabled={!canComplete}
-                          class="h-12 w-10 rounded-lg bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          class="h-12 flex-1 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold text-base transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                           title={canComplete ? 'Log this set' : 'Enter reps first'}
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-12 w-10 rounded-lg bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 text-[10px] font-semibold transition-colors"
+                          class="h-12 px-3 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
                           title="Skip this set"
                         >Skip</button>
                       </div>
@@ -1801,16 +1801,16 @@
                       >✓</button>
                     {:else}
                       {@const canComplete = (set.reps ?? 0) > 0}
-                      <div class="flex flex-col gap-1">
+                      <div class="flex gap-1.5">
                         <button
                           onclick={() => completeSet(ex.uiId, set.localId)}
                           disabled={!canComplete}
-                          class="h-8 w-12 rounded-lg bg-primary-600 hover:bg-primary-500 text-white font-bold text-sm transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          class="h-12 flex-1 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold text-base transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                           title={canComplete ? 'Log this set' : 'Enter reps first'}
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-7 w-12 text-xs font-medium text-amber-500/80 hover:text-amber-400 bg-amber-500/10 rounded-lg transition-colors"
+                          class="h-12 px-3 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
                           title="Skip this set"
                         >Skip</button>
                       </div>
