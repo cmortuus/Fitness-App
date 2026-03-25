@@ -1501,7 +1501,7 @@
                   <!-- ── Unilateral row ─────────────────────────────── -->
                   <div
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
-                    style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem"
+                    style="grid-template-columns: 4.5rem 1fr 1fr 1fr 5.5rem"
                   >
                     <select
                       value={set.setType || 'standard'}
@@ -1646,7 +1646,7 @@
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-12 px-3 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
+                          class="h-12 flex-1 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
                           title="Skip this set"
                         >Skip</button>
                       </div>
@@ -1692,7 +1692,7 @@
                   <!-- ── Bilateral row ──────────────────────────────── -->
                   <div
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
-                    style="grid-template-columns: 4.5rem 1fr 1fr 2.5rem"
+                    style="grid-template-columns: 4.5rem 1fr 1fr 5.5rem"
                   >
                     <select
                       value={set.setType || 'standard'}
@@ -1810,7 +1810,7 @@
                         >✓</button>
                         <button
                           onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-12 px-3 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
+                          class="h-12 flex-1 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors"
                           title="Skip this set"
                         >Skip</button>
                       </div>
