@@ -1,9 +1,10 @@
-"""Authentication API — register, login, refresh, and current user dependency."""
+"""Authentication API — register, login, refresh, current user, and settings."""
 
+import json
 from typing import Annotated
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -192,3 +193,29 @@ async def get_me(
 ) -> dict:
     """Get the current authenticated user."""
     return serialize_user(user)
+
+
+@router.get("/settings")
+async def get_settings(
+    user: Annotated[User, Depends(get_current_user)],
+) -> dict:
+    """Get the user's app settings from the database."""
+    if user.settings_json:
+        try:
+            return json.loads(user.settings_json)
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+@router.put("/settings")
+async def save_settings(
+    request: Request,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Save the user's app settings to the database."""
+    body = await request.json()
+    user.settings_json = json.dumps(body)
+    await db.flush()
+    return body

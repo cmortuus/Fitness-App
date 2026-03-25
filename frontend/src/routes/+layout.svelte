@@ -33,6 +33,9 @@
     authChecked = true;
 
     try {
+      // Load settings from DB first (syncs across devices)
+      await settings.loadFromDb();
+
       const [exercisesData, plansData, latestBW, phase] = await Promise.all([
         getExercises(),
         getPlans(),
