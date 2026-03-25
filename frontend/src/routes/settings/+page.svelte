@@ -116,7 +116,7 @@
   }
 </script>
 
-<div class="space-y-6 max-w-2xl mx-auto p-6">
+<div class="space-y-6 max-w-2xl mx-auto p-6 pb-24">
   <h2 class="text-2xl font-bold">Settings</h2>
 
   <!-- ── Profile ─────────────────────────────────────────────────────── -->
