@@ -1,5 +1,6 @@
 // GymTracker Service Worker — cache app shell for offline support
-const CACHE_NAME = 'gymtracker-v1';
+// VERSION is replaced at build time by vite.config.ts
+const CACHE_NAME = 'gymtracker-__BUILD_TIMESTAMP__';
 const SHELL_URLS = [
   '/',
   '/manifest.json',
@@ -8,7 +9,7 @@ const SHELL_URLS = [
   '/icons/icon-512.png',
 ];
 
-// Install: cache the app shell
+// Install: cache the app shell, immediately take over
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL_URLS))
@@ -16,12 +17,17 @@ self.addEventListener('install', (event) => {
   self.skipWaiting();
 });
 
-// Activate: clean old caches
+// Activate: clean ALL old caches, notify clients to reload
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
       Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
-    )
+    ).then(() => {
+      // Tell all open tabs to reload with the new version
+      self.clients.matchAll({ type: 'window' }).then((clients) => {
+        clients.forEach((client) => client.postMessage({ type: 'SW_UPDATED' }));
+      });
+    })
   );
   self.clients.claim();
 });
