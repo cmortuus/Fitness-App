@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Seed 500+ exercises."""
-import asyncio, json
+import asyncio
+
 from app.database import async_session_factory, init_db
 from app.models.exercise import Exercise
 

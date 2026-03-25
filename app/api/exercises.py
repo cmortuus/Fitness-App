@@ -12,6 +12,7 @@ from app.models.exercise import Exercise
 from app.models.exercise_note import ExerciseNote
 from app.models.user import User
 from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession
+from pydantic import BaseModel as _PydanticBase
 from app.schemas.requests import ExerciseCreate, ExerciseResponse
 
 router = APIRouter()
@@ -254,8 +255,6 @@ async def get_exercise_note(
         return None
     return {"id": note.id, "exercise_id": note.exercise_id, "note": note.note, "updated_at": note.updated_at.isoformat()}
 
-
-from pydantic import BaseModel as _PydanticBase
 
 class _NoteBody(_PydanticBase):
     note: str = ""
