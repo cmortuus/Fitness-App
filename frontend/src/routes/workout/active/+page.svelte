@@ -2021,9 +2021,9 @@
       </div>
     </div><!-- /scrollable -->
 
-    <!-- ─── Rest timer banner ──────────────────────────────────────────────── -->
-    {#if restActive}
-      <div class="rest-bar">
+    <!-- ─── Rest timer banner (always visible) ──────────────────────────────── -->
+    <div class="sticky bottom-0 z-30 flex items-center px-4 py-3 border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
+      {#if restActive}
         <div class="flex items-center gap-3 flex-1">
           <div class="w-8 h-8 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
             <span class="text-primary-400 text-xs font-bold">REST</span>
@@ -2038,8 +2038,15 @@
           <button onclick={skipRest}
                   class="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[40px]">Skip</button>
         </div>
-      </div>
-    {/if}
+      {:else}
+        <div class="flex items-center gap-3 flex-1">
+          <div class="w-8 h-8 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
+            <span class="text-zinc-500 text-xs font-bold">REST</span>
+          </div>
+          <span class="text-sm text-zinc-500">Ready</span>
+        </div>
+      {/if}
+    </div>
 
   </div><!-- /fixed inset-0 -->
 {/if}
