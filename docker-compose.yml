@@ -20,8 +20,8 @@ services:
       - "80"
     volumes:
       - main_data:/app/data
+    env_file: .env
     environment:
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
       - DATABASE_URL=sqlite+aiosqlite:///./data/homegym.db
       - DATABASE_SYNC_URL=sqlite:///./data/homegym.db
     restart: unless-stopped
@@ -35,8 +35,8 @@ services:
       - "80"
     volumes:
       - dev_data:/app/data
+    env_file: .env
     environment:
-      - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
       - DATABASE_URL=sqlite+aiosqlite:///./data/homegym.db
       - DATABASE_SYNC_URL=sqlite:///./data/homegym.db
     restart: unless-stopped
