@@ -177,16 +177,8 @@ docker_deploy() {
     git reset --hard origin/dev
     git checkout "$current_branch"
 
-    # Check if infra files changed (need --no-cache)
-    local build_flags=""
-    if git diff --name-only "$prev_head" origin/dev 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
-      log "Infrastructure files changed — rebuilding without cache..."
-      build_flags="--no-cache"
-    fi
-
-
     log "Rebuilding dev container..."
-    docker compose build $build_flags dev
+    docker compose build dev
     docker compose up -d dev
     docker_health_check_async dev
     return
@@ -194,14 +186,8 @@ docker_deploy() {
     log "Updating main branch only..."
     git reset --hard origin/main
 
-    local build_flags=""
-    if git diff --name-only "$prev_head" origin/main 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
-      log "Infrastructure files changed — rebuilding without cache..."
-      build_flags="--no-cache"
-    fi
-
     log "Rebuilding main container..."
-    docker compose build $build_flags main
+    docker compose build main
     docker compose up -d main
     docker_health_check_async main
     return
@@ -218,15 +204,8 @@ docker_deploy() {
       git checkout "$current_branch"
     fi
 
-    # Check if infra files changed
-    local build_flags=""
-    if git diff --name-only "$prev_head" HEAD 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
-      log "Infrastructure files changed — rebuilding without cache..."
-      build_flags="--no-cache"
-    fi
-
     log "Rebuilding containers..."
-    docker compose build $build_flags
+    docker compose build
     docker compose up -d
   fi
 
