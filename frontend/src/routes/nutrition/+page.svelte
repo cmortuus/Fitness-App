@@ -87,6 +87,8 @@
   } | null>(null);
   let ocrSaving = $state(false);
   let ocrFieldsFound = $state(0);
+  let ocrScanning = $state(false);  // true while a frame is being processed
+  let ocrPartialValues = $state<{ calories: number; protein: number; carbs: number; fat: number } | null>(null);
 
   // Phase wizard
   let showPhaseWizard = $state(false);
@@ -357,12 +359,15 @@
     ctx.putImageData(img, 0, 0);
 
     try {
+      ocrScanning = true;
       const { data } = await ocrWorker.recognize(ocrCanvasEl);
+      ocrScanning = false;
       const parsed = parseNutritionLabel(data.text);
 
       // Count how many fields we found
       const fields = [parsed.calories, parsed.protein, parsed.carbs, parsed.fat].filter(v => v > 0).length;
       ocrFieldsFound = fields;
+      ocrPartialValues = { calories: parsed.calories, protein: parsed.protein, carbs: parsed.carbs, fat: parsed.fat };
 
       if (fields >= 3) {
         // Good enough — stop scanning and show results
@@ -371,12 +376,13 @@
         ocrLiveStatus = '';
         stopLabelScanner(false);
       } else if (fields > 0) {
-        ocrLiveStatus = `Found ${fields}/4 values... hold steady`;
+        ocrLiveStatus = `Found ${fields}/4 — hold steady...`;
       } else {
         ocrLiveStatus = 'Point at nutrition label...';
+        ocrPartialValues = null;
       }
     } catch {
-      // Ignore individual frame errors
+      ocrScanning = false;
     }
   }
 
@@ -973,18 +979,46 @@
                     <video bind:this={ocrVideoEl} autoplay playsinline muted
                            class="w-full h-full object-cover"></video>
                     <canvas bind:this={ocrCanvasEl} class="hidden"></canvas>
+                    <!-- Scanning pulse overlay -->
+                    <div class="absolute inset-0 pointer-events-none">
+                      <div class="absolute inset-4 border-2 rounded-lg transition-colors
+                                  {ocrScanning ? 'border-primary-400 animate-pulse' : 'border-zinc-600/40'}"></div>
+                      {#if ocrScanning}
+                        <div class="absolute top-2 right-2 flex items-center gap-1.5 bg-black/60 rounded-full px-2 py-1">
+                          <div class="w-2 h-2 rounded-full bg-primary-400 animate-pulse"></div>
+                          <span class="text-[10px] text-primary-300">Reading...</span>
+                        </div>
+                      {/if}
+                    </div>
                     <!-- Status overlay -->
-                    <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-3">
-                      <div class="flex items-center justify-between">
+                    <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/90 to-transparent p-3">
+                      <div class="flex items-center justify-between mb-1">
                         <p class="text-xs text-white">{ocrLiveStatus}</p>
                         {#if ocrFieldsFound > 0}
                           <div class="flex gap-1">
                             {#each [0,1,2,3] as i}
-                              <div class="w-2 h-2 rounded-full {i < ocrFieldsFound ? 'bg-green-400' : 'bg-zinc-600'}"></div>
+                              <div class="w-2.5 h-2.5 rounded-full transition-colors {i < ocrFieldsFound ? 'bg-green-400' : 'bg-zinc-600'}"></div>
                             {/each}
                           </div>
                         {/if}
                       </div>
+                      <!-- Show partial values as they're found -->
+                      {#if ocrPartialValues && ocrFieldsFound > 0}
+                        <div class="flex gap-3 text-[10px]">
+                          <span class="{ocrPartialValues.calories > 0 ? 'text-green-400' : 'text-zinc-600'}">
+                            Cal: {ocrPartialValues.calories > 0 ? ocrPartialValues.calories : '—'}
+                          </span>
+                          <span class="{ocrPartialValues.protein > 0 ? 'text-green-400' : 'text-zinc-600'}">
+                            P: {ocrPartialValues.protein > 0 ? ocrPartialValues.protein + 'g' : '—'}
+                          </span>
+                          <span class="{ocrPartialValues.carbs > 0 ? 'text-green-400' : 'text-zinc-600'}">
+                            C: {ocrPartialValues.carbs > 0 ? ocrPartialValues.carbs + 'g' : '—'}
+                          </span>
+                          <span class="{ocrPartialValues.fat > 0 ? 'text-green-400' : 'text-zinc-600'}">
+                            F: {ocrPartialValues.fat > 0 ? ocrPartialValues.fat + 'g' : '—'}
+                          </span>
+                        </div>
+                      {/if}
                     </div>
                   </div>
                   <button onclick={() => stopLabelScanner(true)} class="btn-ghost w-full">Cancel</button>
