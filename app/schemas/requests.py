@@ -121,12 +121,24 @@ class SetResponse(BaseModel):
     id: int
     exercise_id: int
     set_number: int
-    planned_reps: int | None
-    planned_weight_kg: float | None
-    actual_reps: int | None
-    actual_weight_kg: float | None
+    planned_reps: int | None = None
+    planned_reps_left: int | None = None
+    planned_reps_right: int | None = None
+    planned_weight_kg: float | None = None
+    actual_reps: int | None = None
+    actual_weight_kg: float | None = None
+    reps_left: int | None = None
+    reps_right: int | None = None
     set_type: str = "standard"
-    notes: str | None
+    sub_sets: list | str | None = None
+    notes: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    draft_weight_kg: float | None = None
+    draft_reps: int | None = None
+    draft_reps_left: int | None = None
+    draft_reps_right: int | None = None
+    skipped_at: str | None = None
 
     model_config = {"from_attributes": True}
 
