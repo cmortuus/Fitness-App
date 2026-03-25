@@ -11,6 +11,7 @@
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
+  import PlateVisual from '$lib/components/PlateVisual.svelte';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -1635,9 +1636,8 @@
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
                       {:else if shouldShowPlates(exercise) && set.weightLbs != null}
                         {@const bw = getBarWeight(exercise)}
-                        {@const plates = set.weightLbs > bw ? calcPlates(set.weightLbs, unit === 'lbs', bw) : ''}
-                        {#if plates}
-                          <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
+                        {#if set.weightLbs > bw}
+                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
                         {/if}
                       {/if}
                     </div>
@@ -1852,9 +1852,8 @@
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
                       {:else if shouldShowPlates(exercise) && set.weightLbs != null}
                         {@const bw = getBarWeight(exercise)}
-                        {@const plates = set.weightLbs > bw ? calcPlates(set.weightLbs, unit === 'lbs', bw) : ''}
-                        {#if plates}
-                          <span class="text-[9px] text-zinc-500 text-center leading-tight">{plates}</span>
+                        {#if set.weightLbs > bw}
+                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
                         {/if}
                       {/if}
                     </div>
