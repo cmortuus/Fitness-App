@@ -545,12 +545,9 @@
             selectedFood = result;
             selectedQty = result.serving_size_g || 100;
           } catch {
-            // Barcode not in any database — switch to label OCR
+            // Barcode not in any database — show label scanner inline
             lastScannedBarcode = decodedText;
-            scanError = `Barcode ${decodedText} not in database. Scan the nutrition label to add it.`;
-            // Auto-switch to label tab
-            activeTab = 'label';
-            startLabelScanner();
+            scanError = '';
           }
         },
         () => {}
@@ -854,7 +851,7 @@
       {:else}
         <!-- Tabs -->
         <div class="flex border-b border-zinc-800 shrink-0">
-          {#each [['search', 'Search'], ['scan', 'Scan'], ['label', 'Label'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
+          {#each [['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
             <button onclick={() => { if (activeTab === 'scan') stopScanner(); activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); }}
                     class="flex-1 py-2.5 text-xs font-medium transition-colors
                            {activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-zinc-500 hover:text-zinc-300'}">
@@ -895,26 +892,11 @@
               </div>
             {/if}
 
-          <!-- Scan tab -->
+          <!-- Scan tab (barcode + label fallback) -->
           {:else if activeTab === 'scan'}
             <div class="p-4 space-y-4">
-              {#if !scannerActive}
-                <button onclick={startScanner} class="btn-primary w-full">Open Camera</button>
-              {:else}
-                <button onclick={stopScanner} class="btn-ghost w-full text-sm">Close Camera</button>
-              {/if}
-              <div id="barcode-reader" class="rounded-xl overflow-hidden"></div>
-              {#if scanError}
-                <p class="text-sm text-amber-400 text-center">{scanError}</p>
-              {/if}
-              <p class="text-xs text-zinc-500 text-center">Point camera at a food barcode</p>
-            </div>
-
-          <!-- Label OCR tab -->
-          {:else if activeTab === 'label'}
-            <div class="p-4 space-y-3">
               {#if ocrResult}
-                <!-- Show extracted values for editing -->
+                <!-- OCR results — edit and save -->
                 <div class="space-y-3">
                   <p class="text-xs text-zinc-400">
                     {lastScannedBarcode ? `Barcode ${lastScannedBarcode} not in database.` : ''}
@@ -966,21 +948,28 @@
                 </div>
 
               {:else if ocrLiveActive}
-                <!-- Live video scanner -->
+                <!-- Live OCR video scanner -->
                 <div class="space-y-2">
                   <div class="relative rounded-xl overflow-hidden bg-black aspect-[4/3]">
                     <!-- svelte-ignore a11y_media_has_caption -->
                     <video bind:this={ocrVideoEl} autoplay playsinline muted
                            class="w-full h-full object-cover"></video>
                     <canvas bind:this={ocrCanvasEl} class="hidden"></canvas>
+                    <!-- Scanning pulse overlay -->
+                    <div class="absolute inset-0 pointer-events-none">
+                      <div class="absolute inset-4 border-2 border-primary-400/40 rounded-lg animate-pulse"></div>
+                    </div>
                     <!-- Status overlay -->
                     <div class="absolute bottom-0 inset-x-0 bg-gradient-to-t from-black/80 to-transparent p-3">
                       <div class="flex items-center justify-between">
-                        <p class="text-xs text-white">{ocrLiveStatus}</p>
+                        <div class="flex items-center gap-2">
+                          <div class="w-2 h-2 rounded-full bg-primary-400 animate-pulse"></div>
+                          <p class="text-xs text-white">{ocrLiveStatus}</p>
+                        </div>
                         {#if ocrFieldsFound > 0}
                           <div class="flex gap-1">
                             {#each [0,1,2,3] as i}
-                              <div class="w-2 h-2 rounded-full {i < ocrFieldsFound ? 'bg-green-400' : 'bg-zinc-600'}"></div>
+                              <div class="w-2.5 h-2.5 rounded-full transition-colors {i < ocrFieldsFound ? 'bg-green-400' : 'bg-zinc-600'}"></div>
                             {/each}
                           </div>
                         {/if}
@@ -990,20 +979,16 @@
                   <button onclick={() => stopLabelScanner(true)} class="btn-ghost w-full">Cancel</button>
                 </div>
 
-              {:else}
-                <!-- Start options -->
-                <div class="text-center space-y-3">
-                  {#if lastScannedBarcode}
-                    <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-                      <p class="text-xs text-amber-400">Barcode {lastScannedBarcode} not found in any database.</p>
-                      <p class="text-xs text-zinc-400 mt-1">Scan the nutrition label to add it to the community library.</p>
-                    </div>
-                  {:else}
-                    <p class="text-sm text-zinc-400">Scan a nutrition facts label to add to the community library</p>
-                  {/if}
+              {:else if lastScannedBarcode}
+                <!-- Barcode not found — show label scanning options -->
+                <div class="space-y-3">
+                  <div class="bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
+                    <p class="text-xs text-amber-400">Barcode {lastScannedBarcode} not found in any database.</p>
+                    <p class="text-xs text-zinc-400 mt-1">Scan the nutrition label to add it to the community library.</p>
+                  </div>
 
                   <button onclick={startLabelScanner} class="btn-primary w-full !py-3">
-                    Start Live Scanner
+                    📷 Scan Nutrition Label
                   </button>
 
                   <div class="flex gap-2">
@@ -1021,10 +1006,30 @@
                     </label>
                   </div>
 
+                  <button onclick={() => { lastScannedBarcode = ''; scanError = ''; }}
+                          class="text-xs text-zinc-500 hover:text-zinc-300 w-full text-center">
+                    ← Back to barcode scanner
+                  </button>
+
                   {#if ocrError}
                     <p class="text-xs text-red-400">{ocrError}</p>
                   {/if}
                 </div>
+
+              {:else}
+                <!-- Barcode scanner -->
+                {#if !scannerActive}
+                  <button onclick={startScanner} class="btn-primary w-full">📸 Scan Barcode</button>
+                {:else}
+                  <button onclick={stopScanner} class="btn-ghost w-full text-sm">Close Camera</button>
+                {/if}
+                <div id="barcode-reader" class="rounded-xl overflow-hidden"></div>
+                {#if scanError}
+                  <p class="text-sm text-amber-400 text-center">{scanError}</p>
+                {/if}
+                {#if !scannerActive && !scanError}
+                  <p class="text-xs text-zinc-500 text-center">Point camera at a food barcode</p>
+                {/if}
               {/if}
             </div>
 
