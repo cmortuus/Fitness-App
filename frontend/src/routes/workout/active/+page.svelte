@@ -135,7 +135,11 @@
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
-    return exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded';
+    if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
+    // Fallback: check name prefix for exercises that haven't been re-seeded yet
+    const n = exercise.name?.toLowerCase() ?? '';
+    const prefix = n.split('_')[0];
+    return ['barbell', 'smith', 'tbar', 'belt'].includes(prefix);
   }
 
   /** Get bar/sled weight for plate math. Uses display base if set, else actual weight. */
