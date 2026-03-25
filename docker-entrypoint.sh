@@ -6,6 +6,11 @@ DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/homegym.db}" \
 DATABASE_SYNC_URL="${DATABASE_SYNC_URL:-sqlite:///./data/homegym.db}" \
 alembic upgrade head || echo "[entrypoint] Migration warning (may be first run)"
 
+echo "[entrypoint] Updating exercise data..."
+DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/homegym.db}" \
+DATABASE_SYNC_URL="${DATABASE_SYNC_URL:-sqlite:///./data/homegym.db}" \
+python scripts/seed_all_exercises.py || echo "[entrypoint] Seed warning (may already be up to date)"
+
 echo "[entrypoint] Starting backend..."
 DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/homegym.db}" \
 DATABASE_SYNC_URL="${DATABASE_SYNC_URL:-sqlite:///./data/homegym.db}" \

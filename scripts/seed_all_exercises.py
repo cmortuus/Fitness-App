@@ -109,23 +109,32 @@ def generate_all_exercises():
 
 async def seed():
     await init_db()
+    inserted = 0
+    updated = 0
     async with async_session_factory() as session:
+        from sqlalchemy import select
         for ed in generate_all_exercises():
-            from sqlalchemy import select
             result = await session.execute(select(Exercise).where(Exercise.name == ed["name"]))
-            if result.scalar_one_or_none():
+            existing = result.scalar_one_or_none()
+            eq_type = get_equipment_type(ed["name"])
+            if existing:
+                # Update equipment_type if it was left as default "other"
+                if existing.equipment_type in (None, "other", "") and eq_type != "other":
+                    existing.equipment_type = eq_type
+                    updated += 1
                 continue
             ex = Exercise(
                 name=ed["name"],
                 display_name=ed["display"],
                 movement_type=ed["type"],
-                equipment_type=get_equipment_type(ed["name"]),
+                equipment_type=eq_type,
                 primary_muscles=ed.get("primary", []),
                 secondary_muscles=ed.get("secondary", []),
             )
             session.add(ex)
+            inserted += 1
         await session.commit()
-    print(f"Seeded {len(generate_all_exercises())} exercises")
+    print(f"Seeded {inserted} new exercises, updated {updated} equipment types")
 
 if __name__ == "__main__":
     asyncio.run(seed())
