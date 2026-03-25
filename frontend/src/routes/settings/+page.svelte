@@ -558,28 +558,33 @@
   </div>
 
   <!-- ── Developer ────────────────────────────────────────────────────── -->
-  <div class="card space-y-3">
-    <h3 class="text-lg font-semibold">Developer</h3>
-    <div class="flex items-center justify-between">
-      <div>
-        <p class="text-sm text-zinc-300">Use dev version</p>
-        <p class="text-xs text-zinc-500">Switch to the development build for testing new features</p>
+  {#if typeof document !== 'undefined'}
+    {@const onDev = document.cookie.includes('gymtracker_branch=dev')}
+    <div class="card space-y-3">
+      <h3 class="text-lg font-semibold">Developer</h3>
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-sm text-zinc-300">
+            Branch: <span class="font-mono {onDev ? 'text-amber-400' : 'text-green-400'}">{onDev ? 'dev' : 'main'}</span>
+          </p>
+          <p class="text-xs text-zinc-500">{onDev ? 'You are on the development build' : 'You are on the stable build'}</p>
+        </div>
+        <button
+          onclick={() => {
+            if (document.cookie.includes('gymtracker_branch=dev')) {
+              document.cookie = 'gymtracker_branch=; path=/; max-age=0';
+            } else {
+              document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000';
+            }
+            window.location.reload();
+          }}
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {onDev ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-amber-600/20 text-amber-400 hover:bg-amber-600/30'}"
+        >
+          Switch to {onDev ? 'main' : 'dev'}
+        </button>
       </div>
-      <button
-        onclick={() => {
-          if (document.cookie.includes('gymtracker_branch=dev')) {
-            document.cookie = 'gymtracker_branch=; path=/; max-age=0';
-          } else {
-            document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000';
-          }
-          window.location.reload();
-        }}
-        class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-zinc-800 text-zinc-400 hover:bg-zinc-700"
-      >
-        Switch
-      </button>
     </div>
-  </div>
+  {/if}
 
   <!-- ── Account ──────────────────────────────────────────────────────── -->
   <div class="card space-y-3">
