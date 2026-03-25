@@ -122,18 +122,25 @@ migrate_to_docker() {
   }
 
   # 8. Copy existing database into Docker volumes
-  if [ -f "$APP_DIR/homegym.db" ]; then
-    log "Copying existing database into main container volume..."
-    # Create volumes and copy data
-    docker compose up -d main
-    sleep 2
-    docker compose cp "$APP_DIR/homegym.db" main:/app/data/homegym.db
-    docker compose restart main
-  fi
+  # 8. Start PostgreSQL first, let it initialize
+  log "Starting PostgreSQL..."
+  docker compose up -d db
+  sleep 5
 
-  # 9. Start everything
+  # 9. Start app containers (alembic runs in entrypoint)
   docker compose up -d
-  sleep 3
+  sleep 10
+
+  # 10. Migrate SQLite data to PostgreSQL if SQLite DB exists
+  if [ -f "$APP_DIR/homegym.db" ]; then
+    log "Migrating SQLite data to PostgreSQL..."
+    docker compose cp "$APP_DIR/homegym.db" main:/tmp/homegym.db
+    docker compose exec -T main bash -c "PYTHONPATH=/app python scripts/migrate_sqlite_to_pg.py /tmp/homegym.db" || {
+      warn "SQLite migration had issues — check manually"
+    }
+    mv "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_pre_postgres_${TIMESTAMP}.db"
+    log "SQLite backup saved. PostgreSQL is now the database."
+  fi
 
   # 10. Mark as Docker mode
   touch "$APP_DIR/.docker-mode"
@@ -312,6 +319,13 @@ ensure_env() {
     local jwt_secret
     jwt_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
     echo "JWT_SECRET_KEY=${jwt_secret}" >> "$APP_DIR/.env"
+  fi
+  # Ensure POSTGRES_PASSWORD exists
+  if ! grep -q '^POSTGRES_PASSWORD=' "$APP_DIR/.env"; then
+    log "Adding POSTGRES_PASSWORD to .env..."
+    local pg_pass
+    pg_pass=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    echo "POSTGRES_PASSWORD=${pg_pass}" >> "$APP_DIR/.env"
   fi
 }
 
