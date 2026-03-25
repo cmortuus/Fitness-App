@@ -10,6 +10,9 @@
 #   Deploy/update:     ./deploy.sh
 #   Update dev only:   ./deploy.sh --dev
 #   Rollback:          ./deploy.sh --rollback
+#   Auto-reload:       ./deploy.sh --watch [interval]
+#                      Polls for changes every [interval] seconds (default 60).
+#                      Only rebuilds the container(s) whose branch changed.
 #
 # Both main and dev branches run simultaneously as Docker containers.
 # Users switch between them via Settings → Developer → "Use dev version".
@@ -164,17 +167,22 @@ docker_deploy() {
 
   if [ "$target" = "dev" ]; then
     log "Updating dev branch only..."
-    # Stash current branch, update dev, come back
     local current_branch
     current_branch=$(git branch --show-current)
     git checkout dev 2>/dev/null || git checkout -b dev origin/dev
     git reset --hard origin/dev
     git checkout "$current_branch"
 
-    # Rebuild only the dev container
     log "Rebuilding dev container..."
     docker compose build dev
     docker compose up -d dev
+  elif [ "$target" = "main" ]; then
+    log "Updating main branch only..."
+    git reset --hard origin/main
+
+    log "Rebuilding main container..."
+    docker compose build main
+    docker compose up -d main
   else
     log "Updating all branches..."
     git reset --hard origin/main
@@ -331,10 +339,75 @@ legacy_deploy() {
   log "Legacy deploy complete. Run ./deploy.sh again to migrate to Docker."
 }
 
+# ── Watch mode ─────────────────────────────────────────────────────────────────
+
+watch_and_reload() {
+  local interval="${1:-60}"
+
+  if ! is_docker_mode; then
+    err "Watch mode requires Docker. Run ./deploy.sh first to migrate."
+    exit 1
+  fi
+
+  # Load env vars for docker compose
+  if [ -f "$APP_DIR/.env" ]; then
+    set -a; source "$APP_DIR/.env"; set +a
+  fi
+
+  log "Watching for changes every ${interval}s (Ctrl+C to stop)..."
+
+  # Store current remote HEADs
+  git fetch origin --quiet
+  local last_main last_dev
+  last_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
+  last_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
+
+  log "main: ${last_main:0:7}  dev: ${last_dev:0:7}"
+
+  while true; do
+    sleep "$interval"
+    git fetch origin --quiet 2>/dev/null || { warn "git fetch failed, retrying..."; continue; }
+
+    local cur_main cur_dev
+    cur_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
+    cur_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
+
+    local changed_main=false changed_dev=false
+
+    if [ "$cur_main" != "$last_main" ]; then
+      changed_main=true
+      log "main branch changed: ${last_main:0:7} → ${cur_main:0:7}"
+    fi
+
+    if [ "$cur_dev" != "$last_dev" ]; then
+      changed_dev=true
+      log "dev branch changed: ${last_dev:0:7} → ${cur_dev:0:7}"
+    fi
+
+    # Rebuild only what changed
+    if $changed_main && $changed_dev; then
+      log "Both branches changed — rebuilding all..."
+      docker_deploy all
+    elif $changed_main; then
+      log "Rebuilding main only..."
+      docker_deploy main
+    elif $changed_dev; then
+      log "Rebuilding dev only..."
+      docker_deploy dev
+    fi
+
+    last_main="$cur_main"
+    last_dev="$cur_dev"
+  done
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 main() {
   case "${1:-}" in
+    --watch)
+      watch_and_reload "${2:-60}"
+      ;;
     --rollback)
       if is_docker_mode; then
         docker_rollback
