@@ -108,7 +108,7 @@ migrate_to_docker() {
     sudo systemctl disable nginx 2>/dev/null || true
   fi
 
-  # 5. Ensure .env exists
+  # 5. Ensure .env exists (docker compose reads it via env_file directive)
   ensure_env
 
   # 6. Ensure dev branch exists
@@ -161,6 +161,10 @@ docker_deploy() {
   log "Starting Docker deployment at $TIMESTAMP"
   mkdir -p "$BACKUP_DIR"
 
+  # Save current HEAD to detect infra changes after pull
+  local prev_head
+  prev_head=$(git rev-parse HEAD 2>/dev/null || echo "none")
+
   # 1. Pull latest code
   log "Pulling latest code..."
   git fetch origin
@@ -173,15 +177,29 @@ docker_deploy() {
     git reset --hard origin/dev
     git checkout "$current_branch"
 
+    # Check if infra files changed (need --no-cache)
+    local build_flags=""
+    if git diff --name-only "$prev_head" origin/dev 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
+      log "Infrastructure files changed — rebuilding without cache..."
+      build_flags="--no-cache"
+    fi
+
+
     log "Rebuilding dev container..."
-    docker compose build dev
+    docker compose build $build_flags dev
     docker compose up -d dev
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
     git reset --hard origin/main
 
+    local build_flags=""
+    if git diff --name-only "$prev_head" origin/main 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
+      log "Infrastructure files changed — rebuilding without cache..."
+      build_flags="--no-cache"
+    fi
+
     log "Rebuilding main container..."
-    docker compose build main
+    docker compose build $build_flags main
     docker compose up -d main
   else
     log "Updating all branches..."
@@ -196,9 +214,15 @@ docker_deploy() {
       git checkout "$current_branch"
     fi
 
-    # Rebuild both containers
+    # Check if infra files changed
+    local build_flags=""
+    if git diff --name-only "$prev_head" HEAD 2>/dev/null | grep -qE '^(Dockerfile|docker-compose\.yml|frontend/package(-lock)?\.json|requirements\.txt)'; then
+      log "Infrastructure files changed — rebuilding without cache..."
+      build_flags="--no-cache"
+    fi
+
     log "Rebuilding containers..."
-    docker compose build
+    docker compose build $build_flags
     docker compose up -d
   fi
 
@@ -261,12 +285,15 @@ docker_rollback() {
 
 ensure_env() {
   if [ ! -f "$APP_DIR/.env" ]; then
-    log "Creating .env with random JWT secret..."
+    log "Creating .env..."
+    touch "$APP_DIR/.env"
+  fi
+  # Ensure JWT_SECRET_KEY exists in .env (append if missing)
+  if ! grep -q '^JWT_SECRET_KEY=' "$APP_DIR/.env"; then
+    log "Adding JWT_SECRET_KEY to .env..."
     local jwt_secret
     jwt_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
-    cat > "$APP_DIR/.env" <<ENVEOF
-JWT_SECRET_KEY=${jwt_secret}
-ENVEOF
+    echo "JWT_SECRET_KEY=${jwt_secret}" >> "$APP_DIR/.env"
   fi
 }
 
@@ -347,11 +374,6 @@ watch_and_reload() {
   if ! is_docker_mode; then
     err "Watch mode requires Docker. Run ./deploy.sh first to migrate."
     exit 1
-  fi
-
-  # Load env vars for docker compose
-  if [ -f "$APP_DIR/.env" ]; then
-    set -a; source "$APP_DIR/.env"; set +a
   fi
 
   log "Watching for changes every ${interval}s (Ctrl+C to stop)..."
