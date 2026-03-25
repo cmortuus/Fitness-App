@@ -77,9 +77,16 @@ transfer_image() {
 
   log "Saving and transferring $tag to server..."
 
-  # Save image, compress, pipe over SSH, load on server
-  docker save "$tag:latest" | gzip | \
-    ssh "$SERVER" "docker load"
+  # Save to temp file, scp, then load on server (avoids pipe hang)
+  local tmpfile="/tmp/${tag}.tar.gz"
+  docker save "$tag:latest" | gzip > "$tmpfile"
+  local size
+  size=$(du -h "$tmpfile" | cut -f1)
+  log "Image saved ($size), transferring..."
+
+  scp -C "$tmpfile" "$SERVER:/tmp/${tag}.tar.gz"
+  ssh "$SERVER" "docker load < /tmp/${tag}.tar.gz && rm -f /tmp/${tag}.tar.gz"
+  rm -f "$tmpfile"
 
   local duration=$((SECONDS - start_time))
   log "Transferred $tag in $(elapsed $duration)"
