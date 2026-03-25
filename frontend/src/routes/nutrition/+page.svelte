@@ -58,6 +58,16 @@
   let scannerActive = $state(false);
   let scanError = $state('');
   let lastScannedBarcode = $state('');
+  let scannerInstance: any = null;
+
+  async function stopScanner() {
+    if (scannerInstance) {
+      try { await scannerInstance.stop(); } catch {}
+      try { scannerInstance.clear(); } catch {}
+      scannerInstance = null;
+    }
+    scannerActive = false;
+  }
 
   // OCR Label scanner
   let ocrProcessing = $state(false);
@@ -508,6 +518,7 @@
 
   // Barcode scanning
   async function startScanner() {
+    await stopScanner(); // Clean up any existing instance
     scannerActive = true;
     scanError = '';
     try {
@@ -523,12 +534,12 @@
           Html5QrcodeSupportedFormats.QR_CODE,
         ],
       });
+      scannerInstance = scanner;
       await scanner.start(
         { facingMode: 'environment' },
         { fps: 15, qrbox: { width: 300, height: 150 } },
         async (decodedText) => {
-          await scanner.stop();
-          scannerActive = false;
+          await stopScanner();
           try {
             const result = await lookupBarcode(decodedText);
             selectedFood = result;
@@ -546,7 +557,7 @@
       );
     } catch {
       scanError = 'Camera access denied or not available.';
-      scannerActive = false;
+      await stopScanner();
     }
   }
 </script>
@@ -778,7 +789,7 @@
         {:else}
           <h3 class="font-semibold text-white">Add Food</h3>
         {/if}
-        <button onclick={() => { showAddModal = false; selectedFood = null; }} class="text-zinc-400 hover:text-white text-xl">✕</button>
+        <button onclick={() => { stopScanner(); showAddModal = false; selectedFood = null; }} class="text-zinc-400 hover:text-white text-xl">✕</button>
       </div>
 
       {#if selectedFood}
@@ -844,7 +855,7 @@
         <!-- Tabs -->
         <div class="flex border-b border-zinc-800 shrink-0">
           {#each [['search', 'Search'], ['scan', 'Scan'], ['label', 'Label'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
-            <button onclick={() => { activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); }}
+            <button onclick={() => { if (activeTab === 'scan') stopScanner(); activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); }}
                     class="flex-1 py-2.5 text-xs font-medium transition-colors
                            {activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-zinc-500 hover:text-zinc-300'}">
               {label}
@@ -889,6 +900,8 @@
             <div class="p-4 space-y-4">
               {#if !scannerActive}
                 <button onclick={startScanner} class="btn-primary w-full">Open Camera</button>
+              {:else}
+                <button onclick={stopScanner} class="btn-ghost w-full text-sm">Close Camera</button>
               {/if}
               <div id="barcode-reader" class="rounded-xl overflow-hidden"></div>
               {#if scanError}
