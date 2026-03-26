@@ -155,6 +155,8 @@
   let showRecoveryPrompt = $state<Record<string, boolean>>({});
   // Track which exercises have shown the effort prompt (by uiId)
   let showEffortPrompt = $state<Record<string, boolean>>({});
+  // Track which exercises have had effort submitted (by exerciseId)
+  let effortSubmitted = $state<Set<number>>(new Set());
   // Stored feedback per exercise (by exerciseId)
   let feedbackData = $state<Record<number, {
     recovery_rating?: string;
@@ -178,8 +180,8 @@
 
   function shouldShowEffort(ex: UIExercise): boolean {
     const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped);
-    const hasFeedback = feedbackData[ex.exerciseId]?.rir != null;
-    return allDone && !hasFeedback && showEffortPrompt[ex.uiId] !== false;
+    const alreadySubmitted = effortSubmitted.has(ex.exerciseId);
+    return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
   }
 
   async function submitRecovery(ex: UIExercise, rating: string) {
@@ -201,7 +203,7 @@
   }
 
   async function submitEffort(ex: UIExercise, rir: number, pump: string) {
-    showEffortPrompt = { ...showEffortPrompt, [ex.uiId]: false };
+    effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
     const progression = $settings.progression;
 
     // Calculate suggestion based on performance + feedback
@@ -244,7 +246,7 @@
   }
 
   function dismissEffort(ex: UIExercise) {
-    showEffortPrompt = { ...showEffortPrompt, [ex.uiId]: false };
+    effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
   }
 
   // Workout clock
@@ -2645,7 +2647,7 @@
           {/if}
 
           <!-- Show saved feedback badge if already submitted -->
-          {#if feedbackData[ex.exerciseId]?.suggestion && !shouldShowEffort(ex)}
+          {#if feedbackData[ex.exerciseId]?.suggestion && effortSubmitted.has(ex.exerciseId)}
             <div class="mx-1 mb-1 px-3 py-1.5 rounded-lg bg-zinc-800/50 flex items-center justify-between text-xs">
               <span class="text-zinc-500">
                 {#if feedbackData[ex.exerciseId]?.recovery_rating}
