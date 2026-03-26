@@ -2136,7 +2136,11 @@
                   title="Swap for a different exercise"
                 >Swap</button>
                 <button
-                  onclick={() => removeExercise(ex.uiId)}
+                  onclick={() => {
+                    if (confirm(`Remove ${exercise?.display_name ?? 'this exercise'} and all its sets?`)) {
+                      removeExercise(ex.uiId);
+                    }
+                  }}
                   class="text-gray-600 hover:text-red-400 text-xl leading-none"
                   title="Remove exercise"
                 >✕</button>

@@ -7,7 +7,7 @@
   import type { AuthUser } from '$lib/api';
 
   const staticNavItems = [
-    { path: '/',          label: 'Home',      icon: '🏠' },
+    { path: '/',          label: 'Training',  icon: '🏋️' },
     { path: '/nutrition', label: 'Nutrition', icon: '🍽️' },
     { path: '/settings',  label: 'Settings',  icon: '⚙️' },
   ];
