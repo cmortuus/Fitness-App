@@ -1812,6 +1812,22 @@
         {/each}
       </div>
 
+      <!-- Session notes -->
+      <div class="mb-4">
+        <label class="text-xs text-zinc-500 block mb-1">Workout notes (optional)</label>
+        <textarea
+          placeholder="How did it feel? Energy level, sleep, anything notable..."
+          class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white resize-none"
+          style="font-size: 16px;"
+          rows="2"
+          oninput={(e) => {
+            // Save to localStorage keyed by session ID
+            const note = (e.target as HTMLTextAreaElement).value;
+            if (sessionId) localStorage.setItem(`hgt_session_note_${sessionId}`, note);
+          }}
+        ></textarea>
+      </div>
+
       <a href="/" class="btn-primary w-full text-center block">Back to Dashboard</a>
     </div>
   </div>
