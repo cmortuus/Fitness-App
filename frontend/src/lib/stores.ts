@@ -25,6 +25,11 @@ export interface MachineWeights {
   [key: string]: number;  // custom entries
 }
 
+export interface DashboardWidget {
+  id: string;
+  enabled: boolean;
+}
+
 export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
@@ -33,6 +38,7 @@ export interface AppSettings {
   profile: UserProfile;
   machineWeights: MachineWeights;
   maxWarmupSets: number; // max number of auto-generated warmup sets (default 4)
+  dashboardWidgets: DashboardWidget[];
 }
 
 const SETTINGS_KEY = 'hgt_settings';
@@ -77,15 +83,35 @@ const defaultSettings: AppSettings = {
     legCurl: 0,
   },
   maxWarmupSets: 4,
+  dashboardWidgets: [
+    { id: 'stats', enabled: true },
+    { id: 'nextWorkout', enabled: true },
+    { id: 'nutrition', enabled: true },
+    { id: 'insights', enabled: true },
+    { id: 'calendar', enabled: true },
+    { id: 'recentSessions', enabled: true },
+    { id: 'plans', enabled: true },
+    { id: 'repeatLast', enabled: false },
+    { id: 'pinnedCharts', enabled: false },
+  ],
 };
 
 function deepMergeSettings(stored: any): AppSettings {
+  // Merge dashboard widgets: preserve user order/enabled state, add any new widgets
+  const storedWidgets: DashboardWidget[] = stored.dashboardWidgets ?? [];
+  const storedIds = new Set(storedWidgets.map((w: DashboardWidget) => w.id));
+  const mergedWidgets = [
+    ...storedWidgets,
+    ...defaultSettings.dashboardWidgets.filter(w => !storedIds.has(w.id)),
+  ];
+
   return {
     ...defaultSettings,
     ...stored,
     restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
     profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
     machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
+    dashboardWidgets: mergedWidgets,
   };
 }
 
