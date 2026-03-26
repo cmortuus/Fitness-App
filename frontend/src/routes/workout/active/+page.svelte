@@ -8,6 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
+    saveExerciseFeedback,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -146,6 +147,107 @@
   let showCancelConfirm = $state(false);
   let cancelling = $state(false);
   // (showFinishWarning removed — finish button is disabled until all sets done)
+
+  // ─── Autoregulation feedback ──────────────────────────────────────────
+  // Track which muscle groups have been asked about recovery (only ask once per muscle per workout)
+  let recoveryAskedMuscles = $state<Set<string>>(new Set());
+  // Track which exercises have shown the recovery prompt (by uiId)
+  let showRecoveryPrompt = $state<Record<string, boolean>>({});
+  // Track which exercises have shown the effort prompt (by uiId)
+  let showEffortPrompt = $state<Record<string, boolean>>({});
+  // Track which exercises have had effort submitted (by exerciseId)
+  let effortSubmitted = $state<Set<number>>(new Set());
+  // Stored feedback per exercise (by exerciseId)
+  let feedbackData = $state<Record<number, {
+    recovery_rating?: string;
+    rir?: number;
+    pump_rating?: string;
+    suggestion?: string;
+    suggestion_detail?: string;
+  }>>({});
+
+  function getMuscleGroup(exerciseId: number): string {
+    const ex = allExercises.find(e => e.id === exerciseId);
+    return ex?.primary_muscles?.[0] ?? 'other';
+  }
+
+  function shouldShowRecovery(ex: UIExercise): boolean {
+    const muscle = getMuscleGroup(ex.exerciseId);
+    const firstSetDone = ex.sets.length > 0 && (ex.sets[0].done || ex.sets[0].skipped);
+    const notYetAsked = !recoveryAskedMuscles.has(muscle);
+    return firstSetDone && notYetAsked && showRecoveryPrompt[ex.uiId] !== false;
+  }
+
+  function shouldShowEffort(ex: UIExercise): boolean {
+    const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped);
+    const alreadySubmitted = effortSubmitted.has(ex.exerciseId);
+    return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
+  }
+
+  async function submitRecovery(ex: UIExercise, rating: string) {
+    const muscle = getMuscleGroup(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
+    feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], recovery_rating: rating } };
+    if (sessionId) {
+      try {
+        await saveExerciseFeedback(sessionId, { exercise_id: ex.exerciseId, recovery_rating: rating });
+      } catch (e) { console.error('Failed to save recovery feedback:', e); }
+    }
+  }
+
+  function dismissRecovery(ex: UIExercise) {
+    const muscle = getMuscleGroup(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
+  }
+
+  async function submitEffort(ex: UIExercise, rir: number, pump: string) {
+    effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
+    const progression = $settings.progression;
+
+    // Calculate suggestion based on performance + feedback
+    const recovery = feedbackData[ex.exerciseId]?.recovery_rating ?? 'good';
+    let suggestion = 'normal';
+    let detail = '';
+    const increment = getMuscleGroup(ex.exerciseId).match(/quad|hamstring|glute|calf/)
+      ? progression.lowerWeightIncrement
+      : progression.upperWeightIncrement;
+
+    if (rir >= 3 && (recovery === 'fresh' || recovery === 'good')) {
+      suggestion = 'aggressive';
+      detail = `Increase weight by ${increment} ${unit} and consider adding a set`;
+    } else if (rir >= 2 && recovery !== 'poor') {
+      suggestion = 'normal';
+      detail = `Increase weight by ${increment} ${unit}`;
+    } else if (rir >= 1 && recovery !== 'poor') {
+      suggestion = 'conservative';
+      detail = `Keep weight, aim for +1 rep next session`;
+    } else if (recovery === 'poor' && rir <= 1) {
+      suggestion = 'ease';
+      detail = `Hold steady — recovery needs time`;
+    } else {
+      suggestion = 'hold';
+      detail = `Repeat same prescription next session`;
+    }
+
+    feedbackData = {
+      ...feedbackData,
+      [ex.exerciseId]: { ...feedbackData[ex.exerciseId], rir, pump_rating: pump, suggestion, suggestion_detail: detail }
+    };
+
+    if (sessionId) {
+      try {
+        await saveExerciseFeedback(sessionId, {
+          exercise_id: ex.exerciseId, rir, pump_rating: pump, suggestion, suggestion_detail: detail,
+        });
+      } catch (e) { console.error('Failed to save effort feedback:', e); }
+    }
+  }
+
+  function dismissEffort(ex: UIExercise) {
+    effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
+  }
 
   // Workout clock
   let startedAt = $state<number>(0);
@@ -2470,6 +2572,93 @@
               {/if}
             </div>
           </div>
+
+          <!-- ── Recovery prompt (after first set of new muscle group) ── -->
+          {#if shouldShowRecovery(ex)}
+            {@const muscle = getMuscleGroup(ex.exerciseId)}
+            <div class="mx-1 mb-2 px-3 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <p class="text-xs text-blue-300 mb-2">How recovered is your <span class="font-semibold capitalize">{muscle}</span> from last session?</p>
+              <div class="flex gap-2">
+                {#each [['😩', 'poor', 'Poor'], ['😐', 'ok', 'OK'], ['💪', 'good', 'Good'], ['🔥', 'fresh', 'Fresh']] as [emoji, value, label]}
+                  <button
+                    onclick={() => submitRecovery(ex, value)}
+                    class="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-center transition-colors">
+                    <span class="text-base">{emoji}</span><br/>{label}
+                  </button>
+                {/each}
+                <button onclick={() => dismissRecovery(ex)}
+                        class="px-2 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 transition-colors">✕</button>
+              </div>
+            </div>
+          {/if}
+
+          <!-- ── Effort prompt (after all sets complete) ── -->
+          {#if shouldShowEffort(ex)}
+            {@const exercise = getEx(ex.exerciseId)}
+            <div class="mx-1 mb-2 px-3 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <p class="text-sm font-medium text-amber-300 mb-2">How was {exercise?.display_name ?? 'this exercise'}?</p>
+
+              <p class="text-xs text-zinc-400 mb-1.5">Reps in reserve (last set)?</p>
+              <div class="flex gap-1.5 mb-3">
+                {#each [0, 1, 2, 3, 4, 5] as rir}
+                  <button
+                    onclick={() => { feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], rir } }; }}
+                    class="flex-1 py-1.5 rounded-lg text-sm font-mono text-center transition-colors
+                           {feedbackData[ex.exerciseId]?.rir === rir ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                    {rir === 5 ? '5+' : rir}
+                  </button>
+                {/each}
+              </div>
+
+              <p class="text-xs text-zinc-400 mb-1.5">How was the pump?</p>
+              <div class="flex gap-1.5 mb-3">
+                {#each [['😐', 'none', 'None'], ['🙂', 'mild', 'Mild'], ['💪', 'good', 'Good'], ['🔥', 'great', 'Great']] as [emoji, value, label]}
+                  <button
+                    onclick={() => { feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], pump_rating: value } }; }}
+                    class="flex-1 py-1.5 rounded-lg text-xs text-center transition-colors
+                           {feedbackData[ex.exerciseId]?.pump_rating === value ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                    <span class="text-base">{emoji}</span><br/>{label}
+                  </button>
+                {/each}
+              </div>
+
+              {#if feedbackData[ex.exerciseId]?.rir != null && feedbackData[ex.exerciseId]?.pump_rating}
+                <div class="flex gap-2">
+                  <button
+                    onclick={() => submitEffort(ex, feedbackData[ex.exerciseId]!.rir!, feedbackData[ex.exerciseId]!.pump_rating!)}
+                    class="flex-1 btn-primary text-sm !py-2">Submit</button>
+                  <button onclick={() => dismissEffort(ex)}
+                          class="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">Skip</button>
+                </div>
+              {:else}
+                <div class="flex justify-end">
+                  <button onclick={() => dismissEffort(ex)}
+                          class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Skip</button>
+                </div>
+              {/if}
+
+              <!-- Show suggestion if already submitted -->
+              {#if feedbackData[ex.exerciseId]?.suggestion_detail}
+                <div class="mt-2 pt-2 border-t border-amber-500/20">
+                  <p class="text-xs text-amber-200">{feedbackData[ex.exerciseId]!.suggestion_detail}</p>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Show saved feedback badge if already submitted -->
+          {#if feedbackData[ex.exerciseId]?.suggestion && effortSubmitted.has(ex.exerciseId)}
+            <div class="mx-1 mb-1 px-3 py-1.5 rounded-lg bg-zinc-800/50 flex items-center justify-between text-xs">
+              <span class="text-zinc-500">
+                {#if feedbackData[ex.exerciseId]?.recovery_rating}
+                  Recovery: <span class="capitalize">{feedbackData[ex.exerciseId]!.recovery_rating}</span> ·
+                {/if}
+                RIR: {feedbackData[ex.exerciseId]!.rir} · Pump: <span class="capitalize">{feedbackData[ex.exerciseId]!.pump_rating}</span>
+              </span>
+              <span class="text-amber-400">{feedbackData[ex.exerciseId]!.suggestion_detail}</span>
+            </div>
+          {/if}
+
         {/each}
           </div>
         {/each}
