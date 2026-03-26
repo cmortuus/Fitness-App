@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { activeDietPhase, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl, settings } from '$lib/stores';
+  import { activeDietPhase, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl, settings, isOnline, pendingSyncCount, syncStatus } from '$lib/stores';
   import { getExercises, getLatestBodyWeight, getPlans, getActivePhase, isAuthenticated, getStoredUser, clearAuthTokens } from '$lib/api';
   import type { AuthUser } from '$lib/api';
 
@@ -49,6 +49,50 @@
     } catch (error) {
       console.error('Failed to load initial data:', error);
     }
+  });
+
+  // ── Offline detection + sync ──────────────────────────────────────────
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+
+    const goOnline = async () => {
+      isOnline.set(true);
+      // Auto-sync queued requests
+      try {
+        const { syncPendingRequests, getPendingCount } = await import('$lib/offline');
+        const count = await getPendingCount();
+        if (count > 0) {
+          syncStatus.set('syncing');
+          const result = await syncPendingRequests((done, total) => {
+            pendingSyncCount.set(total - done);
+          });
+          pendingSyncCount.set(0);
+          syncStatus.set(result.failed > 0 ? 'error' : 'idle');
+          if (result.synced > 0) {
+            console.info(`Synced ${result.synced} offline requests`);
+          }
+        }
+      } catch (e) {
+        console.error('Offline sync failed:', e);
+        syncStatus.set('error');
+      }
+    };
+
+    const goOffline = () => {
+      isOnline.set(false);
+    };
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+
+    // Check on mount
+    isOnline.set(navigator.onLine);
+    if (navigator.onLine) goOnline(); // sync any pending from last session
+
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
   });
 
   let keyboardOpen = $state(false);
@@ -138,6 +182,20 @@
   <main class="flex-1 w-full max-w-2xl mx-auto md:max-w-4xl">
     {@render children()}
   </main>
+
+  <!-- ── Offline banner ──────────────────────────────────────────────── -->
+  {#if !$isOnline}
+    <div class="fixed top-0 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium">
+      📡 Offline — changes will sync when reconnected
+      {#if $pendingSyncCount > 0}
+        <span class="ml-1 opacity-80">({$pendingSyncCount} pending)</span>
+      {/if}
+    </div>
+  {:else if $syncStatus === 'syncing'}
+    <div class="fixed top-0 left-0 right-0 z-50 bg-blue-600 text-white text-center text-xs py-1.5 font-medium">
+      🔄 Syncing offline changes... ({$pendingSyncCount} remaining)
+    </div>
+  {/if}
 
   <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
   <nav class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
