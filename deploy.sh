@@ -184,7 +184,7 @@ docker_deploy() {
     local tmpdir
     tmpdir=$(mktemp -d)
     git archive origin/dev | tar -x -C "$tmpdir"
-    docker build -t fitness-app-dev "$tmpdir"
+    docker build -t gymtracker-dev:latest "$tmpdir"
     rm -rf "$tmpdir"
     docker compose up -d --no-build dev
     docker_health_check_async dev
@@ -211,7 +211,7 @@ docker_deploy() {
     local tmpdir
     tmpdir=$(mktemp -d)
     git archive origin/dev | tar -x -C "$tmpdir"
-    docker build -t fitness-app-dev "$tmpdir"
+    docker build -t gymtracker-dev:latest "$tmpdir"
     rm -rf "$tmpdir"
 
     docker compose up -d --no-build
