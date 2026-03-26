@@ -25,6 +25,16 @@ export interface MachineWeights {
   [key: string]: number;  // custom entries
 }
 
+export interface ProgressionSettings {
+  trainingLevel: 'beginner' | 'intermediate' | 'advanced';
+  upperWeightIncrement: number;  // lbs
+  lowerWeightIncrement: number;  // lbs
+  maxSetsPerExercise: number;
+  setsAddedPerCycle: number;
+  minRepsForIncrease: number;
+  maxRepsForIncrease: number;
+}
+
 export interface DashboardWidget {
   id: string;
   enabled: boolean;
@@ -37,7 +47,8 @@ export interface AppSettings {
   progressionStyle: 'rep' | 'weight';
   profile: UserProfile;
   machineWeights: MachineWeights;
-  maxWarmupSets: number; // max number of auto-generated warmup sets (default 4)
+  maxWarmupSets: number;
+  progression: ProgressionSettings;
   dashboardWidgets: DashboardWidget[];
 }
 
@@ -95,6 +106,15 @@ const defaultSettings: AppSettings = {
     { id: 'repeatLast', enabled: false },
     { id: 'pinnedCharts', enabled: false },
   ],
+  progression: {
+    trainingLevel: 'intermediate',
+    upperWeightIncrement: 2.5,
+    lowerWeightIncrement: 5,
+    maxSetsPerExercise: 6,
+    setsAddedPerCycle: 1,
+    minRepsForIncrease: 8,
+    maxRepsForIncrease: 12,
+  },
 };
 
 function deepMergeSettings(stored: any): AppSettings {
@@ -112,6 +132,7 @@ function deepMergeSettings(stored: any): AppSettings {
     restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
     profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
     machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
+    progression: { ...defaultSettings.progression, ...(stored.progression ?? {}) },
     dashboardWidgets: mergedWidgets,
   };
 }

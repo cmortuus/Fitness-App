@@ -811,4 +811,26 @@ export async function cloneTemplate(id: number): Promise<{ id: number; name: str
   return response.data;
 }
 
+// ── Exercise feedback (autoregulation) ──────────────────────────────────────
+
+export interface ExerciseFeedbackData {
+  exercise_id: number;
+  recovery_rating?: 'poor' | 'ok' | 'good' | 'fresh';
+  rir?: number;
+  pump_rating?: 'none' | 'mild' | 'good' | 'great';
+  suggestion?: string;
+  suggestion_detail?: string;
+  suggestion_accepted?: boolean;
+}
+
+export async function saveExerciseFeedback(sessionId: number, data: ExerciseFeedbackData): Promise<any> {
+  const response = await api.post(`/sessions/${sessionId}/feedback`, data);
+  return response.data;
+}
+
+export async function getExerciseFeedback(sessionId: number): Promise<any[]> {
+  const response = await api.get(`/sessions/${sessionId}/feedback`);
+  return response.data;
+}
+
 export default api;
