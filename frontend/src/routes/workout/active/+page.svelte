@@ -151,6 +151,8 @@
   let startedAt = $state<number>(0);
   let elapsed = $state(0);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
+  let clockPaused = $state(false);
+  let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
@@ -1172,6 +1174,8 @@
 
   /** Play a short chime using Web Audio API (no audio file needed) */
   function playRestChime() {
+    // Haptic feedback
+    try { navigator.vibrate?.([200, 100, 200]); } catch {}
     try {
       const ctx = new AudioContext();
       // Two-tone chime: C5 then E5
@@ -1816,7 +1820,23 @@
         <div class="flex-1 min-w-0">
           <h1 class="text-sm font-semibold truncate text-zinc-200">{workoutName}</h1>
           <div class="flex items-center gap-3 mt-0.5">
-            <span class="text-base font-mono font-bold text-primary-400">{formatClock(elapsed)}</span>
+            <button
+              onclick={() => {
+                if (clockPaused) {
+                  // Resume: add pause duration to offset
+                  pauseOffset += Date.now() - (startedAt + (elapsed * 1000) + pauseOffset);
+                  clockInterval = setInterval(() => {
+                    elapsed = Math.max(0, Math.floor((Date.now() - startedAt - pauseOffset) / 1000));
+                  }, 1000);
+                } else {
+                  // Pause: stop the clock
+                  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+                }
+                clockPaused = !clockPaused;
+              }}
+              class="text-base font-mono font-bold {clockPaused ? 'text-amber-400 animate-pulse' : 'text-primary-400'}"
+              title={clockPaused ? 'Resume timer' : 'Pause timer'}
+            >{formatClock(elapsed)}{clockPaused ? ' ⏸' : ''}</button>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
           </div>
         </div>
@@ -1877,9 +1897,26 @@
                     <span class="ml-2 text-green-400 text-sm">✓</span>
                   {/if}
                 </h3>
-                {#if exercise?.primary_muscles?.length}
-                  <p class="text-xs text-zinc-500 mt-0.5 capitalize">{muscleLabel(ex.exerciseId)}</p>
-                {/if}
+                <div class="flex items-center gap-2 mt-0.5">
+                  {#if exercise?.primary_muscles?.length}
+                    <p class="text-xs text-zinc-500 capitalize">{muscleLabel(ex.exerciseId)}</p>
+                  {/if}
+                  <button
+                    onclick={() => {
+                      const current = restDurationForExercise(ex.uiId);
+                      const input = prompt(`Rest time for this exercise (seconds):`, String(current));
+                      if (input != null) {
+                        const val = parseInt(input);
+                        if (!isNaN(val) && val > 0) {
+                          ex.customRestSecs = val;
+                          uiExercises = [...uiExercises];
+                        }
+                      }
+                    }}
+                    class="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                    title="Tap to override rest time for this exercise"
+                  >⏱ {Math.floor(restDurationForExercise(ex.uiId) / 60)}:{String(restDurationForExercise(ex.uiId) % 60).padStart(2, '0')}{ex.customRestSecs != null ? ' ✎' : ''}</button>
+                </div>
                 <!-- Persistent exercise note -->
                 {#if editingNoteId === ex.exerciseId}
                   <div class="flex gap-1 mt-1">
