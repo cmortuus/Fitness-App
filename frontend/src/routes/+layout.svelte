@@ -9,7 +9,6 @@
   const staticNavItems = [
     { path: '/',          label: 'Home',      icon: '🏠' },
     { path: '/nutrition', label: 'Nutrition', icon: '🍽️' },
-    { path: '/calendar',  label: 'Log',       icon: '📅' },
     { path: '/settings',  label: 'Settings',  icon: '⚙️' },
   ];
 
