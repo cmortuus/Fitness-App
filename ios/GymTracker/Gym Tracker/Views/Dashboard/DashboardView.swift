@@ -9,6 +9,7 @@ struct DashboardView: View {
     @State private var weekCount = 0
     @State private var latestBodyWeight: BodyWeightEntry?
     @State private var nutritionSummary: DailySummary?
+    @State private var nextDay = 1
 
     private var todayString: String {
         let df = DateFormatter()
@@ -36,7 +37,7 @@ struct DashboardView: View {
 
                         // Next workout
                         if let plan = plans.first {
-                            NextWorkoutCard(plan: plan)
+                            NextWorkoutCard(plan: plan, nextDay: nextDay, totalDays: plan.dayCount)
                         }
 
                         // Today's nutrition snapshot
@@ -260,6 +261,17 @@ struct DashboardView: View {
             plans = try await p
             let allSessions = try await s
             recentSessions = allSessions.filter { $0.status == "completed" }
+
+            // Calculate next day number
+            if let plan = plans.first {
+                let planSessions = allSessions.filter {
+                    $0.status == "completed" && $0.workout_plan_id == plan.id
+                }
+                let totalDays = plan.dayCount
+                if totalDays > 0 {
+                    nextDay = (planSessions.count % totalDays) + 1
+                }
+            }
             streak = calculateStreak(allSessions)
             weekCount = countThisWeek(allSessions)
             latestBodyWeight = try await bw
@@ -277,6 +289,8 @@ struct DashboardView: View {
 
 struct NextWorkoutCard: View {
     let plan: WorkoutPlan
+    let nextDay: Int
+    let totalDays: Int
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -285,9 +299,12 @@ struct NextWorkoutCard: View {
                 .foregroundStyle(.secondary)
             Text(plan.name)
                 .font(.title3.bold())
+            Text("Day \(nextDay) of \(totalDays)")
+                .font(.caption)
+                .foregroundStyle(.blue)
 
             NavigationLink("Start Workout") {
-                ActiveWorkoutView(planId: plan.id, planName: plan.name)
+                ActiveWorkoutView(planId: plan.id, planName: plan.name, dayNumber: nextDay)
             }
             .buttonStyle(.borderedProminent)
         }

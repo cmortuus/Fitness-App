@@ -7,6 +7,7 @@ import UserNotifications
 struct ActiveWorkoutView: View {
     let planId: Int
     let planName: String
+    var dayNumber: Int = 1
 
     @Environment(\.dismiss) var dismiss
     @State private var sessionId: Int?
@@ -698,7 +699,12 @@ struct ActiveWorkoutView: View {
             } else {
                 do {
                     response = try await APIClient.shared.post(
-                        "/sessions/from-plan/\(planId)", body: nil as String?
+                        "/sessions/from-plan/\(planId)",
+                        body: nil as String?,
+                        queryItems: [
+                            .init(name: "day_number", value: "\(dayNumber)"),
+                            .init(name: "overload_style", value: "rep"),
+                        ]
                     )
                 } catch APIError.httpError(409, let body) {
                     if let data = body?.data(using: .utf8),

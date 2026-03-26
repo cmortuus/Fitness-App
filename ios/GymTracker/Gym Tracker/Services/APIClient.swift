@@ -111,8 +111,8 @@ final class APIClient: Sendable {
         try await request("GET", path: path, queryItems: query)
     }
 
-    func post<T: Decodable>(_ path: String, body: (any Encodable)? = nil) async throws -> T {
-        try await request("POST", path: path, body: body)
+    func post<T: Decodable>(_ path: String, body: (any Encodable)? = nil, queryItems: [URLQueryItem]? = nil) async throws -> T {
+        try await request("POST", path: path, body: body, queryItems: queryItems)
     }
 
     func patch<T: Decodable>(_ path: String, body: (any Encodable)? = nil) async throws -> T {
