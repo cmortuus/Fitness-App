@@ -1087,12 +1087,12 @@
     else set.doneRight = true;
     uiExercises = [...uiExercises];
 
-    // Start rest timer (group-aware for supersets/circuits)
-    handlePostSetCompletion(exUiId);
-
-    // If both sides are now resolved, trigger the full backend save
+    // Auto-complete when both sides done
     if (set.doneLeft && set.doneRight) {
       await completeSet(exUiId, localId);
+    } else {
+      // Only start rest timer, don't complete
+      handlePostSetCompletion(exUiId);
     }
   }
 
@@ -2176,9 +2176,11 @@
 
             <!-- Column headers — adapt to unilateral / assisted mode -->
             {#if ex.isUnilateral}
-              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 2.5rem">
+              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 5.5rem 1.5rem">
                 <span class="text-xs text-zinc-500 text-center">Type</span>
                 <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Weight (${unit})`}</span>
+                <span class="text-xs text-zinc-500 text-center">Reps</span>
+                <span></span>
                 <span></span>
               </div>
             {:else}
@@ -2194,187 +2196,155 @@
             <div class="space-y-2 px-4 pb-4">
               {#each ex.sets as set (set.localId)}
                 {#if ex.isUnilateral}
-                  <!-- ── Unilateral row ─────────────────────────────── -->
+                  <!-- ── Unilateral row (two bilateral-style rows per set) ── -->
                   <div
                     use:swipeable={{
                       onSwipeLeft: () => { if (!set.done && !set.skipped) skipSet(ex.uiId, set.localId); },
                       onSwipeRight: () => { if (!set.done) removeSet(ex.uiId, set.localId); },
                       disabled: set.done || set.skipped,
                     }}
-                    class="space-y-1.5 pb-2 mb-1 border-b border-zinc-800/30 last:border-0 {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
+                    class="pb-2 mb-1 border-b border-zinc-800/30 last:border-0 space-y-1 {set.done ? 'opacity-50' : set.skipped ? 'opacity-30' : ''}"
                   >
-                  <!-- Row 1: Type + Weight -->
-                  <div class="grid gap-2 items-center" style="grid-template-columns: 4.5rem 1fr 2.5rem">
-                    <select
-                      value={set.setType || 'standard'}
-                      onchange={(e) => {
-                        set.setType = (e.target as HTMLSelectElement).value;
-                        syncMyoMatchSets(ex);
-                        uiExercises = [...uiExercises];
-                        if (set.backendId && sessionId) {
-                          updateSet(sessionId, set.backendId, { set_type: set.setType }).catch(() => {});
-                        }
-                      }}
-                      disabled={set.done || isMyoMatchLocked(ex, set)}
-                      class="set-type-select w-full
-                             {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
-                              set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
-                              set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
-                              set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
-                              'text-zinc-400'}">
-                      <option value="standard">Straight</option>
-                      <option value="warmup">Warmup</option>
-                      <option value="myo_rep">Myo Rep</option>
-                      {#if ex.sets.indexOf(set) > 0}
-                        <option value="myo_rep_match">Myo Match</option>
-                      {/if}
-                      <option value="drop_set">Drop Set</option>
-                    </select>
+                    {#each ['left', 'right'] as side}
+                      {@const sideDone = side === 'left' ? set.doneLeft : set.doneRight}
+                      {@const sideReps = side === 'left' ? set.repsLeft : set.repsRight}
+                      <div class="grid gap-2 items-center {sideDone ? 'opacity-60' : ''}"
+                           style="grid-template-columns: 4.5rem 1fr 1fr 5.5rem 1.5rem">
 
-                    <!-- Weight / Assist -->
-                    <div class="flex flex-col gap-0.5">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
-                        oninput={(e) => {
-                          const raw = (e.target as HTMLInputElement).value;
-                          const val = raw === '' ? null : Math.abs(parseFloat(raw));
-                          const oldWeight = set.weightLbs;
-                          set.weightLbs = val;
-                          // Epley: always update rep suggestion for this set
-                          if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
-                            const r = epleyReps(set.oneRM, val);
-                            set.repsLeft = r;
-                            set.repsRight = r;
-                          }
-                          // Propagate to subsequent sets only while each next set
-                          // had the same weight as the set just edited (chain stops at first mismatch)
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            const s = ex.sets[i];
-                            if (!s.done && s.weightLbs === oldWeight) {
-                              s.weightLbs = val;
-                              if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
-                                const r = epleyReps(s.oneRM, val);
-                                s.repsLeft = r;
-                                s.repsRight = r;
+                        <!-- Type dropdown (synced between L/R) -->
+                        <select
+                          value={set.setType || 'standard'}
+                          onchange={(e) => {
+                            set.setType = (e.target as HTMLSelectElement).value;
+                            syncMyoMatchSets(ex);
+                            uiExercises = [...uiExercises];
+                            if (set.backendId && sessionId) {
+                              updateSet(sessionId, set.backendId, { set_type: set.setType }).catch(() => {});
+                            }
+                          }}
+                          disabled={set.done || sideDone || isMyoMatchLocked(ex, set)}
+                          class="set-type-select w-full
+                                 {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
+                                  set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                                  set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
+                                  set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                                  'text-zinc-400'}">
+                          <option value="standard">Straight</option>
+                          <option value="warmup">Warmup</option>
+                          <option value="myo_rep">Myo Rep</option>
+                          {#if ex.sets.indexOf(set) > 0}
+                            <option value="myo_rep_match">Myo Match</option>
+                          {/if}
+                          <option value="drop_set">Drop Set</option>
+                        </select>
+
+                        <!-- Weight (shared between L/R) -->
+                        <div class="flex flex-col gap-0.5">
+                          <input
+                            type="number" inputmode="decimal"
+                            value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
+                            oninput={(e) => {
+                              const raw = (e.target as HTMLInputElement).value;
+                              const val = raw === '' ? null : Math.abs(parseFloat(raw));
+                              const oldWeight = set.weightLbs;
+                              set.weightLbs = val;
+                              if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
+                                const r = epleyReps(set.oneRM, val);
+                                set.repsLeft = r;
+                                set.repsRight = r;
                               }
-                            } else { break; }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
-                        placeholder={isAssistedEx ? `-assist` : unit}
-                        class="set-input"
-                      />
-                      {#if isAssistedEx && set.weightLbs !== null}
-                        <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
-                        {@const bw = getBarWeight(exercise)}
-                        {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                        {/if}
-                      {/if}
-                      {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
-                        {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
-                        {#if estReps < 5}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
-                        {:else if estReps > 30}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
-                        {:else}
-                          <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
-                        {/if}
-                        {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
-                        {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
-                        <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
-                      {/if}
-                    </div>
-                    <!-- Skip button on weight row -->
-                    <div class="flex items-center justify-center">
-                      {#if set.done}
-                        <button onclick={() => uncompleteSet(ex.uiId, set.localId)}
-                                class="text-green-500 text-sm" title="Undo — mark as incomplete">✓</button>
-                      {:else if set.skipped}
-                        <button onclick={() => unskipSet(ex.uiId, set.localId)}
-                                class="text-zinc-500 text-sm" title="Undo skip">↩</button>
-                      {:else}
-                        <button onclick={() => skipSet(ex.uiId, set.localId)}
-                                class="text-zinc-600 hover:text-zinc-400 text-xs" title="Skip this set">Skip</button>
-                      {/if}
-                    </div>
-                  </div>
+                              const idx = ex.sets.indexOf(set);
+                              for (let i = idx + 1; i < ex.sets.length; i++) {
+                                const s = ex.sets[i];
+                                if (!s.done && s.weightLbs === oldWeight) {
+                                  s.weightLbs = val;
+                                  if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
+                                    const r = epleyReps(s.oneRM, val);
+                                    s.repsLeft = r;
+                                    s.repsRight = r;
+                                  }
+                                } else { break; }
+                              }
+                              uiExercises = [...uiExercises];
+                            }}
+                            disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
+                            placeholder={isAssistedEx ? `-assist` : unit}
+                            class="set-input"
+                          />
+                          {#if side === 'left'}
+                            {#if isAssistedEx && set.weightLbs !== null}
+                              <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
+                            {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
+                              {@const bw = getBarWeight(exercise)}
+                              {#if set.weightLbs > bw}
+                                <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
+                              {/if}
+                            {/if}
+                            {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                              {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
+                              {#if estReps < 5}
+                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
+                              {:else if estReps > 30}
+                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
+                              {:else}
+                                <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
+                              {/if}
+                              {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
+                              {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
+                              <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
+                            {/if}
+                          {/if}
+                        </div>
 
-                  <!-- Row 2: Left + Right reps with check buttons -->
-                  <div class="grid gap-2 items-center ml-1" style="grid-template-columns: 1fr auto 1fr auto">
-                    <!-- Left reps + L✓ -->
-                    <div class="flex gap-1 items-center">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={set.repsLeft ?? ''}
-                        oninput={(e) => {
-                          const v = (e.target as HTMLInputElement).value;
-                          const r = v === '' ? null : parseInt(v);
-                          set.repsLeft = r;
-                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                            const newW = epleyWeight(set.oneRM, r);
-                            set.weightLbs = newW;
-                            const idx = ex.sets.indexOf(set);
-                            for (let i = idx + 1; i < ex.sets.length; i++) {
-                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                        <!-- Reps (side-specific) -->
+                        <input
+                          type="number" inputmode="decimal"
+                          value={sideReps ?? ''}
+                          oninput={(e) => {
+                            const v = (e.target as HTMLInputElement).value;
+                            const r = v === '' ? null : parseInt(v);
+                            if (side === 'left') set.repsLeft = r;
+                            else set.repsRight = r;
+                            if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                              const newW = epleyWeight(set.oneRM, r);
+                              set.weightLbs = newW;
+                              const idx = ex.sets.indexOf(set);
+                              for (let i = idx + 1; i < ex.sets.length; i++) {
+                                if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                              }
                             }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
-                        class="set-input flex-1 {set.doneLeft && !set.done ? 'opacity-50' : ''}"
-                      />
-                      {#if !set.saving && !set.skipped && !set.done}
-                        {#if set.doneLeft}
-                          <button onclick={() => undoSide(ex.uiId, set.localId, 'left')}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
-                        {:else}
-                          <button onclick={() => completeSide(ex.uiId, set.localId, 'left')}
-                                  disabled={(set.repsLeft ?? 0) <= 0}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
-                        {/if}
-                      {/if}
-                    </div>
+                            uiExercises = [...uiExercises];
+                          }}
+                          disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min="0"
+                          placeholder={side === 'left' ? 'L' : 'R'}
+                          class="set-input"
+                        />
 
-                    <!-- Right reps + R✓ -->
-                    <div class="flex gap-1 items-center">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={set.repsRight ?? ''}
-                        oninput={(e) => {
-                          const v = (e.target as HTMLInputElement).value;
-                          const r = v === '' ? null : parseInt(v);
-                          set.repsRight = r;
-                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                            const newW = epleyWeight(set.oneRM, r);
-                            set.weightLbs = newW;
-                            const idx = ex.sets.indexOf(set);
-                            for (let i = idx + 1; i < ex.sets.length; i++) {
-                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
-                            }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
-                        class="set-input flex-1 {set.doneRight && !set.done ? 'opacity-50' : ''}"
-                      />
-                      {#if !set.saving && !set.skipped && !set.done}
-                        {#if set.doneRight}
-                          <button onclick={() => undoSide(ex.uiId, set.localId, 'right')}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
-                        {:else}
-                          <button onclick={() => completeSide(ex.uiId, set.localId, 'right')}
-                                  disabled={(set.repsRight ?? 0) <= 0}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
-                        {/if}
-                      {/if}
-                    </div>
+                        <!-- Complete/Skip buttons (per-side) -->
+                        <div class="flex gap-1.5 justify-center">
+                          {#if set.saving}
+                            <span class="text-zinc-400 text-xs">…</span>
+                          {:else if sideDone}
+                            <button onclick={() => undoSide(ex.uiId, set.localId, side)}
+                                    title="Undo — mark as incomplete"
+                                    class="h-10 w-10 rounded-xl bg-green-700/30 text-green-400 font-bold text-lg">✓</button>
+                          {:else if set.skipped}
+                            <button onclick={() => unskipSet(ex.uiId, set.localId)}
+                                    class="h-10 px-2 rounded-xl bg-amber-600/20 text-amber-400 text-xs font-semibold">Undo</button>
+                          {:else}
+                            <button onclick={() => completeSide(ex.uiId, set.localId, side)}
+                                    disabled={(sideReps ?? 0) <= 0}
+                                    title="Log this set"
+                                    class="h-10 w-10 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold transition-colors disabled:opacity-30">✓</button>
+                            <button onclick={() => skipSet(ex.uiId, set.localId)}
+                                    class="h-10 px-2 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium">Skip</button>
+                          {/if}
+                        </div>
 
-                  </div>
+                        <!-- Side label -->
+                        <span class="text-xs text-zinc-500 font-semibold text-center">{side === 'left' ? 'L' : 'R'}</span>
+                      </div>
+                    {/each}
                   </div>
                   <!-- Rep range advisories (unilateral) -->
                   {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
