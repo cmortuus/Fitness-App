@@ -1,12 +1,15 @@
 import SwiftUI
+import Observation
+import Security
 
 /// Handles authentication — login, signup, token storage, and refresh
+@Observable
 @MainActor
-class AuthService: ObservableObject {
+class AuthService {
     static let shared = AuthService()
 
-    @Published var isAuthenticated = false
-    @Published var currentUser: User?
+    var isAuthenticated = false
+    var currentUser: User?
 
     private(set) var accessToken: String?
     private var refreshToken: String?
