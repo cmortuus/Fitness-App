@@ -723,7 +723,7 @@
       </a>
     </div>
     <div class="grid grid-cols-2 gap-3">
-      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+      <a href="/body" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
         <p class="text-xs text-zinc-500">Body Weight</p>
         <p class="text-sm font-semibold text-primary-400 mt-0.5">Trend →</p>
       </a>
@@ -731,13 +731,21 @@
         <p class="text-xs text-zinc-500">Est. 1RM</p>
         <p class="text-sm font-semibold text-green-400 mt-0.5">All Lifts →</p>
       </a>
-      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+      <a href="/volume" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
         <p class="text-xs text-zinc-500">Volume</p>
         <p class="text-sm font-semibold text-amber-400 mt-0.5">Weekly →</p>
       </a>
-      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+      <a href="/records" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
         <p class="text-xs text-zinc-500">Records</p>
         <p class="text-sm font-semibold text-purple-400 mt-0.5">PRs →</p>
+      </a>
+      <a href="/compare" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-xs text-zinc-500">Compare</p>
+        <p class="text-sm font-semibold text-cyan-400 mt-0.5">Side by Side →</p>
+      </a>
+      <a href="/calculator" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-xs text-zinc-500">Calculator</p>
+        <p class="text-sm font-semibold text-rose-400 mt-0.5">1RM →</p>
       </a>
     </div>
   </div>

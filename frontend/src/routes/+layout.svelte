@@ -39,13 +39,13 @@
       const [exercisesData, plansData, latestBW, phase] = await Promise.all([
         getExercises(),
         getPlans(),
-        getLatestBodyWeight(),
-        getActivePhase(),
+        getLatestBodyWeight().catch(() => null),
+        getActivePhase().catch(() => null),
       ]);
       exercises.set(exercisesData);
       workoutPlans.set(plansData);
-      latestBodyWeight.set(latestBW);
-      activeDietPhase.set(phase);
+      if (latestBW) latestBodyWeight.set(latestBW);
+      if (phase) activeDietPhase.set(phase);
     } catch (error) {
       console.error('Failed to load initial data:', error);
     }
