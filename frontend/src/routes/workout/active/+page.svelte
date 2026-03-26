@@ -145,6 +145,7 @@
   let editingNoteId = $state<number | null>(null);
   let editingNoteText = $state('');
   let focusedWeightSetId = $state<string | null>(null);
+  let focusedExerciseId = $state<number | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
   let summaryCardEl: HTMLDivElement;
@@ -325,6 +326,7 @@
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
+    if (!$settings.showPlateMath) return false;
     if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
     // Fallback: check name prefix for exercises that haven't been re-seeded yet
     const n = exercise.name?.toLowerCase() ?? '';
@@ -341,6 +343,34 @@
     const n = exercise.name?.toLowerCase() ?? '';
     return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
   }
+
+  // Derived: plate banner data for the currently focused weight input
+  let plateBanner = $derived.by(() => {
+    if (!focusedWeightSetId || !focusedExerciseId) return null;
+    for (const ex of uiExercises) {
+      if (ex.exerciseId !== focusedExerciseId) continue;
+      const exercise = allExercises.find((e: Exercise) => e.id === ex.exerciseId);
+      if (!exercise || !shouldShowPlates(exercise)) return null;
+      for (let i = 0; i < ex.sets.length; i++) {
+        const set = ex.sets[i];
+        if (set.localId === focusedWeightSetId) {
+          const bw = getBarWeight(exercise);
+          const weight = set.weightLbs ?? 0;
+          if (weight <= bw) return null;
+          // Previous set weight for delta display
+          const prevWeight = i > 0 ? (ex.sets[i - 1].weightLbs ?? null) : null;
+          return {
+            totalWeight: weight,
+            barWeight: bw,
+            isLbs: $settings.weightUnit === 'lbs',
+            oneSided: isOneSidedPlateExercise(exercise),
+            prevWeight: prevWeight && prevWeight > bw ? prevWeight : null,
+          };
+        }
+      }
+    }
+    return null;
+  });
 
   /** Get bar/sled weight for plate math. Uses display base if set, else actual weight. */
   function getBarWeight(exercise: Exercise | undefined): number {
@@ -2318,18 +2348,12 @@
                             disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                             placeholder={isAssistedEx ? `-assist` : unit}
                             class="set-input"
-                            onfocus={() => { focusedWeightSetId = set.localId; }}
-                            onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
+                            onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
+                            onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
                           />
                           {#if side === 'left'}
                             {#if isAssistedEx && set.weightLbs !== null}
                               <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                            {/if}
-                            {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
-                              {@const bw = getBarWeight(exercise)}
-                              {#if set.weightLbs > bw}
-                                <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                              {/if}
                             {/if}
                             {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
@@ -2503,17 +2527,11 @@
                         disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                         placeholder={isAssistedEx ? `-assist` : unit}
                         class="set-input"
-                        onfocus={() => { focusedWeightSetId = set.localId; }}
-                        onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
+                        onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
+                        onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {/if}
-                      {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
-                        {@const bw = getBarWeight(exercise)}
-                        {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                        {/if}
                       {/if}
                       {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
@@ -3015,5 +3033,18 @@
       <p class="text-sm text-white/90">{prCelebration.exercise}</p>
       <p class="text-xl font-bold text-white mt-1">{prCelebration.value}</p>
     </div>
+  </div>
+{/if}
+
+<!-- Fixed plate math banner — sits above the on-screen keyboard -->
+{#if plateBanner}
+  <div class="fixed bottom-0 left-0 right-0 z-40 bg-zinc-900/95 border-t border-zinc-700 px-4 py-2 backdrop-blur-sm">
+    <PlateVisual
+      totalWeight={plateBanner.totalWeight}
+      barWeight={plateBanner.barWeight}
+      isLbs={plateBanner.isLbs}
+      oneSided={plateBanner.oneSided}
+      prevWeight={plateBanner.prevWeight}
+    />
   </div>
 {/if}
