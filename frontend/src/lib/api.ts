@@ -61,7 +61,26 @@ api.interceptors.response.use(
     } else if (error.response) {
       console.error('API Error:', error.response.status, error.response.data);
     } else if (error.request) {
-      console.error('Network Error: No response received');
+      // Network error — queue write requests for offline sync
+      const method = error.config?.method?.toUpperCase();
+      if (method && ['PATCH', 'POST', 'PUT', 'DELETE'].includes(method) && error.config?.url) {
+        try {
+          const { queueRequest, getPendingCount } = await import('$lib/offline');
+          const { isOnline, pendingSyncCount } = await import('$lib/stores');
+          const fullUrl = `/api${error.config.url}`;
+          await queueRequest(method, fullUrl, error.config.data ? JSON.parse(error.config.data) : null);
+          const count = await getPendingCount();
+          pendingSyncCount.set(count);
+          isOnline.set(false);
+          console.info(`Offline: queued ${method} ${error.config.url} (${count} pending)`);
+          // Return a fake success response so the UI doesn't show an error
+          return { data: {}, status: 200, statusText: 'Queued (offline)' };
+        } catch (queueErr) {
+          console.error('Failed to queue offline request:', queueErr);
+        }
+      } else {
+        console.error('Network Error: No response received');
+      }
     } else {
       console.error('Request Error:', error.message);
     }

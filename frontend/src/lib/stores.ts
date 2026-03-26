@@ -202,6 +202,11 @@ function createSettingsStore() {
 
 export const settings = createSettingsStore();
 
+// ─── Offline state ───────────────────────────────────────────────────────────
+export const isOnline = writable(typeof navigator !== 'undefined' ? navigator.onLine : true);
+export const pendingSyncCount = writable(0);
+export const syncStatus = writable<'idle' | 'syncing' | 'error'>('idle');
+
 // Current workout session
 export const currentSession = writable<WorkoutSession | null>(null);
 
