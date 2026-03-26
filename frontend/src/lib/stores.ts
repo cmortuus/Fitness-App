@@ -49,6 +49,7 @@ export interface AppSettings {
   machineWeights: MachineWeights;
   maxWarmupSets: number;
   progression: ProgressionSettings;
+  plateMathEnabled: boolean;
   dashboardWidgets: DashboardWidget[];
 }
 
@@ -94,6 +95,7 @@ const defaultSettings: AppSettings = {
     legCurl: 0,
   },
   maxWarmupSets: 4,
+  plateMathEnabled: true,
   dashboardWidgets: [
     { id: 'stats', enabled: true },
     { id: 'nextWorkout', enabled: true },

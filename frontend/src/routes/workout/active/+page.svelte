@@ -292,6 +292,7 @@
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
+    if ($settings.plateMathEnabled === false) return false;
     if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
     // Fallback: check name prefix for exercises that haven't been re-seeded yet
     const n = exercise.name?.toLowerCase() ?? '';
@@ -2246,62 +2247,37 @@
                         </select>
 
                         <!-- Weight (shared between L/R) -->
-                        <div class="flex flex-col gap-0.5">
-                          <input
-                            type="number" inputmode="decimal"
-                            value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
-                            oninput={(e) => {
-                              const raw = (e.target as HTMLInputElement).value;
-                              const val = raw === '' ? null : Math.abs(parseFloat(raw));
-                              const oldWeight = set.weightLbs;
-                              set.weightLbs = val;
-                              if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
-                                const r = epleyReps(set.oneRM, val);
-                                set.repsLeft = r;
-                                set.repsRight = r;
-                              }
-                              const idx = ex.sets.indexOf(set);
-                              for (let i = idx + 1; i < ex.sets.length; i++) {
-                                const s = ex.sets[i];
-                                if (!s.done && s.weightLbs === oldWeight) {
-                                  s.weightLbs = val;
-                                  if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
-                                    const r = epleyReps(s.oneRM, val);
-                                    s.repsLeft = r;
-                                    s.repsRight = r;
-                                  }
-                                } else { break; }
-                              }
-                              uiExercises = [...uiExercises];
-                            }}
-                            disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
-                            placeholder={isAssistedEx ? `-assist` : unit}
-                            class="set-input"
-                          />
-                          {#if side === 'left'}
-                            {#if isAssistedEx && set.weightLbs !== null}
-                              <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                            {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
-                              {@const bw = getBarWeight(exercise)}
-                              {#if set.weightLbs > bw}
-                                <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                              {/if}
-                            {/if}
-                            {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
-                              {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
-                              {#if estReps < 5}
-                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
-                              {:else if estReps > 30}
-                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
-                              {:else}
-                                <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
-                              {/if}
-                              {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
-                              {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
-                              <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
-                            {/if}
-                          {/if}
-                        </div>
+                        <input
+                          type="number" inputmode="decimal"
+                          value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
+                          oninput={(e) => {
+                            const raw = (e.target as HTMLInputElement).value;
+                            const val = raw === '' ? null : Math.abs(parseFloat(raw));
+                            const oldWeight = set.weightLbs;
+                            set.weightLbs = val;
+                            if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
+                              const r = epleyReps(set.oneRM, val);
+                              set.repsLeft = r;
+                              set.repsRight = r;
+                            }
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              const s = ex.sets[i];
+                              if (!s.done && s.weightLbs === oldWeight) {
+                                s.weightLbs = val;
+                                if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
+                                  const r = epleyReps(s.oneRM, val);
+                                  s.repsLeft = r;
+                                  s.repsRight = r;
+                                }
+                              } else { break; }
+                            }
+                            uiExercises = [...uiExercises];
+                          }}
+                          disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
+                          placeholder={isAssistedEx ? `-assist` : unit}
+                          class="set-input"
+                        />
 
                         <!-- Reps (side-specific) -->
                         <input
@@ -2353,6 +2329,32 @@
                       </div>
                     {/each}
                   </div>
+                  <!-- Plate visual + weight helpers (unilateral — below both L/R rows) -->
+                  {#if !set.done && !set.skipped && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
+                    {#if isAssistedEx && set.weightLbs !== null}
+                      <div class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</div>
+                    {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                      {@const bw = getBarWeight(exercise)}
+                      {#if set.weightLbs > bw}
+                        <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
+                      {/if}
+                    {/if}
+                    {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0}
+                      {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
+                      {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
+                      {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
+                      <div class="text-center">
+                        {#if estReps < 5}
+                          <span class="text-[10px] text-red-400">~{estReps} reps (heavy)</span>
+                        {:else if estReps > 30}
+                          <span class="text-[10px] text-red-400">~{estReps} reps (light)</span>
+                        {:else}
+                          <span class="text-[10px] text-zinc-500">~{estReps} reps</span>
+                        {/if}
+                        <span class="text-[9px] text-zinc-600 ml-1">{w30}–{w5} {unit}</span>
+                      </div>
+                    {/if}
+                  {/if}
                   <!-- Rep range advisories (unilateral) -->
                   {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
                     {#if (set.repsLeft ?? 0) > 30 || (set.repsRight ?? 0) > 30}
@@ -2429,59 +2431,33 @@
                     </select>
 
                     <!-- Weight / Assist -->
-                    <div class="flex flex-col gap-0.5">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
-                        oninput={(e) => {
-                          const raw = (e.target as HTMLInputElement).value;
-                          const val = raw === '' ? null : Math.abs(parseFloat(raw));
-                          const oldWeight = set.weightLbs;
-                          set.weightLbs = val;
-                          // Epley: always update rep suggestion for this set
-                          if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
-                            set.reps = epleyReps(set.oneRM, val);
-                          }
-                          // Propagate to subsequent sets only while each next set
-                          // had the same weight as the set just edited (chain stops at first mismatch)
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            const s = ex.sets[i];
-                            if (!s.done && s.weightLbs === oldWeight) {
-                              s.weightLbs = val;
-                              if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
-                                s.reps = epleyReps(s.oneRM, val);
-                              }
-                            } else { break; }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
-                        placeholder={isAssistedEx ? `-assist` : unit}
-                        class="set-input"
-                      />
-                      {#if isAssistedEx && set.weightLbs !== null}
-                        <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
-                        {@const bw = getBarWeight(exercise)}
-                        {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                        {/if}
-                      {/if}
-                      {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
-                        {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
-                        {#if estReps < 5}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
-                        {:else if estReps > 30}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
-                        {:else}
-                          <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
-                        {/if}
-                        {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
-                        {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
-                        <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
-                      {/if}
-                    </div>
+                    <input
+                      type="number" inputmode="decimal"
+                      value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
+                      oninput={(e) => {
+                        const raw = (e.target as HTMLInputElement).value;
+                        const val = raw === '' ? null : Math.abs(parseFloat(raw));
+                        const oldWeight = set.weightLbs;
+                        set.weightLbs = val;
+                        if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
+                          set.reps = epleyReps(set.oneRM, val);
+                        }
+                        const idx = ex.sets.indexOf(set);
+                        for (let i = idx + 1; i < ex.sets.length; i++) {
+                          const s = ex.sets[i];
+                          if (!s.done && s.weightLbs === oldWeight) {
+                            s.weightLbs = val;
+                            if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
+                              s.reps = epleyReps(s.oneRM, val);
+                            }
+                          } else { break; }
+                        }
+                        uiExercises = [...uiExercises];
+                      }}
+                      disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
+                      placeholder={isAssistedEx ? `-assist` : unit}
+                      class="set-input"
+                    />
 
                     <!-- Reps + optional partials -->
                     <div class="flex flex-col gap-0.5">
@@ -2551,6 +2527,32 @@
                       </div>
                     {/if}
                   </div>
+                  <!-- Plate visual + weight helpers (below the set row to avoid blocking inputs) -->
+                  {#if !set.done && !set.skipped && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
+                    {#if isAssistedEx && set.weightLbs !== null}
+                      <div class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</div>
+                    {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                      {@const bw = getBarWeight(exercise)}
+                      {#if set.weightLbs > bw}
+                        <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
+                      {/if}
+                    {/if}
+                    {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0}
+                      {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
+                      {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
+                      {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
+                      <div class="text-center">
+                        {#if estReps < 5}
+                          <span class="text-[10px] text-red-400">~{estReps} reps (heavy)</span>
+                        {:else if estReps > 30}
+                          <span class="text-[10px] text-red-400">~{estReps} reps (light)</span>
+                        {:else}
+                          <span class="text-[10px] text-zinc-500">~{estReps} reps</span>
+                        {/if}
+                        <span class="text-[9px] text-zinc-600 ml-1">{w30}–{w5} {unit}</span>
+                      </div>
+                    {/if}
+                  {/if}
                   <!-- Rep range advisories (bilateral) -->
                   {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
                     {#if (set.reps ?? 0) > 30}
