@@ -13,6 +13,7 @@
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
+  import html2canvas from 'html2canvas';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -146,6 +147,37 @@
   let focusedWeightSetId = $state<string | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
+  let summaryCardEl: HTMLDivElement;
+  let sharing = $state(false);
+
+  async function shareWorkout() {
+    if (!summaryCardEl) return;
+    sharing = true;
+    try {
+      const canvas = await html2canvas(summaryCardEl, {
+        backgroundColor: '#18181b',
+        scale: 2,
+      });
+      canvas.toBlob(async (blob) => {
+        if (!blob) { sharing = false; return; }
+        const file = new File([blob], 'workout-summary.png', { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Workout Summary' });
+        } else {
+          // Fallback: download
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'workout-summary.png';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        sharing = false;
+      }, 'image/png');
+    } catch {
+      sharing = false;
+    }
+  }
   let showCancelConfirm = $state(false);
   let cancelling = $state(false);
   // (showFinishWarning removed — finish button is disabled until all sets done)
@@ -1926,7 +1958,7 @@
 <!-- ─── Finished screen ────────────────────────────────────────────────── -->
 {:else if finished}
   <div class="flex items-center justify-center flex-1 p-4">
-    <div class="card max-w-lg w-full">
+    <div class="card max-w-lg w-full" bind:this={summaryCardEl}>
       <div class="text-center mb-6">
         <div class="text-6xl mb-3">🎉</div>
         <h2 class="text-3xl font-bold">Workout done!</h2>
@@ -1994,7 +2026,15 @@
         ></textarea>
       </div>
 
-      <a href="/" class="btn-primary w-full text-center block">Back to Dashboard</a>
+      <div class="flex gap-3">
+        <button onclick={shareWorkout} disabled={sharing}
+                class="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-medium rounded-xl transition-colors disabled:opacity-50">
+          {sharing ? 'Generating...' : '📤 Share'}
+        </button>
+        <a href="/" class="flex-1 py-3 bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-xl text-center transition-colors">
+          Dashboard
+        </a>
+      </div>
     </div>
   </div>
 
