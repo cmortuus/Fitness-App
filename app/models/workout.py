@@ -1,6 +1,6 @@
 """Workout session and plan models."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 

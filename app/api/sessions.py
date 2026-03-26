@@ -1,7 +1,7 @@
 """Workout session API endpoints."""
 
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
