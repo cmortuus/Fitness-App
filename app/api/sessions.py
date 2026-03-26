@@ -304,6 +304,9 @@ async def update_set(
 
     update_data = set_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
+        # Strip timezone info — DB uses naive timestamps
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            value = value.replace(tzinfo=None)
         setattr(exercise_set, field, value)
 
     # Update session totals
