@@ -36,6 +36,18 @@
       // Load settings from DB first (syncs across devices)
       await settings.loadFromDb();
 
+      // Ensure branch cookie matches DB preference (survives cache clears)
+      if (typeof document !== 'undefined') {
+        const pref = $settings as any;
+        const wantsDev = pref.branchPreference === 'dev';
+        const hasCookie = document.cookie.includes('gymtracker_branch=dev');
+        if (wantsDev && !hasCookie) {
+          document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
+        } else if (!wantsDev && hasCookie) {
+          document.cookie = 'gymtracker_branch=; path=/; max-age=0; Secure; SameSite=Lax';
+        }
+      }
+
       const [exercisesData, plansData, latestBW, phase] = await Promise.all([
         getExercises(),
         getPlans(),
