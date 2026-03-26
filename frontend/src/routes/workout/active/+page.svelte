@@ -955,6 +955,66 @@
     uiExercises = [...uiExercises];
   }
 
+  function generateWarmups(exUiId: string) {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex) return;
+
+    // Find the first working set's weight as the target
+    const workingSet = ex.sets.find(s => s.setType !== 'warmup' && s.weightLbs != null && s.weightLbs > 0);
+    if (!workingSet || !workingSet.weightLbs) return;
+    const target = workingSet.weightLbs;
+
+    const exercise = getEx(ex.exerciseId);
+    const barWeight = getBarWeight(exercise);
+
+    // Standard warmup ramp: bar only, 50%, 70%, 85%
+    const warmupScheme = [
+      { pct: 0, reps: 10, label: 'Bar' },    // empty bar
+      { pct: 0.5, reps: 5 },
+      { pct: 0.7, reps: 3 },
+      { pct: 0.85, reps: 1 },
+    ];
+
+    const warmupSets: typeof ex.sets = [];
+    for (const w of warmupScheme) {
+      const rawWeight = w.pct === 0 ? barWeight : target * w.pct;
+      const weight = roundWeight(rawWeight);
+      // Skip if warmup weight is same as or more than working weight
+      if (weight >= target) continue;
+      // Skip duplicate weights
+      if (warmupSets.some(s => s.weightLbs === weight)) continue;
+
+      warmupSets.push({
+        localId: `${ex.exerciseId}-warmup-${warmupSets.length}-${Date.now()}`,
+        backendId: null,
+        setNumber: warmupSets.length + 1,
+        weightLbs: weight,
+        reps: w.reps,
+        repsLeft: ex.isUnilateral ? w.reps : null,
+        repsRight: ex.isUnilateral ? w.reps : null,
+        done: false,
+        skipped: false,
+        doneLeft: false,
+        doneRight: false,
+        saving: false,
+        oneRM: null,
+        initWeight: null,
+        initReps: null,
+        setType: 'warmup',
+        drops: [],
+      });
+    }
+
+    if (warmupSets.length === 0) return;
+
+    // Remove existing warmup sets
+    ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
+    // Prepend warmups, then renumber all sets
+    ex.sets = [...warmupSets, ...ex.sets];
+    ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
+    uiExercises = [...uiExercises];
+  }
+
   async function removeExercise(exUiId: string) {
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (ex && sessionId) {
@@ -1758,11 +1818,13 @@
                       }}
                       disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
-                             {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                             {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
+                              set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                               set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
+                      <option value="warmup">Warmup</option>
                       <option value="myo_rep">Myo Rep</option>
                       {#if ex.sets.indexOf(set) > 0}
                         <option value="myo_rep_match">Myo Match</option>
@@ -1970,11 +2032,13 @@
                       }}
                       disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
-                             {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                             {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
+                              set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                               set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
+                      <option value="warmup">Warmup</option>
                       <option value="myo_rep">Myo Rep</option>
                       {#if ex.sets.indexOf(set) > 0}
                         <option value="myo_rep_match">Myo Match</option>
@@ -2137,6 +2201,12 @@
                 onclick={() => addSetRow(ex.uiId)}
                 class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
               >+ Add Set</button>
+              {#if shouldShowPlates(exercise) && ex.sets.some(s => s.setType !== 'warmup' && s.weightLbs != null && s.weightLbs > 0)}
+                <button
+                  onclick={() => generateWarmups(ex.uiId)}
+                  class="text-xs px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded transition-colors"
+                >{ex.sets.some(s => s.setType === 'warmup') ? 'Redo Warmups' : '+ Warmups'}</button>
+              {/if}
               {#if ex.sets.length > 1 && !ex.sets[ex.sets.length - 1].done}
                 <button
                   onclick={() => removeSet(ex.uiId, ex.sets[ex.sets.length - 1].localId)}
