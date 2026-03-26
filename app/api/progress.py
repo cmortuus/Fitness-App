@@ -348,3 +348,55 @@ async def get_insights(
             insights.append({"type": "success", "icon": "🏆", "text": f"PRs on {len(prs)} exercises this week"})
 
     return insights
+
+
+@router.get("/records")
+async def get_personal_records(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    """Get personal records per exercise — heaviest weight, most reps, best estimated 1RM."""
+    result = await db.execute(
+        select(ExerciseSet, Exercise.display_name, Exercise.name)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
+        .where(WorkoutSession.user_id == user.id)
+        .where(ExerciseSet.actual_reps.isnot(None))
+        .where(ExerciseSet.actual_weight_kg.isnot(None))
+        .where(ExerciseSet.actual_weight_kg > 0)
+        .where(ExerciseSet.set_type != 'warmup')
+    )
+    rows = result.all()
+
+    # Group by exercise
+    exercise_data: dict[int, dict] = {}
+    for exercise_set, display_name, name in rows:
+        eid = exercise_set.exercise_id
+        w = exercise_set.actual_weight_kg or 0
+        r = exercise_set.actual_reps or 0
+        est_1rm = w * (1 + r / 30) if r > 0 and w > 0 else 0
+
+        if eid not in exercise_data:
+            exercise_data[eid] = {
+                "exercise_id": eid,
+                "display_name": display_name,
+                "name": name,
+                "max_weight_kg": 0,
+                "max_reps": 0,
+                "best_1rm_kg": 0,
+                "best_set_weight_kg": 0,
+                "best_set_reps": 0,
+            }
+
+        d = exercise_data[eid]
+        if w > d["max_weight_kg"]:
+            d["max_weight_kg"] = w
+        if r > d["max_reps"]:
+            d["max_reps"] = r
+        if est_1rm > d["best_1rm_kg"]:
+            d["best_1rm_kg"] = round(est_1rm, 1)
+            d["best_set_weight_kg"] = w
+            d["best_set_reps"] = r
+
+    records = sorted(exercise_data.values(), key=lambda x: x["best_1rm_kg"], reverse=True)
+    return records

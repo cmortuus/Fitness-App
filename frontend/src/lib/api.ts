@@ -382,6 +382,12 @@ export async function recalculateWeights(pattern: string, oldBaseKg: number, new
   return response.data;
 }
 
+// Personal records
+export async function getPersonalRecords(): Promise<any[]> {
+  const response = await api.get('/progress/records');
+  return response.data;
+}
+
 // Get recently used exercises
 export async function getRecentExercises(limit: number = 10): Promise<RecentExercise[]> {
   const response = await api.get('/plans/exercises/recent', { params: { limit } });
