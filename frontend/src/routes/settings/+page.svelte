@@ -462,6 +462,17 @@
           ['hackSquat', 'Hack Squat'],
           ['tBarRow', 'T-Bar Row'],
           ['beltSquat', 'Belt Squat'],
+          ['chestPress', 'Chest Press'],
+          ['shoulderPress', 'Shoulder Press'],
+          ['inclinePress', 'Incline Press'],
+          ['declinePress', 'Decline Press'],
+          ['calfRaise', 'Calf Raise'],
+          ['seatedRow', 'Seated Row'],
+          ['latPulldown', 'Lat Pulldown'],
+          ['pendulumSquat', 'Pendulum Squat'],
+          ['hipThrust', 'Hip Thrust Machine'],
+          ['legExtension', 'Leg Extension'],
+          ['legCurl', 'Leg Curl'],
         ] as [key, label]}
           <div class="space-y-1">
             <div class="flex items-center justify-between gap-4">

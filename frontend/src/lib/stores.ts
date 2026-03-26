@@ -63,6 +63,17 @@ const defaultSettings: AppSettings = {
     legPress: 75,
     hackSquat: 45,
     tBarRow: 20,
+    chestPress: 0,
+    shoulderPress: 0,
+    inclinePress: 0,
+    declinePress: 0,
+    calfRaise: 0,
+    seatedRow: 0,
+    latPulldown: 0,
+    pendulumSquat: 0,
+    hipThrust: 0,
+    legExtension: 0,
+    legCurl: 0,
   },
 };
 
