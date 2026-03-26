@@ -61,7 +61,26 @@ api.interceptors.response.use(
     } else if (error.response) {
       console.error('API Error:', error.response.status, error.response.data);
     } else if (error.request) {
-      console.error('Network Error: No response received');
+      // Network error — queue write requests for offline sync
+      const method = error.config?.method?.toUpperCase();
+      if (method && ['PATCH', 'POST', 'PUT', 'DELETE'].includes(method) && error.config?.url) {
+        try {
+          const { queueRequest, getPendingCount } = await import('$lib/offline');
+          const { isOnline, pendingSyncCount } = await import('$lib/stores');
+          const fullUrl = `/api${error.config.url}`;
+          await queueRequest(method, fullUrl, error.config.data ? JSON.parse(error.config.data) : null);
+          const count = await getPendingCount();
+          pendingSyncCount.set(count);
+          isOnline.set(false);
+          console.info(`Offline: queued ${method} ${error.config.url} (${count} pending)`);
+          // Return a fake success response so the UI doesn't show an error
+          return { data: {}, status: 200, statusText: 'Queued (offline)' };
+        } catch (queueErr) {
+          console.error('Failed to queue offline request:', queueErr);
+        }
+      } else {
+        console.error('Network Error: No response received');
+      }
     } else {
       console.error('Request Error:', error.message);
     }
@@ -808,6 +827,44 @@ export async function getTemplate(id: number): Promise<WorkoutTemplate> {
 
 export async function cloneTemplate(id: number): Promise<{ id: number; name: string; message: string }> {
   const response = await api.post(`/templates/${id}/clone`);
+  return response.data;
+}
+
+// ── Exercise feedback (autoregulation) ──────────────────────────────────────
+
+export interface ExerciseFeedbackData {
+  exercise_id: number;
+  recovery_rating?: 'poor' | 'ok' | 'good' | 'fresh';
+  rir?: number;
+  pump_rating?: 'none' | 'mild' | 'good' | 'great';
+  suggestion?: string;
+  suggestion_detail?: string;
+  suggestion_accepted?: boolean;
+}
+
+export async function saveExerciseFeedback(sessionId: number, data: ExerciseFeedbackData): Promise<any> {
+  const response = await api.post(`/sessions/${sessionId}/feedback`, data);
+  return response.data;
+}
+
+export async function getExerciseFeedback(sessionId: number): Promise<any[]> {
+  const response = await api.get(`/sessions/${sessionId}/feedback`);
+  return response.data;
+}
+
+// ── Volume landmarks ────────────────────────────────────────────────────────
+
+export interface VolumeLandmark {
+  muscle: string;
+  sets: number;
+  mev: number;
+  mav: number;
+  mrv: number;
+  status: 'below_mev' | 'in_range' | 'above_mav' | 'above_mrv';
+}
+
+export async function getVolumeLandmarks(days: number = 7): Promise<{ days: number; muscles: VolumeLandmark[]; total_sets: number }> {
+  const response = await api.get(`/progress/volume-landmarks?days=${days}`);
   return response.data;
 }
 

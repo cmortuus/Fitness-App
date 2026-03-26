@@ -25,6 +25,21 @@ export interface MachineWeights {
   [key: string]: number;  // custom entries
 }
 
+export interface ProgressionSettings {
+  trainingLevel: 'beginner' | 'intermediate' | 'advanced';
+  upperWeightIncrement: number;  // lbs
+  lowerWeightIncrement: number;  // lbs
+  maxSetsPerExercise: number;
+  setsAddedPerCycle: number;
+  minRepsForIncrease: number;
+  maxRepsForIncrease: number;
+}
+
+export interface DashboardWidget {
+  id: string;
+  enabled: boolean;
+}
+
 export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
@@ -32,7 +47,9 @@ export interface AppSettings {
   progressionStyle: 'rep' | 'weight';
   profile: UserProfile;
   machineWeights: MachineWeights;
-  maxWarmupSets: number; // max number of auto-generated warmup sets (default 4)
+  maxWarmupSets: number;
+  progression: ProgressionSettings;
+  dashboardWidgets: DashboardWidget[];
 }
 
 const SETTINGS_KEY = 'hgt_settings';
@@ -77,15 +94,48 @@ const defaultSettings: AppSettings = {
     legCurl: 0,
   },
   maxWarmupSets: 4,
+  dashboardWidgets: [
+    { id: 'stats', enabled: true },
+    { id: 'nextWorkout', enabled: true },
+    { id: 'nutrition', enabled: true },
+    { id: 'insights', enabled: true },
+    { id: 'calendar', enabled: true },
+    { id: 'recentSessions', enabled: true },
+    { id: 'plans', enabled: true },
+    { id: 'trainingLog', enabled: true },
+    { id: 'weekView', enabled: true },
+    { id: 'calculator', enabled: false },
+    { id: 'repeatLast', enabled: false },
+    { id: 'pinnedCharts', enabled: false },
+  ],
+  progression: {
+    trainingLevel: 'intermediate',
+    upperWeightIncrement: 2.5,
+    lowerWeightIncrement: 5,
+    maxSetsPerExercise: 6,
+    setsAddedPerCycle: 1,
+    minRepsForIncrease: 8,
+    maxRepsForIncrease: 12,
+  },
 };
 
 function deepMergeSettings(stored: any): AppSettings {
+  // Merge dashboard widgets: preserve user order/enabled state, add any new widgets
+  const storedWidgets: DashboardWidget[] = stored.dashboardWidgets ?? [];
+  const storedIds = new Set(storedWidgets.map((w: DashboardWidget) => w.id));
+  const mergedWidgets = [
+    ...storedWidgets,
+    ...defaultSettings.dashboardWidgets.filter(w => !storedIds.has(w.id)),
+  ];
+
   return {
     ...defaultSettings,
     ...stored,
     restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
     profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
     machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
+    progression: { ...defaultSettings.progression, ...(stored.progression ?? {}) },
+    dashboardWidgets: mergedWidgets,
   };
 }
 
@@ -152,6 +202,11 @@ function createSettingsStore() {
 }
 
 export const settings = createSettingsStore();
+
+// ─── Offline state ───────────────────────────────────────────────────────────
+export const isOnline = writable(typeof navigator !== 'undefined' ? navigator.onLine : true);
+export const pendingSyncCount = writable(0);
+export const syncStatus = writable<'idle' | 'syncing' | 'error'>('idle');
 
 // Current workout session
 export const currentSession = writable<WorkoutSession | null>(null);

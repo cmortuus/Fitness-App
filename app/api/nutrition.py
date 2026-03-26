@@ -1,7 +1,7 @@
 """Nutrition tracking API endpoints — food log, custom foods, goals, and search."""
 
 import json
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -211,7 +211,7 @@ async def list_entries(
     date: date = Query(default=None),
 ) -> dict:
     """Get nutrition entries for a date, grouped by meal with totals."""
-    target_date = date or datetime.now(timezone.utc).date()
+    target_date = date or datetime.utcnow().date()
     result = await db.execute(
         select(NutritionEntry)
         .where(NutritionEntry.date == target_date, NutritionEntry.user_id == user.id)
@@ -287,7 +287,7 @@ async def daily_summary(
     date: date = Query(default=None),
 ) -> dict:
     """Get daily macro totals vs goals."""
-    target_date = date or datetime.now(timezone.utc).date()
+    target_date = date or datetime.utcnow().date()
 
     # Totals
     result = await db.execute(
@@ -344,7 +344,7 @@ async def weekly_report(
     from app.models.body_weight import BodyWeightEntry
     from app.models.workout import WorkoutSession
 
-    today = datetime.now(timezone.utc).date()
+    today = datetime.utcnow().date()
     week_ago = today - timedelta(days=7)
 
     # Daily nutrition totals for each of the last 7 days
@@ -437,7 +437,7 @@ async def get_goals(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict | None:
     """Get current active macro goals."""
-    today = datetime.now(timezone.utc).date()
+    today = datetime.utcnow().date()
     result = await db.execute(
         select(MacroGoal)
         .where(MacroGoal.effective_from <= today, MacroGoal.user_id == user.id)
@@ -455,7 +455,7 @@ async def set_goals(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Set or update daily macro goals (upserts on effective_from)."""
-    effective = data.effective_from or datetime.now(timezone.utc).date()
+    effective = data.effective_from or datetime.utcnow().date()
 
     # Upsert: check if a goal already exists for this date
     result = await db.execute(

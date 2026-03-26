@@ -1,6 +1,6 @@
 """Diet phase API — create/manage cut/bulk/maintenance phases with auto-calculated macros."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -48,7 +48,7 @@ def serialize_phase(phase: DietPhase, extra: dict | None = None) -> dict:
 
 async def _get_weight_entries(db: AsyncSession, user_id: int, days: int = 14) -> list[BodyWeightEntry]:
     """Fetch recent body weight entries."""
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    cutoff = datetime.utcnow() - timedelta(days=days)
     result = await db.execute(
         select(BodyWeightEntry)
         .where(BodyWeightEntry.recorded_at >= cutoff, BodyWeightEntry.user_id == user_id)
@@ -59,7 +59,7 @@ async def _get_weight_entries(db: AsyncSession, user_id: int, days: int = 14) ->
 
 async def _build_phase_status(phase: DietPhase, db: AsyncSession, user_id: int) -> dict:
     """Build the full status response for a phase."""
-    today = datetime.now(timezone.utc).date()
+    today = datetime.utcnow().date()
     days_in = (today - phase.started_on).days
     current_week = min(max(1, days_in // 7 + 1), phase.duration_weeks)
     weeks_remaining = max(0, phase.duration_weeks - current_week)
@@ -142,7 +142,7 @@ async def create_phase(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Start a new diet phase. Deactivates any existing active phase."""
-    today = datetime.now(timezone.utc).date()
+    today = datetime.utcnow().date()
 
     # Get starting weight
     bw_result = await db.execute(
@@ -257,7 +257,7 @@ async def recalculate_phase(
         if cal_adj:
             macros["calories"] = max(1200, macros["calories"] + cal_adj)
 
-        today = datetime.now(timezone.utc).date()
+        today = datetime.utcnow().date()
         await _upsert_goal(db, macros, today, user_id=user.id)
         status_data["current_goals"] = {k: macros[k] for k in ("calories", "protein", "carbs", "fat")}
 
@@ -277,5 +277,5 @@ async def end_phase(
     if not phase:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No active phase")
     phase.is_active = False
-    phase.ended_on = datetime.now(timezone.utc).date()
+    phase.ended_on = datetime.utcnow().date()
     await db.flush()

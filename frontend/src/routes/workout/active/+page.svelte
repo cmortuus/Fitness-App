@@ -8,6 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
+    saveExerciseFeedback,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -91,7 +92,8 @@
     // Original suggestions for deviation warning
     initWeight: number | null;
     initReps: number | null;
-    setType: string;  // 'standard' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
+    setType: string;  // 'standard' | 'standard_partials' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
+    partialReps: number | null;  // for standard_partials — partial ROM reps after full ROM
     drops: { weightLbs: number | null; reps: number | null }[];  // for drop sets only
   }
 
@@ -141,11 +143,142 @@
   let exerciseNotes = $state<Record<number, string>>({});
   let editingNoteId = $state<number | null>(null);
   let editingNoteText = $state('');
+  let focusedWeightSetId = $state<string | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
   let showCancelConfirm = $state(false);
   let cancelling = $state(false);
   // (showFinishWarning removed — finish button is disabled until all sets done)
+
+  // ─── PR celebration ──────────────────────────────────────────────────
+  let prCelebration = $state<{ exercise: string; type: string; value: string } | null>(null);
+  let prTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function checkForPR(ex: UIExercise, set: UISet) {
+    const exercise = allExercises.find(e => e.id === ex.exerciseId);
+    if (!exercise || !set.initWeight || !set.initReps) return;
+    const w = set.weightLbs ?? 0;
+    const r = ex.isUnilateral ? Math.min(set.repsLeft ?? 0, set.repsRight ?? 0) : (set.reps ?? 0);
+    const isAsst = exercise.is_assisted ?? false;
+
+    let prType = '';
+    let prValue = '';
+    if (!isAsst && w > (set.initWeight ?? 0)) {
+      prType = 'Weight PR';
+      prValue = `${w} ${unit}`;
+    } else if (r > (set.initReps ?? 0)) {
+      prType = 'Rep PR';
+      prValue = `${r} reps`;
+    }
+
+    if (prType) {
+      prCelebration = { exercise: exercise.display_name, type: prType, value: prValue };
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      if (prTimeout) clearTimeout(prTimeout);
+      prTimeout = setTimeout(() => { prCelebration = null; }, 4000);
+    }
+  }
+
+  // ─── Autoregulation feedback ──────────────────────────────────────────
+  // Track which muscle groups have been asked about recovery (only ask once per muscle per workout)
+  let recoveryAskedMuscles = $state<Set<string>>(new Set());
+  // Track which exercises have shown the recovery prompt (by uiId)
+  let showRecoveryPrompt = $state<Record<string, boolean>>({});
+  // Track which exercises have shown the effort prompt (by uiId)
+  let showEffortPrompt = $state<Record<string, boolean>>({});
+  // Track which exercises have had effort submitted (by exerciseId)
+  let effortSubmitted = $state<Set<number>>(new Set());
+  // Stored feedback per exercise (by exerciseId)
+  let feedbackData = $state<Record<number, {
+    recovery_rating?: string;
+    rir?: number;
+    pump_rating?: string;
+    suggestion?: string;
+    suggestion_detail?: string;
+  }>>({});
+
+  function getMuscleGroup(exerciseId: number): string {
+    const ex = allExercises.find(e => e.id === exerciseId);
+    return ex?.primary_muscles?.[0] ?? 'other';
+  }
+
+  function shouldShowRecovery(ex: UIExercise): boolean {
+    const muscle = getMuscleGroup(ex.exerciseId);
+    const firstSetDone = ex.sets.length > 0 && (ex.sets[0].done || ex.sets[0].skipped);
+    const notYetAsked = !recoveryAskedMuscles.has(muscle);
+    return firstSetDone && notYetAsked && showRecoveryPrompt[ex.uiId] !== false;
+  }
+
+  function shouldShowEffort(ex: UIExercise): boolean {
+    const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped);
+    const alreadySubmitted = effortSubmitted.has(ex.exerciseId);
+    return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
+  }
+
+  async function submitRecovery(ex: UIExercise, rating: string) {
+    const muscle = getMuscleGroup(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
+    feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], recovery_rating: rating } };
+    if (sessionId) {
+      try {
+        await saveExerciseFeedback(sessionId, { exercise_id: ex.exerciseId, recovery_rating: rating });
+      } catch (e) { console.error('Failed to save recovery feedback:', e); }
+    }
+  }
+
+  function dismissRecovery(ex: UIExercise) {
+    const muscle = getMuscleGroup(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
+  }
+
+  async function submitEffort(ex: UIExercise, rir: number, pump: string) {
+    effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
+    const progression = $settings.progression;
+
+    // Calculate suggestion based on performance + feedback
+    const recovery = feedbackData[ex.exerciseId]?.recovery_rating ?? 'good';
+    let suggestion = 'normal';
+    let detail = '';
+    const increment = getMuscleGroup(ex.exerciseId).match(/quad|hamstring|glute|calf/)
+      ? progression.lowerWeightIncrement
+      : progression.upperWeightIncrement;
+
+    if (rir >= 3 && (recovery === 'fresh' || recovery === 'good')) {
+      suggestion = 'aggressive';
+      detail = `Increase weight by ${increment} ${unit} and consider adding a set`;
+    } else if (rir >= 2 && recovery !== 'poor') {
+      suggestion = 'normal';
+      detail = `Increase weight by ${increment} ${unit}`;
+    } else if (rir >= 1 && recovery !== 'poor') {
+      suggestion = 'conservative';
+      detail = `Keep weight, aim for +1 rep next session`;
+    } else if (recovery === 'poor' && rir <= 1) {
+      suggestion = 'ease';
+      detail = `Hold steady — recovery needs time`;
+    } else {
+      suggestion = 'hold';
+      detail = `Repeat same prescription next session`;
+    }
+
+    feedbackData = {
+      ...feedbackData,
+      [ex.exerciseId]: { ...feedbackData[ex.exerciseId], rir, pump_rating: pump, suggestion, suggestion_detail: detail }
+    };
+
+    if (sessionId) {
+      try {
+        await saveExerciseFeedback(sessionId, {
+          exercise_id: ex.exerciseId, rir, pump_rating: pump, suggestion, suggestion_detail: detail,
+        });
+      } catch (e) { console.error('Failed to save effort feedback:', e); }
+    }
+  }
+
+  function dismissEffort(ex: UIExercise) {
+    effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
+  }
 
   // Workout clock
   let startedAt = $state<number>(0);
@@ -247,6 +380,7 @@
       const params = new URLSearchParams(window.location.search);
       const planId = params.get('plan');
       const dayNumber = parseInt(params.get('day') || '1');
+      const isDeload = params.get('deload') === 'true';
 
       const [exData, notesData] = await Promise.all([getExercises(), getAllExerciseNotes()]);
       allExercises = exData;
@@ -264,6 +398,24 @@
       if (planId) {
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
+        // Apply deload reductions: ~70% weight, drop last set(s)
+        if (isDeload && uiExercises.length > 0) {
+          workoutName = '🔄 Deload — ' + workoutName;
+          for (const ex of uiExercises) {
+            // Reduce weight to ~70%
+            for (const set of ex.sets) {
+              if (set.weightLbs != null) {
+                set.weightLbs = Math.round(set.weightLbs * 0.7 / 2.5) * 2.5; // round to nearest 2.5
+              }
+            }
+            // Drop ~40% of sets (keep at least 2)
+            const targetSets = Math.max(2, Math.round(ex.sets.length * 0.6));
+            while (ex.sets.length > targetSets) {
+              ex.sets.pop();
+            }
+          }
+          uiExercises = [...uiExercises]; // trigger reactivity
+        }
       } else if ($currentSession) {
         // ── Resume in-progress session (store still set) ────────────────
         await resumeSession();
@@ -416,7 +568,8 @@
               initWeight: suggestedWeight,
               initReps:   suggestedReps,
               setType: bset?.set_type || 'standard',
-              drops: bset?.sub_sets ? bset.sub_sets.map((d: any) => ({
+              partialReps: bset?.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
+              drops: bset?.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
                 weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
                 reps: d.reps ?? null,
               })) : [],
@@ -579,7 +732,8 @@
             initWeight: sugW,
             initReps: sugR,
             setType: bset.set_type || 'standard',
-            drops: bset.sub_sets ? bset.sub_sets.map((d: any) => ({
+            partialReps: bset.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
+            drops: bset.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
               weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
               reps: d.reps ?? null,
             })) : [],
@@ -791,6 +945,8 @@
             weight_kg: d.weightLbs ? toKg(d.weightLbs) : 0,
             reps: d.reps ?? 0,
           }))
+        : set.setType === 'standard_partials' && set.partialReps
+        ? [{ weight_kg: weightKg, reps: set.partialReps, type: 'partial' }]
         : undefined;
 
       await updateSet(sessionId, bId, {
@@ -909,6 +1065,8 @@
           });
         }
       }
+      // Check for PR before rest timer
+      checkForPR(ex, set);
       // Start rest timer (group-aware for supersets/circuits)
       ensureNotificationPermission();
       handlePostSetCompletion(exUiId);
@@ -935,12 +1093,12 @@
     else set.doneRight = true;
     uiExercises = [...uiExercises];
 
-    // Start rest timer (group-aware for supersets/circuits)
-    handlePostSetCompletion(exUiId);
-
-    // If both sides are now resolved, trigger the full backend save
+    // Auto-complete when both sides done
     if (set.doneLeft && set.doneRight) {
       await completeSet(exUiId, localId);
+    } else {
+      // Only start rest timer, don't complete
+      handlePostSetCompletion(exUiId);
     }
   }
 
@@ -990,7 +1148,7 @@
       initWeight: null,
       initReps: null,
       setType: ex.sets[0]?.setType || 'standard',
-      drops: [],
+      partialReps: null, drops: [],
     }];
     uiExercises = [...uiExercises];
   }
@@ -1041,7 +1199,7 @@
           repsRight: ex.isUnilateral ? w.reps : null,
           done: false, skipped: false, doneLeft: false, doneRight: false,
           saving: false, oneRM: null, initWeight: null, initReps: null,
-          setType: 'warmup', drops: [],
+          setType: 'warmup', partialReps: null, drops: [],
         });
       }
       ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
@@ -1081,7 +1239,7 @@
         initWeight: null,
         initReps: null,
         setType: 'warmup',
-        drops: [],
+        partialReps: null, drops: [],
       });
     }
 
@@ -1093,6 +1251,14 @@
     ex.sets = [...warmupSets, ...ex.sets];
     ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
     uiExercises = [...uiExercises];
+  }
+
+  function moveExercise(idx: number, dir: -1 | 1) {
+    const target = idx + dir;
+    if (target < 0 || target >= uiExercises.length) return;
+    const arr = [...uiExercises];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    uiExercises = arr;
   }
 
   async function removeExercise(exUiId: string) {
@@ -1347,7 +1513,7 @@
           saving: false,
           oneRM: null, initWeight: null, initReps: null,
           setType: 'standard' as string,
-          drops: [] as { weightLbs: number | null; reps: number | null }[],
+          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[],
         }));
         // Delete old backend sets
         for (const s of oldEx.sets) {
@@ -1961,7 +2127,7 @@
                   </div>
                 {:else if exerciseNotes[ex.exerciseId]}
                   <button onclick={() => { editingNoteId = ex.exerciseId; editingNoteText = exerciseNotes[ex.exerciseId] || ''; }}
-                          class="text-xs text-amber-400/70 mt-1 text-left hover:text-amber-300 transition-colors">
+                          class="text-xs text-amber-400 mt-1 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-left hover:bg-amber-500/20 transition-colors">
                     📝 {exerciseNotes[ex.exerciseId]}
                   </button>
                 {:else}
@@ -1996,7 +2162,11 @@
                   title="Swap for a different exercise"
                 >Swap</button>
                 <button
-                  onclick={() => removeExercise(ex.uiId)}
+                  onclick={() => {
+                    if (confirm(`Remove ${exercise?.display_name ?? 'this exercise'} and all its sets?`)) {
+                      removeExercise(ex.uiId);
+                    }
+                  }}
                   class="text-gray-600 hover:text-red-400 text-xl leading-none"
                   title="Remove exercise"
                 >✕</button>
@@ -2012,11 +2182,11 @@
 
             <!-- Column headers — adapt to unilateral / assisted mode -->
             {#if ex.isUnilateral}
-              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem">
+              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 5.5rem 1.5rem">
                 <span class="text-xs text-zinc-500 text-center">Type</span>
-                <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Wt (${unit})`}</span>
-                <span class="text-xs text-zinc-500 text-center">Left</span>
-                <span class="text-xs text-zinc-500 text-center">Right</span>
+                <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Weight (${unit})`}</span>
+                <span class="text-xs text-zinc-500 text-center">Reps</span>
+                <span></span>
                 <span></span>
               </div>
             {:else}
@@ -2032,182 +2202,160 @@
             <div class="space-y-2 px-4 pb-4">
               {#each ex.sets as set (set.localId)}
                 {#if ex.isUnilateral}
-                  <!-- ── Unilateral row ─────────────────────────────── -->
+                  <!-- ── Unilateral row (two bilateral-style rows per set) ── -->
                   <div
                     use:swipeable={{
                       onSwipeLeft: () => { if (!set.done && !set.skipped) skipSet(ex.uiId, set.localId); },
                       onSwipeRight: () => { if (!set.done) removeSet(ex.uiId, set.localId); },
                       disabled: set.done || set.skipped,
                     }}
-                    class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
-                    style="grid-template-columns: 4.5rem 1fr auto auto auto"
+                    class="pb-2 mb-1 border-b border-zinc-800/30 last:border-0 space-y-1 {set.done ? 'opacity-50' : set.skipped ? 'opacity-30' : ''}"
                   >
-                    <select
-                      value={set.setType || 'standard'}
-                      onchange={(e) => {
-                        set.setType = (e.target as HTMLSelectElement).value;
-                        syncMyoMatchSets(ex);
-                        uiExercises = [...uiExercises];
-                        if (set.backendId && sessionId) {
-                          updateSet(sessionId, set.backendId, { set_type: set.setType }).catch(() => {});
-                        }
-                      }}
-                      disabled={set.done || isMyoMatchLocked(ex, set)}
-                      class="set-type-select w-full
-                             {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
-                              set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
-                              set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
-                              set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
-                              'text-zinc-400'}">
-                      <option value="standard">Straight</option>
-                      <option value="warmup">Warmup</option>
-                      <option value="myo_rep">Myo Rep</option>
-                      {#if ex.sets.indexOf(set) > 0}
-                        <option value="myo_rep_match">Myo Match</option>
-                      {/if}
-                      <option value="drop_set">Drop Set</option>
-                    </select>
+                    {#each ['left', 'right'] as side}
+                      {@const sideDone = side === 'left' ? set.doneLeft : set.doneRight}
+                      {@const sideReps = side === 'left' ? set.repsLeft : set.repsRight}
+                      <div class="grid gap-2 items-center {sideDone ? 'opacity-60' : ''}"
+                           style="grid-template-columns: 4.5rem 1fr 1fr 5.5rem 1.5rem">
 
-                    <!-- Weight / Assist -->
-                    <div class="flex flex-col gap-0.5">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
-                        oninput={(e) => {
-                          const raw = (e.target as HTMLInputElement).value;
-                          const val = raw === '' ? null : Math.abs(parseFloat(raw));
-                          const oldWeight = set.weightLbs;
-                          set.weightLbs = val;
-                          // Epley: always update rep suggestion for this set
-                          if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
-                            const r = epleyReps(set.oneRM, val);
-                            set.repsLeft = r;
-                            set.repsRight = r;
-                          }
-                          // Propagate to subsequent sets only while each next set
-                          // had the same weight as the set just edited (chain stops at first mismatch)
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            const s = ex.sets[i];
-                            if (!s.done && s.weightLbs === oldWeight) {
-                              s.weightLbs = val;
-                              if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
-                                const r = epleyReps(s.oneRM, val);
-                                s.repsLeft = r;
-                                s.repsRight = r;
+                        <!-- Type dropdown (synced between L/R) -->
+                        <select
+                          value={set.setType || 'standard'}
+                          onchange={(e) => {
+                            set.setType = (e.target as HTMLSelectElement).value;
+                            syncMyoMatchSets(ex);
+                            uiExercises = [...uiExercises];
+                            if (set.backendId && sessionId) {
+                              updateSet(sessionId, set.backendId, { set_type: set.setType }).catch(() => {});
+                            }
+                          }}
+                          disabled={set.done || sideDone || isMyoMatchLocked(ex, set)}
+                          class="set-type-select w-full
+                                 {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
+                                  set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                                  set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
+                                  set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                                  set.setType === 'standard_partials' ? '!bg-teal-500/15 !border-teal-500/30 text-teal-400' :
+                                  'text-zinc-400'}">
+                          <option value="standard">Straight</option>
+                          <option value="standard_partials">+ Partials</option>
+                          <option value="warmup">Warmup</option>
+                          <option value="myo_rep">Myo Rep</option>
+                          {#if ex.sets.indexOf(set) > 0}
+                            <option value="myo_rep_match">Myo Match</option>
+                          {/if}
+                          <option value="drop_set">Drop Set</option>
+                        </select>
+
+                        <!-- Weight (shared between L/R) -->
+                        <div class="flex flex-col gap-0.5">
+                          <input
+                            type="number" inputmode="decimal"
+                            value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
+                            oninput={(e) => {
+                              const raw = (e.target as HTMLInputElement).value;
+                              const val = raw === '' ? null : Math.abs(parseFloat(raw));
+                              const oldWeight = set.weightLbs;
+                              set.weightLbs = val;
+                              if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
+                                const r = epleyReps(set.oneRM, val);
+                                set.repsLeft = r;
+                                set.repsRight = r;
                               }
-                            } else { break; }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
-                        placeholder={isAssistedEx ? `-assist` : unit}
-                        class="set-input"
-                      />
-                      {#if isAssistedEx && set.weightLbs !== null}
-                        <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
-                        {@const bw = getBarWeight(exercise)}
-                        {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                        {/if}
-                      {/if}
-                      {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
-                        {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
-                        {#if estReps < 5}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
-                        {:else if estReps > 30}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
-                        {:else}
-                          <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
-                        {/if}
-                        {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
-                        {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
-                        <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
-                      {/if}
-                    </div>
+                              const idx = ex.sets.indexOf(set);
+                              for (let i = idx + 1; i < ex.sets.length; i++) {
+                                const s = ex.sets[i];
+                                if (!s.done && s.weightLbs === oldWeight) {
+                                  s.weightLbs = val;
+                                  if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
+                                    const r = epleyReps(s.oneRM, val);
+                                    s.repsLeft = r;
+                                    s.repsRight = r;
+                                  }
+                                } else { break; }
+                              }
+                              uiExercises = [...uiExercises];
+                            }}
+                            disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
+                            placeholder={isAssistedEx ? `-assist` : unit}
+                            class="set-input"
+                            onfocus={() => { focusedWeightSetId = set.localId; }}
+                            onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
+                          />
+                          {#if side === 'left'}
+                            {#if isAssistedEx && set.weightLbs !== null}
+                              <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
+                            {/if}
+                            {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
+                              {@const bw = getBarWeight(exercise)}
+                              {#if set.weightLbs > bw}
+                                <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
+                              {/if}
+                            {/if}
+                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                              {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
+                              {#if estReps < 5}
+                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
+                              {:else if estReps > 30}
+                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
+                              {:else}
+                                <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
+                              {/if}
+                              {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
+                              {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
+                              <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
+                            {/if}
+                          {/if}
+                        </div>
 
-                    <!-- Left reps + L✓ -->
-                    <div class="flex gap-1 items-center">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={set.repsLeft ?? ''}
-                        oninput={(e) => {
-                          const v = (e.target as HTMLInputElement).value;
-                          const r = v === '' ? null : parseInt(v);
-                          set.repsLeft = r;
-                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                            const newW = epleyWeight(set.oneRM, r);
-                            set.weightLbs = newW;
-                            const idx = ex.sets.indexOf(set);
-                            for (let i = idx + 1; i < ex.sets.length; i++) {
-                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                        <!-- Reps (side-specific) -->
+                        <input
+                          type="number" inputmode="decimal"
+                          value={sideReps ?? ''}
+                          oninput={(e) => {
+                            const v = (e.target as HTMLInputElement).value;
+                            const r = v === '' ? null : parseInt(v);
+                            if (side === 'left') set.repsLeft = r;
+                            else set.repsRight = r;
+                            if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                              const newW = epleyWeight(set.oneRM, r);
+                              set.weightLbs = newW;
+                              const idx = ex.sets.indexOf(set);
+                              for (let i = idx + 1; i < ex.sets.length; i++) {
+                                if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                              }
                             }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
-                        class="set-input flex-1 {set.doneLeft && !set.done ? 'opacity-50' : ''}"
-                      />
-                      {#if !set.saving && !set.skipped && !set.done}
-                        {#if set.doneLeft}
-                          <button onclick={() => undoSide(ex.uiId, set.localId, 'left')}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
-                        {:else}
-                          <button onclick={() => completeSide(ex.uiId, set.localId, 'left')}
-                                  disabled={(set.repsLeft ?? 0) <= 0}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
-                        {/if}
-                      {/if}
-                    </div>
+                            uiExercises = [...uiExercises];
+                          }}
+                          disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min="0"
+                          placeholder={side === 'left' ? 'L' : 'R'}
+                          class="set-input"
+                        />
 
-                    <!-- Right reps + R✓ -->
-                    <div class="flex gap-1 items-center">
-                      <input
-                        type="number" inputmode="decimal"
-                        value={set.repsRight ?? ''}
-                        oninput={(e) => {
-                          const v = (e.target as HTMLInputElement).value;
-                          const r = v === '' ? null : parseInt(v);
-                          set.repsRight = r;
-                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                            const newW = epleyWeight(set.oneRM, r);
-                            set.weightLbs = newW;
-                            const idx = ex.sets.indexOf(set);
-                            for (let i = idx + 1; i < ex.sets.length; i++) {
-                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
-                            }
-                          }
-                          uiExercises = [...uiExercises];
-                        }}
-                        disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
-                        class="set-input flex-1 {set.doneRight && !set.done ? 'opacity-50' : ''}"
-                      />
-                      {#if !set.saving && !set.skipped && !set.done}
-                        {#if set.doneRight}
-                          <button onclick={() => undoSide(ex.uiId, set.localId, 'right')}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
-                        {:else}
-                          <button onclick={() => completeSide(ex.uiId, set.localId, 'right')}
-                                  disabled={(set.repsRight ?? 0) <= 0}
-                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
-                        {/if}
-                      {/if}
-                    </div>
+                        <!-- Complete/Skip buttons (per-side) -->
+                        <div class="flex gap-1.5 justify-center">
+                          {#if set.saving}
+                            <span class="text-zinc-400 text-xs">…</span>
+                          {:else if sideDone}
+                            <button onclick={() => undoSide(ex.uiId, set.localId, side)}
+                                    title="Undo — mark as incomplete"
+                                    class="h-10 w-10 rounded-xl bg-green-700/30 text-green-400 font-bold text-lg">✓</button>
+                          {:else if set.skipped}
+                            <button onclick={() => unskipSet(ex.uiId, set.localId)}
+                                    class="h-10 px-2 rounded-xl bg-amber-600/20 text-amber-400 text-xs font-semibold">Undo</button>
+                          {:else}
+                            <button onclick={() => completeSide(ex.uiId, set.localId, side)}
+                                    disabled={(sideReps ?? 0) <= 0}
+                                    title="Log this set"
+                                    class="h-10 w-10 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold transition-colors disabled:opacity-30">✓</button>
+                            <button onclick={() => skipSet(ex.uiId, set.localId)}
+                                    class="h-10 px-2 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium">Skip</button>
+                          {/if}
+                        </div>
 
-                    <!-- Skip / Undo (full set) -->
-                    {#if set.saving}
-                      <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
-                    {:else if set.skipped}
-                      <button onclick={() => unskipSet(ex.uiId, set.localId)}
-                              class="h-10 px-2 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors">Undo</button>
-                    {:else if set.done}
-                      <button onclick={() => uncompleteSet(ex.uiId, set.localId)}
-                              class="h-10 w-10 rounded-xl bg-green-700/30 hover:bg-zinc-700 text-green-400 font-bold text-lg transition-colors">✓</button>
-                    {:else}
-                      <button onclick={() => skipSet(ex.uiId, set.localId)}
-                              class="h-10 px-2 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors">Skip</button>
-                    {/if}
+                        <!-- Side label -->
+                        <span class="text-xs text-zinc-500 font-semibold text-center">{side === 'left' ? 'L' : 'R'}</span>
+                      </div>
+                    {/each}
                   </div>
                   <!-- Rep range advisories (unilateral) -->
                   {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
@@ -2272,8 +2420,10 @@
                               set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                               set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                              set.setType === 'standard_partials' ? '!bg-teal-500/15 !border-teal-500/30 text-teal-400' :
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
+                      <option value="standard_partials">+ Partials</option>
                       <option value="warmup">Warmup</option>
                       <option value="myo_rep">Myo Rep</option>
                       {#if ex.sets.indexOf(set) > 0}
@@ -2313,16 +2463,19 @@
                         disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                         placeholder={isAssistedEx ? `-assist` : unit}
                         class="set-input"
+                        onfocus={() => { focusedWeightSetId = set.localId; }}
+                        onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
+                      {/if}
+                      {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
                           <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                         {/if}
                       {/if}
-                      {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                         {#if estReps < 5}
                           <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -2337,28 +2490,41 @@
                       {/if}
                     </div>
 
-                    <!-- Reps -->
-                    <input
-                      type="number" inputmode="decimal"
-                      value={set.reps ?? ''}
-                      oninput={(e) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        const r = v === '' ? null : parseInt(v);
-                        set.reps = r;
-                        // Epley: auto-adjust weight when reps change
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                          const newW = epleyWeight(set.oneRM, r);
-                          set.weightLbs = newW;
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                    <!-- Reps + optional partials -->
+                    <div class="flex flex-col gap-0.5">
+                      <input
+                        type="number" inputmode="decimal"
+                        value={set.reps ?? ''}
+                        oninput={(e) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          const r = v === '' ? null : parseInt(v);
+                          set.reps = r;
+                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                            const newW = epleyWeight(set.oneRM, r);
+                            set.weightLbs = newW;
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                            }
                           }
-                        }
-                        uiExercises = [...uiExercises];
-                      }}
-                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
-                      class="set-input"
-                    />
+                          uiExercises = [...uiExercises];
+                        }}
+                        disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
+                        class="set-input"
+                      />
+                      {#if set.setType === 'standard_partials'}
+                        <input
+                          type="number" inputmode="decimal"
+                          value={set.partialReps ?? ''}
+                          oninput={(e) => {
+                            set.partialReps = (e.target as HTMLInputElement).value === '' ? null : parseInt((e.target as HTMLInputElement).value);
+                            uiExercises = [...uiExercises];
+                          }}
+                          disabled={set.done} min="0" placeholder="partials"
+                          class="set-input !text-teal-400 !border-teal-500/30 text-xs"
+                        />
+                      {/if}
+                    </div>
 
                     <!-- Complete / Skip / Undo -->
                     {#if set.saving}
@@ -2451,6 +2617,93 @@
               {/if}
             </div>
           </div>
+
+          <!-- ── Recovery prompt (after first set of new muscle group) ── -->
+          {#if shouldShowRecovery(ex)}
+            {@const muscle = getMuscleGroup(ex.exerciseId)}
+            <div class="mx-1 mb-2 px-3 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
+              <p class="text-xs text-blue-300 mb-2">How recovered is your <span class="font-semibold capitalize">{muscle}</span> from last session?</p>
+              <div class="flex gap-2">
+                {#each [['😩', 'poor', 'Poor'], ['😐', 'ok', 'OK'], ['💪', 'good', 'Good'], ['🔥', 'fresh', 'Fresh']] as [emoji, value, label]}
+                  <button
+                    onclick={() => submitRecovery(ex, value)}
+                    class="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-center transition-colors">
+                    <span class="text-base">{emoji}</span><br/>{label}
+                  </button>
+                {/each}
+                <button onclick={() => dismissRecovery(ex)}
+                        class="px-2 py-1.5 rounded-lg text-xs text-zinc-500 hover:text-zinc-300 transition-colors">✕</button>
+              </div>
+            </div>
+          {/if}
+
+          <!-- ── Effort prompt (after all sets complete) ── -->
+          {#if shouldShowEffort(ex)}
+            {@const exercise = getEx(ex.exerciseId)}
+            <div class="mx-1 mb-2 px-3 py-3 rounded-xl bg-amber-500/10 border border-amber-500/20">
+              <p class="text-sm font-medium text-amber-300 mb-2">How was {exercise?.display_name ?? 'this exercise'}?</p>
+
+              <p class="text-xs text-zinc-400 mb-1.5">Reps in reserve (last set)?</p>
+              <div class="flex gap-1.5 mb-3">
+                {#each [0, 1, 2, 3, 4, 5] as rir}
+                  <button
+                    onclick={() => { feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], rir } }; }}
+                    class="flex-1 py-1.5 rounded-lg text-sm font-mono text-center transition-colors
+                           {feedbackData[ex.exerciseId]?.rir === rir ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                    {rir === 5 ? '5+' : rir}
+                  </button>
+                {/each}
+              </div>
+
+              <p class="text-xs text-zinc-400 mb-1.5">How was the pump?</p>
+              <div class="flex gap-1.5 mb-3">
+                {#each [['😐', 'none', 'None'], ['🙂', 'mild', 'Mild'], ['💪', 'good', 'Good'], ['🔥', 'great', 'Great']] as [emoji, value, label]}
+                  <button
+                    onclick={() => { feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], pump_rating: value } }; }}
+                    class="flex-1 py-1.5 rounded-lg text-xs text-center transition-colors
+                           {feedbackData[ex.exerciseId]?.pump_rating === value ? 'bg-amber-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                    <span class="text-base">{emoji}</span><br/>{label}
+                  </button>
+                {/each}
+              </div>
+
+              {#if feedbackData[ex.exerciseId]?.rir != null && feedbackData[ex.exerciseId]?.pump_rating}
+                <div class="flex gap-2">
+                  <button
+                    onclick={() => submitEffort(ex, feedbackData[ex.exerciseId]!.rir!, feedbackData[ex.exerciseId]!.pump_rating!)}
+                    class="flex-1 btn-primary text-sm !py-2">Submit</button>
+                  <button onclick={() => dismissEffort(ex)}
+                          class="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">Skip</button>
+                </div>
+              {:else}
+                <div class="flex justify-end">
+                  <button onclick={() => dismissEffort(ex)}
+                          class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Skip</button>
+                </div>
+              {/if}
+
+              <!-- Show suggestion if already submitted -->
+              {#if feedbackData[ex.exerciseId]?.suggestion_detail}
+                <div class="mt-2 pt-2 border-t border-amber-500/20">
+                  <p class="text-xs text-amber-200">{feedbackData[ex.exerciseId]!.suggestion_detail}</p>
+                </div>
+              {/if}
+            </div>
+          {/if}
+
+          <!-- Show saved feedback badge if already submitted -->
+          {#if feedbackData[ex.exerciseId]?.suggestion && effortSubmitted.has(ex.exerciseId)}
+            <div class="mx-1 mb-1 px-3 py-1.5 rounded-lg bg-zinc-800/50 flex items-center justify-between text-xs">
+              <span class="text-zinc-500">
+                {#if feedbackData[ex.exerciseId]?.recovery_rating}
+                  Recovery: <span class="capitalize">{feedbackData[ex.exerciseId]!.recovery_rating}</span> ·
+                {/if}
+                RIR: {feedbackData[ex.exerciseId]!.rir} · Pump: <span class="capitalize">{feedbackData[ex.exerciseId]!.pump_rating}</span>
+              </span>
+              <span class="text-amber-400">{feedbackData[ex.exerciseId]!.suggestion_detail}</span>
+            </div>
+          {/if}
+
         {/each}
           </div>
         {/each}
@@ -2709,6 +2962,18 @@
         {/if}
       </div>
 
+    </div>
+  </div>
+{/if}
+
+<!-- PR Celebration Toast -->
+{#if prCelebration}
+  <div class="fixed top-4 left-4 right-4 z-50 animate-bounce">
+    <div class="bg-gradient-to-r from-amber-600 to-yellow-500 rounded-2xl px-5 py-4 shadow-2xl text-center">
+      <p class="text-2xl mb-1">🎉🏆🎉</p>
+      <p class="text-lg font-bold text-white">{prCelebration.type}!</p>
+      <p class="text-sm text-white/90">{prCelebration.exercise}</p>
+      <p class="text-xl font-bold text-white mt-1">{prCelebration.value}</p>
     </div>
   </div>
 {/if}

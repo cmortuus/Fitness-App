@@ -1,6 +1,6 @@
 """Workout session and plan models."""
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -127,6 +127,45 @@ class WorkoutSession(Base):
     )
     sets: Mapped[list["ExerciseSet"]] = relationship(
         "ExerciseSet", back_populates="workout_session", cascade="all, delete-orphan"
+    )
+
+
+class ExerciseFeedback(Base):
+    """Per-exercise recovery and effort feedback for autoregulation."""
+
+    __tablename__ = "exercise_feedback"
+    __table_args__ = (
+        Index("ix_exercise_feedback_session", "session_id"),
+        Index("ix_exercise_feedback_exercise", "exercise_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workout_sessions.id"), nullable=False
+    )
+    exercise_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("exercises.id"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=False
+    )
+
+    # Recovery check (after first set) — "poor", "ok", "good", "fresh"
+    recovery_rating: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    # Effort check (after last set) — RIR 0-5
+    rir: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Pump rating — "none", "mild", "good", "great"
+    pump_rating: Mapped[str | None] = mapped_column(String(10), nullable=True)
+
+    # What the system suggested — "aggressive", "normal", "conservative", "hold", "repeat", "ease", "deload"
+    suggestion: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    suggestion_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    suggestion_accepted: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
 

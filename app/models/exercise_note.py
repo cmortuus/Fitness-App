@@ -1,6 +1,6 @@
 """Exercise notes — persistent per-exercise notes visible across workouts."""
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, Text
 from sqlalchemy.orm import Mapped, mapped_column
