@@ -474,3 +474,90 @@ async def get_personal_records(
 
     records = sorted(exercise_data.values(), key=lambda x: x["best_1rm_kg"], reverse=True)
     return records
+
+
+# ── Volume landmarks (MEV/MRV) ────────────────────────────────────────────
+
+# Evidence-based volume landmarks per muscle group (sets per week)
+# Based on RP/Israetel recommendations
+VOLUME_LANDMARKS = {
+    "chest":       {"mev": 8,  "mav": 14, "mrv": 20},
+    "back":        {"mev": 8,  "mav": 14, "mrv": 22},
+    "quads":       {"mev": 6,  "mav": 12, "mrv": 18},
+    "hamstrings":  {"mev": 4,  "mav": 10, "mrv": 16},
+    "glutes":      {"mev": 4,  "mav": 10, "mrv": 16},
+    "shoulders":   {"mev": 6,  "mav": 14, "mrv": 20},
+    "biceps":      {"mev": 4,  "mav": 10, "mrv": 18},
+    "triceps":     {"mev": 4,  "mav": 10, "mrv": 16},
+    "calves":      {"mev": 6,  "mav": 10, "mrv": 16},
+    "abs":         {"mev": 0,  "mav": 8,  "mrv": 16},
+    "traps":       {"mev": 0,  "mav": 8,  "mrv": 16},
+    "forearms":    {"mev": 0,  "mav": 6,  "mrv": 12},
+}
+
+
+@router.get("/volume-landmarks")
+async def get_volume_landmarks(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: int = Query(default=7, description="Look-back window in days"),
+) -> dict:
+    """Weekly sets per muscle group vs MEV/MAV/MRV landmarks."""
+    cutoff = datetime.utcnow() - timedelta(days=days)
+
+    # Get completed sets with exercise data
+    result = await db.execute(
+        select(ExerciseSet, Exercise)
+        .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.started_at >= cutoff,
+            ExerciseSet.completed_at.isnot(None),
+            ExerciseSet.skipped_at.is_(None),
+        )
+    )
+    rows = result.all()
+
+    # Count sets per muscle group
+    muscle_sets: dict[str, int] = {}
+    for exercise_set, exercise in rows:
+        muscles = exercise.primary_muscles or []
+        for muscle in muscles:
+            m = muscle.lower().strip()
+            muscle_sets[m] = muscle_sets.get(m, 0) + 1
+
+    # Build response with landmarks
+    muscle_data = []
+    # Include all muscles that have landmarks OR have sets logged
+    all_muscles = set(VOLUME_LANDMARKS.keys()) | set(muscle_sets.keys())
+    for muscle in sorted(all_muscles):
+        landmarks = VOLUME_LANDMARKS.get(muscle, {"mev": 4, "mav": 10, "mrv": 16})
+        sets = muscle_sets.get(muscle, 0)
+        status = "below_mev"
+        if sets == 0:
+            status = "none"
+        elif sets >= landmarks["mrv"]:
+            status = "above_mrv"
+        elif sets >= landmarks["mav"]:
+            status = "above_mav"
+        elif sets >= landmarks["mev"]:
+            status = "in_range"
+
+        muscle_data.append({
+            "muscle": muscle,
+            "sets": sets,
+            "mev": landmarks["mev"],
+            "mav": landmarks["mav"],
+            "mrv": landmarks["mrv"],
+            "status": status,
+        })
+
+    # Sort: muscles with sets first, then alphabetical
+    muscle_data.sort(key=lambda x: (-x["sets"], x["muscle"]))
+
+    return {
+        "days": days,
+        "muscles": muscle_data,
+        "total_sets": sum(muscle_sets.values()),
+    }
