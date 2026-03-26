@@ -698,9 +698,28 @@
     {#if currentUser}
       <p class="text-sm text-zinc-400">Signed in as <span class="text-white font-medium">{currentUser.username}</span></p>
     {/if}
-    <button onclick={logout}
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
-      Sign Out
-    </button>
+    <div class="flex gap-2">
+      <button
+        onclick={async () => {
+          try {
+            const token = localStorage.getItem('hgt_access_token');
+            const res = await fetch('/api/sessions/export/csv', {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'gymtracker-export.csv';
+            a.click(); URL.revokeObjectURL(url);
+          } catch { alert('Export failed'); }
+        }}
+        class="flex-1 py-2.5 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
+        Export CSV
+      </button>
+      <button onclick={logout}
+              class="flex-1 py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+        Sign Out
+      </button>
+    </div>
   </div>
 </div>
