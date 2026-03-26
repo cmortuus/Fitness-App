@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Line } from 'svelte-chartjs';
+  import { Line, Bar } from 'svelte-chartjs';
   import {
     Chart,
     CategoryScale,
     LinearScale,
     PointElement,
     LineElement,
+    BarElement,
     Title,
     Tooltip,
     Legend,
@@ -17,7 +18,7 @@
   import { settings } from '$lib/stores';
 
   // Register Chart.js components (required by svelte-chartjs)
-  Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
+  Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
 
   // Weight conversion
   const KG_TO_LBS = 2.20462;
@@ -34,6 +35,7 @@
   let recommendations = $state<ProgressionRecommendation[]>([]);
   let selectedExercise = $state<string>('all');
   let timeRange = $state<string>('30d');
+  let chartMode = $state<'1rm' | 'volume' | 'weight'>('1rm');
   let loading = $state(true);
   let error = $state<string | null>(null);
 
@@ -112,13 +114,80 @@
     };
   });
 
+  // Volume chart data — total volume per date (aggregated across exercises if "all")
+  let volumeChartData = $derived(() => {
+    const dates = [...new Set(filteredData.map(p => p.date))].sort();
+    const exNames = selectedExercise === 'all'
+      ? [...new Set(filteredData.map(p => p.exercise_name))].sort()
+      : [selectedExercise];
+
+    return {
+      labels: dates,
+      datasets: exNames.map((exercise, idx) => {
+        const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
+        return {
+          label: exercise,
+          data: dates.map(date => {
+            const point = exerciseData.find(p => p.date === date);
+            return point?.volume_load ? displayWeight(point.volume_load) : null;
+          }) as (number | null)[],
+          backgroundColor: COLORS[idx % COLORS.length] + '80',
+          borderColor: COLORS[idx % COLORS.length],
+          borderWidth: 1,
+        };
+      }),
+    };
+  });
+
+  // Best working weight per session (max actual_weight across sets)
+  let weightChartData = $derived(() => {
+    const dates = [...new Set(filteredData.map(p => p.date))].sort();
+    const exNames = selectedExercise === 'all'
+      ? [...new Set(filteredData.map(p => p.exercise_name))].sort()
+      : [selectedExercise];
+
+    return {
+      labels: dates,
+      datasets: exNames.map((exercise, idx) => {
+        const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
+        return {
+          label: exercise,
+          data: dates.map(date => {
+            const point = exerciseData.find(p => p.date === date);
+            // Use the recommended_weight field as a proxy for top set weight, or 1RM
+            return point?.estimated_1rm != null ? displayWeight(point.estimated_1rm) : null;
+          }) as (number | null)[],
+          borderColor: COLORS[idx % COLORS.length],
+          backgroundColor: COLORS[idx % COLORS.length] + '20',
+          tension: 0.3,
+          spanGaps: true,
+          fill: true,
+        };
+      }),
+    };
+  });
+
+  let activeChartData = $derived(() => {
+    switch (chartMode) {
+      case 'volume': return volumeChartData();
+      case 'weight': return weightChartData();
+      default: return chartData();
+    }
+  });
+
+  let chartTitle = $derived(
+    chartMode === '1rm' ? `Estimated 1RM Progress (${unit})`
+    : chartMode === 'volume' ? `Volume Load (${unit})`
+    : `Weight Trend (${unit})`
+  );
+
   let chartOptions = $derived({
     responsive: true,
     plugins: {
       legend: { position: 'top' as const },
       title: {
         display: true,
-        text: `Estimated 1RM Progress (${unit})`,
+        text: chartTitle,
         color: '#d1d5db',
       },
       tooltip: {
@@ -129,7 +198,7 @@
     },
     scales: {
       y: {
-        beginAtZero: false,
+        beginAtZero: chartMode === 'volume',
         title: { display: true, text: `Weight (${unit})`, color: '#9ca3af' },
         ticks: { color: '#9ca3af' },
         grid: { color: '#374151' },
@@ -167,18 +236,37 @@
           {/each}
         </select>
       </div>
+
+      <div>
+        <label class="label">Chart</label>
+        <div class="flex rounded-lg overflow-hidden border border-zinc-700">
+          <button
+            class="px-3 py-1.5 text-sm {chartMode === '1rm' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
+            onclick={() => chartMode = '1rm'}>1RM</button>
+          <button
+            class="px-3 py-1.5 text-sm {chartMode === 'volume' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
+            onclick={() => chartMode = 'volume'}>Volume</button>
+          <button
+            class="px-3 py-1.5 text-sm {chartMode === 'weight' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
+            onclick={() => chartMode = 'weight'}>Weight</button>
+        </div>
+      </div>
     </div>
   </div>
 
   <!-- Progress Chart -->
   <div class="card">
-    <h3 class="text-lg font-semibold mb-4">Estimated 1RM Over Time</h3>
+    <h3 class="text-lg font-semibold mb-4">{chartTitle}</h3>
     {#if loading}
       <div class="animate-pulse bg-zinc-800 rounded h-48"></div>
     {:else if error}
       <p class="text-red-400 text-center py-8">{error}</p>
     {:else if filteredData.length > 0}
-      <Line data={chartData()} options={chartOptions} />
+      {#if chartMode === 'volume'}
+        <Bar data={activeChartData()} options={chartOptions} />
+      {:else}
+        <Line data={activeChartData()} options={chartOptions} />
+      {/if}
     {:else}
       <p class="text-zinc-400 text-center py-8">
         No data for the selected range. Complete a workout with logged sets to see your progress here.
