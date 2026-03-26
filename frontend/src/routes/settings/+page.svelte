@@ -3,6 +3,14 @@
   import { settings, latestBodyWeight } from '$lib/stores';
   import type { RestDurations } from '$lib/stores';
   import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser, recalculateWeights } from '$lib/api';
+  import { writeBodyWeight, isHealthKitAvailable, requestHealthKitPermissions } from '$lib/healthkit';
+
+  let healthKitAvailable = $state(false);
+  let healthKitConnected = $state(false);
+
+  async function connectHealthKit() {
+    healthKitConnected = await requestHealthKitPermissions();
+  }
   import type { BodyWeightEntry } from '$lib/api';
 
   const currentUser = getStoredUser();
@@ -116,6 +124,7 @@
 
   onMount(async () => {
     weighIns = await getBodyWeights(30);
+    healthKitAvailable = await isHealthKitAvailable();
   });
 
   async function logWeighIn() {
@@ -132,6 +141,7 @@
       });
       weighIns = [entry, ...weighIns];
       latestBodyWeight.set(entry);
+      writeBodyWeight(kg).catch(() => {}); // sync to HealthKit (no-op on web)
       newWeight = null;
       newBodyFat = null;
       newNotes = '';
@@ -794,6 +804,25 @@
       {/if}
     {/each}
   </div>
+
+  <!-- ── Apple Health ──────────────────────────────────────────────── -->
+  {#if healthKitAvailable}
+    <div class="card space-y-3">
+      <h3 class="text-lg font-semibold">Apple Health</h3>
+      <p class="text-sm text-zinc-400">Sync workouts, body weight, and nutrition to Apple Health.</p>
+      {#if healthKitConnected}
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-green-500"></span>
+          <span class="text-sm text-green-400">Connected</span>
+        </div>
+      {:else}
+        <button onclick={connectHealthKit}
+                class="w-full py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+          Connect Apple Health
+        </button>
+      {/if}
+    </div>
+  {/if}
 
   <!-- ── Developer ────────────────────────────────────────────────────── -->
   {#if typeof document !== 'undefined'}

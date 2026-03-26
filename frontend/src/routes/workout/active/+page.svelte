@@ -14,6 +14,7 @@
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import html2canvas from 'html2canvas';
+  import { writeWorkout } from '$lib/healthkit';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -1642,6 +1643,12 @@
     currentSession.set(null);
     // Compute PRs before clearing UI state
     prs = detectPRs();
+    // Write workout to HealthKit (no-op on web/PWA)
+    writeWorkout({
+      startDate: new Date(Date.now() - elapsed * 1000),
+      endDate: new Date(),
+      workoutName: workoutName,
+    }).catch(() => {}); // fire and forget
     finished = true;
     finishing = false;
   }
