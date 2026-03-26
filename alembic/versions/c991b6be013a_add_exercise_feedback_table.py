@@ -1,6 +1,6 @@
 """Add exercise_feedback table for autoregulation
 
-Revision ID: a1b2c3d4e5f6
+Revision ID: c991b6be013a
 Revises: f0b873e7c9f3
 Create Date: 2026-03-26
 """
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = 'a1b2c3d4e5f6'
-down_revision: Union[str, Sequence[str], None] = 'f0b873e7c9f3'
+revision: str = 'c991b6be013a'
+down_revision: Union[str, Sequence[str], None] = 'b1c2d3e4f5g6'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
