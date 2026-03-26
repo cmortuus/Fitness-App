@@ -30,6 +30,7 @@
     "axios": "^1.6.0",
     "chart.js": "^4.4.0",
     "date-fns": "^3.0.0",
+    "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",
     "svelte-chartjs": "^4.0.1",
     "tesseract.js": "^7.0.0"
