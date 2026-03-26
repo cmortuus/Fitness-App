@@ -2145,11 +2145,9 @@
 
             <!-- Column headers — adapt to unilateral / assisted mode -->
             {#if ex.isUnilateral}
-              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 1fr 1fr 2.5rem">
+              <div class="grid gap-2 mb-2" style="grid-template-columns: 4.5rem 1fr 2.5rem">
                 <span class="text-xs text-zinc-500 text-center">Type</span>
-                <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Wt (${unit})`}</span>
-                <span class="text-xs text-zinc-500 text-center">Left</span>
-                <span class="text-xs text-zinc-500 text-center">Right</span>
+                <span class="text-xs text-zinc-500 text-center">{isAssistedEx ? `−Assist (${unit})` : `Weight (${unit})`}</span>
                 <span></span>
               </div>
             {:else}
@@ -2172,9 +2170,10 @@
                       onSwipeRight: () => { if (!set.done) removeSet(ex.uiId, set.localId); },
                       disabled: set.done || set.skipped,
                     }}
-                    class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
-                    style="grid-template-columns: 4.5rem 1fr auto auto auto"
+                    class="space-y-1.5 pb-2 mb-1 border-b border-zinc-800/30 last:border-0 {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
                   >
+                  <!-- Row 1: Type + Weight -->
+                  <div class="grid gap-2 items-center" style="grid-template-columns: 4.5rem 1fr 2.5rem">
                     <select
                       value={set.setType || 'standard'}
                       onchange={(e) => {
@@ -2259,7 +2258,23 @@
                         <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
                       {/if}
                     </div>
+                    <!-- Skip button on weight row -->
+                    <div class="flex items-center justify-center">
+                      {#if set.done}
+                        <button onclick={() => uncompleteSet(ex.uiId, set.localId)}
+                                class="text-green-500 text-sm" title="Undo — mark as incomplete">✓</button>
+                      {:else if set.skipped}
+                        <button onclick={() => unskipSet(ex.uiId, set.localId)}
+                                class="text-zinc-500 text-sm" title="Undo skip">↩</button>
+                      {:else}
+                        <button onclick={() => skipSet(ex.uiId, set.localId)}
+                                class="text-zinc-600 hover:text-zinc-400 text-xs" title="Skip this set">Skip</button>
+                      {/if}
+                    </div>
+                  </div>
 
+                  <!-- Row 2: Left + Right reps with check buttons -->
+                  <div class="grid gap-2 items-center ml-1" style="grid-template-columns: 1fr auto 1fr auto">
                     <!-- Left reps + L✓ -->
                     <div class="flex gap-1 items-center">
                       <input
@@ -2328,19 +2343,7 @@
                       {/if}
                     </div>
 
-                    <!-- Skip / Undo (full set) -->
-                    {#if set.saving}
-                      <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
-                    {:else if set.skipped}
-                      <button onclick={() => unskipSet(ex.uiId, set.localId)}
-                              class="h-10 px-2 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors">Undo</button>
-                    {:else if set.done}
-                      <button onclick={() => uncompleteSet(ex.uiId, set.localId)}
-                              class="h-10 w-10 rounded-xl bg-green-700/30 hover:bg-zinc-700 text-green-400 font-bold text-lg transition-colors">✓</button>
-                    {:else}
-                      <button onclick={() => skipSet(ex.uiId, set.localId)}
-                              class="h-10 px-2 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors">Skip</button>
-                    {/if}
+                  </div>
                   </div>
                   <!-- Rep range advisories (unilateral) -->
                   {#if !set.done && !set.skipped && set.setType !== 'myo_rep' && set.setType !== 'myo_rep_match'}
