@@ -13,7 +13,7 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.exercise import Exercise
 from app.models.user import User
-from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
+from app.models.workout import ExerciseFeedback, ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
 from app.services.progression import compute_overload
 from app.schemas.requests import (
     SetCreate,
@@ -761,3 +761,107 @@ async def export_sessions_csv(
         media_type="text/csv",
         headers={"Content-Disposition": "attachment; filename=gymtracker-export.csv"},
     )
+
+
+# ── Exercise feedback (autoregulation) ────────────────────────────────────────
+
+@router.post("/{session_id}/feedback", response_model=dict, status_code=status.HTTP_201_CREATED)
+async def save_exercise_feedback(
+    session_id: int,
+    data: dict,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Save recovery/effort feedback for an exercise in a session."""
+    # Validate session belongs to user
+    result = await db.execute(
+        select(WorkoutSession).where(
+            WorkoutSession.id == session_id, WorkoutSession.user_id == user.id
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    exercise_id = data.get("exercise_id")
+    if not exercise_id:
+        raise HTTPException(status_code=400, detail="exercise_id required")
+
+    # Upsert — update existing feedback or create new
+    existing_result = await db.execute(
+        select(ExerciseFeedback).where(
+            ExerciseFeedback.session_id == session_id,
+            ExerciseFeedback.exercise_id == exercise_id,
+            ExerciseFeedback.user_id == user.id,
+        )
+    )
+    feedback = existing_result.scalar_one_or_none()
+
+    if feedback:
+        if "recovery_rating" in data:
+            feedback.recovery_rating = data["recovery_rating"]
+        if "rir" in data:
+            feedback.rir = data["rir"]
+        if "pump_rating" in data:
+            feedback.pump_rating = data["pump_rating"]
+        if "suggestion" in data:
+            feedback.suggestion = data["suggestion"]
+        if "suggestion_detail" in data:
+            feedback.suggestion_detail = data["suggestion_detail"]
+        if "suggestion_accepted" in data:
+            feedback.suggestion_accepted = data["suggestion_accepted"]
+    else:
+        feedback = ExerciseFeedback(
+            session_id=session_id,
+            exercise_id=exercise_id,
+            user_id=user.id,
+            recovery_rating=data.get("recovery_rating"),
+            rir=data.get("rir"),
+            pump_rating=data.get("pump_rating"),
+            suggestion=data.get("suggestion"),
+            suggestion_detail=data.get("suggestion_detail"),
+            suggestion_accepted=data.get("suggestion_accepted", False),
+        )
+        db.add(feedback)
+
+    await db.flush()
+    await db.refresh(feedback)
+    return {
+        "id": feedback.id,
+        "session_id": feedback.session_id,
+        "exercise_id": feedback.exercise_id,
+        "recovery_rating": feedback.recovery_rating,
+        "rir": feedback.rir,
+        "pump_rating": feedback.pump_rating,
+        "suggestion": feedback.suggestion,
+        "suggestion_detail": feedback.suggestion_detail,
+        "suggestion_accepted": feedback.suggestion_accepted,
+    }
+
+
+@router.get("/{session_id}/feedback", response_model=list[dict])
+async def get_exercise_feedback(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    """Get all exercise feedback for a session."""
+    result = await db.execute(
+        select(ExerciseFeedback).where(
+            ExerciseFeedback.session_id == session_id,
+            ExerciseFeedback.user_id == user.id,
+        )
+    )
+    return [
+        {
+            "id": f.id,
+            "exercise_id": f.exercise_id,
+            "recovery_rating": f.recovery_rating,
+            "rir": f.rir,
+            "pump_rating": f.pump_rating,
+            "suggestion": f.suggestion,
+            "suggestion_detail": f.suggestion_detail,
+            "suggestion_accepted": f.suggestion_accepted,
+        }
+        for f in result.scalars().all()
+    ]
