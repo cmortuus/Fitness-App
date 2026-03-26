@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.database import get_db
@@ -346,6 +347,79 @@ async def get_insights(
             insights.append({"type": "success", "icon": "🏆", "text": f"New estimated PR on {prs[0]}"})
         else:
             insights.append({"type": "success", "icon": "🏆", "text": f"PRs on {len(prs)} exercises this week"})
+
+    # 6. Auto-deload detection: check if performance dropped 2+ sessions in a row
+    # Look at last 3 sessions for each exercise and check if estimated 1RM is declining
+    recent_sessions = await db.execute(
+        select(WorkoutSession)
+        .options(selectinload(WorkoutSession.sets))
+        .where(WorkoutSession.user_id == user.id)
+        .where(WorkoutSession.status == WorkoutStatus.COMPLETED)
+        .order_by(desc(WorkoutSession.date))
+        .limit(10)
+    )
+    recent_sess_list = recent_sessions.scalars().all()
+    if len(recent_sess_list) >= 3:
+        # Group sets by exercise across sessions, track 1RM per session
+        exercise_1rm_history: dict[int, list[float]] = {}
+        for sess in recent_sess_list[:5]:
+            for s in (sess.sets or []):
+                if s.actual_reps and s.actual_weight_kg and s.actual_weight_kg > 0 and (s.set_type or 'standard') != 'warmup':
+                    est = s.actual_weight_kg * (1 + s.actual_reps / 30)
+                    if s.exercise_id not in exercise_1rm_history:
+                        exercise_1rm_history[s.exercise_id] = []
+                    # Keep best 1RM per session per exercise
+                    if len(exercise_1rm_history[s.exercise_id]) == 0 or exercise_1rm_history[s.exercise_id][-1] < est:
+                        if len(exercise_1rm_history[s.exercise_id]) > 0:
+                            exercise_1rm_history[s.exercise_id][-1] = max(exercise_1rm_history[s.exercise_id][-1], est)
+                        else:
+                            exercise_1rm_history[s.exercise_id].append(est)
+
+        declining = []
+        for eid, history in exercise_1rm_history.items():
+            if len(history) >= 3 and history[0] < history[1] < history[2]:
+                # Performance declining for 3 sessions — get exercise name
+                ex_result = await db.execute(select(Exercise.display_name).where(Exercise.id == eid))
+                name = ex_result.scalar()
+                if name:
+                    declining.append(name)
+
+        if declining:
+            insights.append({
+                "type": "warning",
+                "icon": "⚠️",
+                "text": f"Performance declining on {', '.join(declining[:3])} — consider a deload week"
+            })
+
+    # 7. Exercise rotation suggestions — exercises not done in 4+ weeks
+    if len(recent_sess_list) >= 3:
+        four_weeks_ago = today - timedelta(days=28)
+        recent_exercise_ids = set()
+        for sess in recent_sess_list:
+            if sess.date >= str(four_weeks_ago):
+                for s in (sess.sets or []):
+                    recent_exercise_ids.add(s.exercise_id)
+
+        # Find exercises done in older sessions but not recent ones
+        all_exercise_ids = set()
+        for sess in recent_sess_list:
+            for s in (sess.sets or []):
+                all_exercise_ids.add(s.exercise_id)
+
+        stale = all_exercise_ids - recent_exercise_ids
+        if stale:
+            stale_names = []
+            for eid in list(stale)[:3]:
+                ex_r = await db.execute(select(Exercise.display_name).where(Exercise.id == eid))
+                n = ex_r.scalar()
+                if n:
+                    stale_names.append(n)
+            if stale_names:
+                insights.append({
+                    "type": "info",
+                    "icon": "🔄",
+                    "text": f"Haven't done {', '.join(stale_names)} in 4+ weeks — consider rotating back in"
+                })
 
     return insights
 

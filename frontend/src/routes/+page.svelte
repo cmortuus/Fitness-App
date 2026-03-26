@@ -195,6 +195,18 @@
   })());
 
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
+
+  // Last completed session with a plan — for "Repeat Last" button
+  let lastWorkout = $derived((() => {
+    const last = allSessions.find(s => s.status === 'completed' && s.workout_plan_id);
+    if (!last) return null;
+    const plan = $workoutPlans.find(p => p.id === last.workout_plan_id);
+    if (!plan) return null;
+    // Find which day this was
+    const dayName = last.name?.split(' - ').pop() ?? '';
+    const day = plan.days.find(d => last.name?.includes(d.day_name)) ?? plan.days[0];
+    return { plan, day, session: last };
+  })());
 </script>
 
 <div class="page-content space-y-5">
@@ -371,7 +383,23 @@
       </div>
     </a>
 
-  {:else}
+  {/if}
+
+  {#if lastWorkout && !$currentSession}
+    <button
+      onclick={() => window.location.href = `/workout/active?plan=${lastWorkout!.plan.id}&day=${lastWorkout!.day.day_number}`}
+      class="w-full text-left px-4 py-3 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/50 transition-colors">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-[10px] text-zinc-500 uppercase tracking-wider">Repeat Last</p>
+          <p class="text-sm font-medium text-zinc-300">{lastWorkout.session.name}</p>
+        </div>
+        <span class="text-zinc-600">→</span>
+      </div>
+    </button>
+  {/if}
+
+  {#if !nextWorkout && !$currentSession}
     <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
       <p class="text-4xl mb-3">💪</p>
       <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
