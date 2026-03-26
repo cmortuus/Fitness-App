@@ -162,7 +162,17 @@
     // Fallback: check name prefix for exercises that haven't been re-seeded yet
     const n = exercise.name?.toLowerCase() ?? '';
     const prefix = n.split('_')[0];
-    return ['barbell', 'smith', 'tbar', 'belt', 'plate'].includes(prefix);
+    if (['barbell', 'smith', 'tbar', 'belt', 'plate'].includes(prefix)) return true;
+    // Multi-word prefixes and variants
+    if (n.startsWith('t_bar') || n.startsWith('t-bar') || n.includes('t bar') || n.includes('landmine')) return true;
+    if (n.startsWith('plate_loaded')) return true;
+    return false;
+  }
+
+  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+    if (!exercise) return false;
+    const n = exercise.name?.toLowerCase() ?? '';
+    return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
   }
 
   /** Get bar/sled weight for plate math. Uses display base if set, else actual weight. */
@@ -2034,7 +2044,7 @@
                       {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
+                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                         {/if}
                       {/if}
                       {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
@@ -2244,7 +2254,7 @@
                       {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
+                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                         {/if}
                       {/if}
                       {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}

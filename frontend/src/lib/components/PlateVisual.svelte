@@ -7,9 +7,10 @@
     totalWeight: number;
     barWeight: number;
     isLbs: boolean;
+    oneSided?: boolean; // t-bar row, landmine — plates on one end only
   }
 
-  let { totalWeight, barWeight, isLbs }: Props = $props();
+  let { totalWeight, barWeight, isLbs, oneSided = false }: Props = $props();
 
   // Standard gym plate colors (lbs) — sizes proportional to real plates
   const PLATES_LBS: [number, string, string][] = [
@@ -40,7 +41,7 @@
   }
 
   let plates = $derived.by(() => {
-    const perSide = (totalWeight - barWeight) / 2;
+    const perSide = oneSided ? (totalWeight - barWeight) : (totalWeight - barWeight) / 2;
     if (perSide <= 0) return [];
 
     const available = isLbs ? PLATES_LBS : PLATES_KG;
@@ -92,6 +93,6 @@
     <div style="width: 10px; height: 4px; background: #52525b; border-radius: 0 1px 1px 0;"></div>
   </div>
   <p class="text-[9px] text-zinc-500 text-center">
-    {plates.map(p => `${p.count}×${p.weight}`).join(' + ')} /side
+    {plates.map(p => `${p.count}×${p.weight}`).join(' + ')} {oneSided ? '' : '/side'}
   </p>
 {/if}
