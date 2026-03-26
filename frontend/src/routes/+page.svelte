@@ -213,9 +213,19 @@
     recentSessions: 'Recent Workouts',
     plans: 'Manage Plans',
     repeatLast: 'Repeat Last Workout',
-    pinnedCharts: 'Pinned Charts',
+    calculator: '1RM Calculator',
+    pinnedCharts: 'Quick Charts',
     trainingLog: 'Training Log',
   };
+
+  // ── Inline calculator state ────────────────────────────────────────
+  let calcWeight = $state<number | null>(null);
+  let calcReps = $state<number | null>(null);
+  let calcResult = $derived(
+    calcWeight && calcReps && calcReps > 0
+      ? Math.round(calcWeight * (1 + calcReps / 30))
+      : null
+  );
 
   function removeWidget(id: string) {
     if (REQUIRED_WIDGETS.has(id)) return;
@@ -711,6 +721,33 @@
         {/each}
       </div>
     {/if}
+  </div>
+
+  {:else if widget.id === 'calculator'}
+  <!-- ── Inline 1RM Calculator ─────────────────────────────────────── -->
+  <div class="card">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-semibold text-zinc-200 text-sm">1RM Calculator</h3>
+      <a href="/calculator" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">All Formulas →</a>
+    </div>
+    <div class="flex items-center gap-2">
+      <input type="number" inputmode="decimal" bind:value={calcWeight}
+             placeholder={$settings.weightUnit} min="1"
+             class="input text-center text-sm flex-1 !py-1.5" style="font-size: 16px;" />
+      <span class="text-zinc-500 text-xs">×</span>
+      <input type="number" inputmode="numeric" bind:value={calcReps}
+             placeholder="reps" min="1" max="30"
+             class="input text-center text-sm w-16 !py-1.5" style="font-size: 16px;" />
+      <span class="text-zinc-500 text-xs">=</span>
+      <div class="text-center min-w-[60px]">
+        {#if calcResult}
+          <p class="text-lg font-bold text-primary-400">{calcResult}</p>
+          <p class="text-[9px] text-zinc-500">{$settings.weightUnit}</p>
+        {:else}
+          <p class="text-sm text-zinc-600">—</p>
+        {/if}
+      </div>
+    </div>
   </div>
 
   {:else if widget.id === 'pinnedCharts'}

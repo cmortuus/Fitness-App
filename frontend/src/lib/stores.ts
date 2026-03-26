@@ -103,6 +103,7 @@ const defaultSettings: AppSettings = {
     { id: 'recentSessions', enabled: true },
     { id: 'plans', enabled: true },
     { id: 'trainingLog', enabled: true },
+    { id: 'calculator', enabled: false },
     { id: 'repeatLast', enabled: false },
     { id: 'pinnedCharts', enabled: false },
   ],
