@@ -176,20 +176,6 @@ docker_deploy() {
   log "Pulling latest code..."
   git fetch origin
 
-  # Build a specific branch into a temp dir and build its Docker image
-  build_branch() {
-    local branch="$1"
-    local service="$2"
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    log "Extracting $branch into temp build dir..."
-    git archive "origin/$branch" | tar -x -C "$tmpdir"
-    docker compose build --build-arg BUILDKIT_INLINE_CACHE=1 "$service"
-    # Build with the branch's code as context
-    docker build -t "fitness-app-${service}" "$tmpdir"
-    rm -rf "$tmpdir"
-  }
-
   if [ "$target" = "dev" ]; then
     log "Updating dev branch only..."
     git fetch origin dev
@@ -200,7 +186,7 @@ docker_deploy() {
     git archive origin/dev | tar -x -C "$tmpdir"
     docker build -t fitness-app-dev "$tmpdir"
     rm -rf "$tmpdir"
-    docker compose up -d dev
+    docker compose up -d --no-build dev
     docker_health_check_async dev
     return
   elif [ "$target" = "main" ]; then
@@ -228,7 +214,7 @@ docker_deploy() {
     docker build -t fitness-app-dev "$tmpdir"
     rm -rf "$tmpdir"
 
-    docker compose up -d
+    docker compose up -d --no-build
   fi
 
   docker_health_check_async all
