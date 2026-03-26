@@ -57,18 +57,32 @@
     if (typeof window === 'undefined') return;
     const show = () => { keyboardOpen = true; };
     const hide = () => { keyboardOpen = false; };
-    // Detect keyboard via visualViewport resize (reliable on iOS)
+
+    // Focus/blur on inputs — most reliable across all devices
+    const onFocusIn = (e: FocusEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') show();
+    };
+    const onFocusOut = () => {
+      setTimeout(hide, 100); // delay to avoid flicker between field switches
+    };
+    document.addEventListener('focusin', onFocusIn);
+    document.addEventListener('focusout', onFocusOut);
+
+    // Also use visualViewport as backup (catches keyboard dismiss without blur)
+    let vpCleanup: (() => void) | null = null;
     if (window.visualViewport) {
       const vv = window.visualViewport;
-      const check = () => { keyboardOpen = vv.height < window.innerHeight * 0.75; };
+      const check = () => { keyboardOpen = vv.height < window.innerHeight * 0.85; };
       vv.addEventListener('resize', check);
-      return () => vv.removeEventListener('resize', check);
+      vpCleanup = () => vv.removeEventListener('resize', check);
     }
-    // Fallback: focus/blur on inputs
-    document.addEventListener('focusin', (e) => {
-      if ((e.target as HTMLElement)?.tagName === 'INPUT' || (e.target as HTMLElement)?.tagName === 'TEXTAREA') show();
-    });
-    document.addEventListener('focusout', hide);
+
+    return () => {
+      document.removeEventListener('focusin', onFocusIn);
+      document.removeEventListener('focusout', onFocusOut);
+      vpCleanup?.();
+    };
   });
 
   function logout() {
