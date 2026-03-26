@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.api.auth import get_current_user
 from app.database import get_db
@@ -272,7 +273,7 @@ async def get_insights(
     # 3. Workout frequency
     ws_result = await db.execute(
         select(func.count(WorkoutSession.id))
-        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time()))
         .where(WorkoutSession.completed_at.isnot(None))
         .where(WorkoutSession.user_id == user.id)
     )
@@ -285,7 +286,7 @@ async def get_insights(
     # 4. Weight trend
     bw_result = await db.execute(
         select(BodyWeightEntry)
-        .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time()))
         .where(BodyWeightEntry.user_id == user.id)
         .order_by(BodyWeightEntry.recorded_at)
     )
@@ -306,7 +307,7 @@ async def get_insights(
         select(ExerciseSet, Exercise.name)
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
         .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
-        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time()))
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
         .where(WorkoutSession.user_id == user.id)
@@ -324,8 +325,8 @@ async def get_insights(
         select(ExerciseSet, Exercise.name)
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
         .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
-        .where(WorkoutSession.started_at >= datetime.combine(prev_week_ago, datetime.min.time(), tzinfo=timezone.utc))
-        .where(WorkoutSession.started_at < datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at >= datetime.combine(prev_week_ago, datetime.min.time()))
+        .where(WorkoutSession.started_at < datetime.combine(week_ago, datetime.min.time()))
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
         .where(WorkoutSession.user_id == user.id)
@@ -347,4 +348,129 @@ async def get_insights(
         else:
             insights.append({"type": "success", "icon": "🏆", "text": f"PRs on {len(prs)} exercises this week"})
 
+    # 6. Auto-deload detection: check if performance dropped 2+ sessions in a row
+    # Look at last 3 sessions for each exercise and check if estimated 1RM is declining
+    recent_sessions = await db.execute(
+        select(WorkoutSession)
+        .options(selectinload(WorkoutSession.sets))
+        .where(WorkoutSession.user_id == user.id)
+        .where(WorkoutSession.status == WorkoutStatus.COMPLETED)
+        .order_by(desc(WorkoutSession.date))
+        .limit(10)
+    )
+    recent_sess_list = recent_sessions.scalars().all()
+    if len(recent_sess_list) >= 3:
+        # Group sets by exercise across sessions, track 1RM per session
+        exercise_1rm_history: dict[int, list[float]] = {}
+        for sess in recent_sess_list[:5]:
+            for s in (sess.sets or []):
+                if s.actual_reps and s.actual_weight_kg and s.actual_weight_kg > 0 and (s.set_type or 'standard') != 'warmup':
+                    est = s.actual_weight_kg * (1 + s.actual_reps / 30)
+                    if s.exercise_id not in exercise_1rm_history:
+                        exercise_1rm_history[s.exercise_id] = []
+                    # Keep best 1RM per session per exercise
+                    if len(exercise_1rm_history[s.exercise_id]) == 0 or exercise_1rm_history[s.exercise_id][-1] < est:
+                        if len(exercise_1rm_history[s.exercise_id]) > 0:
+                            exercise_1rm_history[s.exercise_id][-1] = max(exercise_1rm_history[s.exercise_id][-1], est)
+                        else:
+                            exercise_1rm_history[s.exercise_id].append(est)
+
+        declining = []
+        for eid, history in exercise_1rm_history.items():
+            if len(history) >= 3 and history[0] < history[1] < history[2]:
+                # Performance declining for 3 sessions — get exercise name
+                ex_result = await db.execute(select(Exercise.display_name).where(Exercise.id == eid))
+                name = ex_result.scalar()
+                if name:
+                    declining.append(name)
+
+        if declining:
+            insights.append({
+                "type": "warning",
+                "icon": "⚠️",
+                "text": f"Performance declining on {', '.join(declining[:3])} — consider a deload week"
+            })
+
+    # 7. Exercise rotation suggestions — exercises not done in 4+ weeks
+    if len(recent_sess_list) >= 3:
+        four_weeks_ago = today - timedelta(days=28)
+        recent_exercise_ids = set()
+        for sess in recent_sess_list:
+            if sess.date >= str(four_weeks_ago):
+                for s in (sess.sets or []):
+                    recent_exercise_ids.add(s.exercise_id)
+
+        # Find exercises done in older sessions but not recent ones
+        all_exercise_ids = set()
+        for sess in recent_sess_list:
+            for s in (sess.sets or []):
+                all_exercise_ids.add(s.exercise_id)
+
+        stale = all_exercise_ids - recent_exercise_ids
+        if stale:
+            stale_names = []
+            for eid in list(stale)[:3]:
+                ex_r = await db.execute(select(Exercise.display_name).where(Exercise.id == eid))
+                n = ex_r.scalar()
+                if n:
+                    stale_names.append(n)
+            if stale_names:
+                insights.append({
+                    "type": "info",
+                    "icon": "🔄",
+                    "text": f"Haven't done {', '.join(stale_names)} in 4+ weeks — consider rotating back in"
+                })
+
     return insights
+
+
+@router.get("/records")
+async def get_personal_records(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    """Get personal records per exercise — heaviest weight, most reps, best estimated 1RM."""
+    result = await db.execute(
+        select(ExerciseSet, Exercise.display_name, Exercise.name)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
+        .where(WorkoutSession.user_id == user.id)
+        .where(ExerciseSet.actual_reps.isnot(None))
+        .where(ExerciseSet.actual_weight_kg.isnot(None))
+        .where(ExerciseSet.actual_weight_kg > 0)
+        .where(ExerciseSet.set_type != 'warmup')
+    )
+    rows = result.all()
+
+    # Group by exercise
+    exercise_data: dict[int, dict] = {}
+    for exercise_set, display_name, name in rows:
+        eid = exercise_set.exercise_id
+        w = exercise_set.actual_weight_kg or 0
+        r = exercise_set.actual_reps or 0
+        est_1rm = w * (1 + r / 30) if r > 0 and w > 0 else 0
+
+        if eid not in exercise_data:
+            exercise_data[eid] = {
+                "exercise_id": eid,
+                "display_name": display_name,
+                "name": name,
+                "max_weight_kg": 0,
+                "max_reps": 0,
+                "best_1rm_kg": 0,
+                "best_set_weight_kg": 0,
+                "best_set_reps": 0,
+            }
+
+        d = exercise_data[eid]
+        if w > d["max_weight_kg"]:
+            d["max_weight_kg"] = w
+        if r > d["max_reps"]:
+            d["max_reps"] = r
+        if est_1rm > d["best_1rm_kg"]:
+            d["best_1rm_kg"] = round(est_1rm, 1)
+            d["best_set_weight_kg"] = w
+            d["best_set_reps"] = r
+
+    records = sorted(exercise_data.values(), key=lambda x: x["best_1rm_kg"], reverse=True)
+    return records

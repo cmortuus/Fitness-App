@@ -309,3 +309,51 @@ async def get_all_notes(
     for n in result.scalars().all():
         notes[n.exercise_id] = {"note": n.note, "updated_at": n.updated_at.isoformat()}
     return notes
+
+
+class _RecalcBody(_PydanticBase):
+    exercise_name_pattern: str  # e.g. "smith" to match all smith machine exercises
+    old_base_kg: float
+    new_base_kg: float
+
+
+@router.post("/recalculate-weights")
+async def recalculate_weights(
+    body: _RecalcBody,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Retroactively adjust weights on historical sets when a machine's base weight changes."""
+    diff_kg = body.new_base_kg - body.old_base_kg
+    if abs(diff_kg) < 0.01:
+        return {"adjusted": 0}
+
+    # Find matching exercises by name pattern
+    result = await db.execute(
+        select(Exercise).where(Exercise.name.ilike(f"%{body.exercise_name_pattern}%"))
+    )
+    exercise_ids = [e.id for e in result.scalars().all()]
+    if not exercise_ids:
+        return {"adjusted": 0}
+
+    # Find all completed sets for these exercises belonging to this user
+    sets_result = await db.execute(
+        select(ExerciseSet)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.user_id == user.id,
+            ExerciseSet.exercise_id.in_(exercise_ids),
+            ExerciseSet.actual_weight_kg.isnot(None),
+        )
+    )
+    sets = sets_result.scalars().all()
+
+    count = 0
+    for s in sets:
+        s.actual_weight_kg = max(0, (s.actual_weight_kg or 0) + diff_kg)
+        if s.planned_weight_kg is not None:
+            s.planned_weight_kg = max(0, s.planned_weight_kg + diff_kg)
+        count += 1
+
+    await db.flush()
+    return {"adjusted": count, "diff_kg": round(diff_kg, 2)}

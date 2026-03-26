@@ -22,5 +22,5 @@ class WorkoutTemplate(Base):
     planned_exercises: Mapped[str] = mapped_column(Text, nullable=False)
     block_type: Mapped[str] = mapped_column(String(20), nullable=False, default="hypertrophy")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )

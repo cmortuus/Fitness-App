@@ -196,6 +196,8 @@ export interface PlannedExercise {
   notes?: string | null;
   set_type?: string;
   drops?: number | null;
+  group_id?: string | null;
+  group_type?: 'superset' | 'circuit' | null;
 }
 
 export interface PlannedDay {
@@ -369,6 +371,21 @@ export async function getAllExerciseNotes(): Promise<Record<number, { note: stri
 
 export async function setExerciseNote(exerciseId: number, note: string): Promise<void> {
   await api.put(`/exercises/${exerciseId}/notes`, { note });
+}
+
+export async function recalculateWeights(pattern: string, oldBaseKg: number, newBaseKg: number): Promise<{ adjusted: number }> {
+  const response = await api.post('/exercises/recalculate-weights', {
+    exercise_name_pattern: pattern,
+    old_base_kg: oldBaseKg,
+    new_base_kg: newBaseKg,
+  });
+  return response.data;
+}
+
+// Personal records
+export async function getPersonalRecords(): Promise<any[]> {
+  const response = await api.get('/progress/records');
+  return response.data;
 }
 
 // Get recently used exercises

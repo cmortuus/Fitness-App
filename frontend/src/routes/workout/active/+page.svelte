@@ -101,7 +101,30 @@
     sets: UISet[];
     isUnilateral: boolean;     // overrides exercise default; shows L/R inputs
     customRestSecs: number | null; // null = use category default
+    groupId: string | null;    // shared ID for superset/circuit grouping
+    groupType: 'superset' | 'circuit' | null;
   }
+
+  interface ExerciseGroup {
+    groupId: string | null;
+    groupType: 'superset' | 'circuit' | null;
+    exercises: UIExercise[];
+  }
+
+  function computeGroups(exercises: UIExercise[]): ExerciseGroup[] {
+    const groups: ExerciseGroup[] = [];
+    for (const ex of exercises) {
+      const last = groups[groups.length - 1];
+      if (ex.groupId && last?.groupId === ex.groupId) {
+        last.exercises.push(ex);
+      } else {
+        groups.push({ groupId: ex.groupId, groupType: ex.groupType, exercises: [ex] });
+      }
+    }
+    return groups;
+  }
+
+  let exerciseGroups = $derived(computeGroups(uiExercises));
 
   // ─── State ────────────────────────────────────────────────────────────────
   let loading = $state(true);
@@ -128,6 +151,8 @@
   let startedAt = $state<number>(0);
   let elapsed = $state(0);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
+  let clockPaused = $state(false);
+  let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
@@ -135,7 +160,21 @@
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
-    return exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded';
+    if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
+    // Fallback: check name prefix for exercises that haven't been re-seeded yet
+    const n = exercise.name?.toLowerCase() ?? '';
+    const prefix = n.split('_')[0];
+    if (['barbell', 'smith', 'tbar', 'belt', 'plate'].includes(prefix)) return true;
+    // Multi-word prefixes and variants
+    if (n.startsWith('t_bar') || n.startsWith('t-bar') || n.includes('t bar') || n.includes('landmine')) return true;
+    if (n.startsWith('plate_loaded')) return true;
+    return false;
+  }
+
+  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+    if (!exercise) return false;
+    const n = exercise.name?.toLowerCase() ?? '';
+    return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
   }
 
   /** Get bar/sled weight for plate math. Uses display base if set, else actual weight. */
@@ -196,6 +235,7 @@
   // Filters for the exercise picker
   let filterRegion = $state<'all' | 'upper' | 'lower' | 'full_body'>('all');
   let filterType = $state<'all' | 'compound' | 'isolation'>('all');
+  let filterEquip = $state<string>('all');
   let pickingExercise = $state<Exercise | null>(null);
   let recentExercises = $state<Exercise[]>([]);
   // Swap mode: when set, the modal replaces this exercise instead of adding
@@ -294,6 +334,23 @@
         raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
       } catch (e: any) {
         if (e?.response?.status === 409) {
+          // Session already in progress — resume it instead of showing conflict dialog
+          const detail = e?.response?.data?.detail;
+          const existingId: number | null =
+            detail && typeof detail === 'object' ? detail.session_id ?? null : null;
+          if (existingId != null) {
+            currentSession.set(await getSession(existingId));
+            await resumeSession();
+            return;
+          }
+          // Fallback: check for any in-progress session
+          const sessions = await getSessions({ limit: 5 });
+          const inProgress = sessions.find(s => s.started_at && !s.completed_at);
+          if (inProgress) {
+            currentSession.set(inProgress);
+            await resumeSession();
+            return;
+          }
           await handleConflict(e, () => startFromPlan(planId, dayNumber));
           return;
         }
@@ -371,6 +428,8 @@
             sets,
             isUnilateral: isUni,
             customRestSecs: null,
+            groupId: pe.group_id ?? null,
+            groupType: pe.group_type ?? null,
           };
         });
       }
@@ -533,6 +592,8 @@
           sets,
           isUnilateral: isUni,
           customRestSecs: null,
+          groupId: null,
+          groupType: null,
         };
       });
     } catch (e) {
@@ -848,8 +909,9 @@
           });
         }
       }
-      // Start rest timer only on successful save
-      startRestTimer(exUiId);
+      // Start rest timer (group-aware for supersets/circuits)
+      ensureNotificationPermission();
+      handlePostSetCompletion(exUiId);
     } catch (e) {
       console.error('Failed to complete set:', e);
       alert('Failed to save set. Please try again.');
@@ -873,8 +935,8 @@
     else set.doneRight = true;
     uiExercises = [...uiExercises];
 
-    // Start rest timer after completing either side
-    startRestTimer(exUiId);
+    // Start rest timer (group-aware for supersets/circuits)
+    handlePostSetCompletion(exUiId);
 
     // If both sides are now resolved, trigger the full backend save
     if (set.doneLeft && set.doneRight) {
@@ -933,6 +995,106 @@
     uiExercises = [...uiExercises];
   }
 
+  function generateWarmups(exUiId: string) {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex) return;
+
+    // Find the first working set's weight as the target
+    const workingSet = ex.sets.find(s => s.setType !== 'warmup' && s.weightLbs != null && s.weightLbs > 0);
+    if (!workingSet || !workingSet.weightLbs) return;
+    const target = workingSet.weightLbs;
+
+    const exercise = getEx(ex.exerciseId);
+    const barWeight = getBarWeight(exercise);
+
+    // Check if this muscle group was already warmed up by a prior exercise
+    const myMuscles = exercise?.primary_muscles ?? [];
+    const exIdx = uiExercises.indexOf(ex);
+    const alreadyWarmed = exIdx > 0 && uiExercises.slice(0, exIdx).some(prev => {
+      const prevEx = getEx(prev.exerciseId);
+      const prevMuscles = prevEx?.primary_muscles ?? [];
+      const overlap = myMuscles.some(m => prevMuscles.includes(m));
+      const hasDoneSets = prev.sets.some(s => s.done || s.setType === 'warmup');
+      return overlap && hasDoneSets;
+    });
+
+    // Standard warmup ramp
+    const fullScheme = [
+      { pct: 0, reps: 10 },    // empty bar
+      { pct: 0.5, reps: 5 },
+      { pct: 0.7, reps: 3 },
+      { pct: 0.85, reps: 1 },
+    ];
+
+    // If muscles already warmed, just do 1 set at 70%
+    if (alreadyWarmed) {
+      const warmupScheme = [{ pct: 0.7, reps: 3 }];
+      const warmupSets: typeof ex.sets = [];
+      for (const w of warmupScheme) {
+        const weight = roundWeight(target * w.pct);
+        if (weight >= target) continue;
+        warmupSets.push({
+          localId: `${ex.exerciseId}-warmup-0-${Date.now()}`,
+          backendId: null, setNumber: 1,
+          weightLbs: weight, reps: w.reps,
+          repsLeft: ex.isUnilateral ? w.reps : null,
+          repsRight: ex.isUnilateral ? w.reps : null,
+          done: false, skipped: false, doneLeft: false, doneRight: false,
+          saving: false, oneRM: null, initWeight: null, initReps: null,
+          setType: 'warmup', drops: [],
+        });
+      }
+      ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
+      ex.sets = [...warmupSets, ...ex.sets];
+      ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
+      uiExercises = [...uiExercises];
+      return;
+    }
+
+    // Trim to user's max warmup sets setting
+    const maxSets = $settings.maxWarmupSets ?? 4;
+    const warmupScheme = fullScheme.slice(-maxSets);
+
+    const warmupSets: typeof ex.sets = [];
+    for (const w of warmupScheme) {
+      const rawWeight = w.pct === 0 ? barWeight : target * w.pct;
+      const weight = roundWeight(rawWeight);
+      // Skip if warmup weight is same as or more than working weight
+      if (weight >= target) continue;
+      // Skip duplicate weights
+      if (warmupSets.some(s => s.weightLbs === weight)) continue;
+
+      warmupSets.push({
+        localId: `${ex.exerciseId}-warmup-${warmupSets.length}-${Date.now()}`,
+        backendId: null,
+        setNumber: warmupSets.length + 1,
+        weightLbs: weight,
+        reps: w.reps,
+        repsLeft: ex.isUnilateral ? w.reps : null,
+        repsRight: ex.isUnilateral ? w.reps : null,
+        done: false,
+        skipped: false,
+        doneLeft: false,
+        doneRight: false,
+        saving: false,
+        oneRM: null,
+        initWeight: null,
+        initReps: null,
+        setType: 'warmup',
+        drops: [],
+      });
+    }
+
+    if (warmupSets.length === 0) return;
+
+    // Remove existing warmup sets
+    ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
+    // Prepend warmups, then renumber all sets
+    ex.sets = [...warmupSets, ...ex.sets];
+    ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
+    uiExercises = [...uiExercises];
+  }
+
   async function removeExercise(exUiId: string) {
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (ex && sessionId) {
@@ -958,8 +1120,63 @@
     return d.upperIsolation;
   }
 
+  // ─── Superset/Circuit grouping ──────────────────────────────────────────
+  let highlightedExUiId = $state<string | null>(null);
+  let highlightTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function handlePostSetCompletion(exUiId: string) {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex?.groupId) {
+      startRestTimer(exUiId);
+      return;
+    }
+    const group = uiExercises.filter(e => e.groupId === ex.groupId);
+    const myDone = ex.sets.filter(s => s.done || s.skipped).length;
+    const allCaughtUp = group.every(g => g.sets.filter(s => s.done || s.skipped).length >= myDone);
+    if (allCaughtUp) {
+      startRestTimer(exUiId);
+    } else {
+      // Highlight next exercise in group
+      const myIdx = group.indexOf(ex);
+      const next = group[(myIdx + 1) % group.length];
+      highlightedExUiId = next.uiId;
+      if (highlightTimeout) clearTimeout(highlightTimeout);
+      highlightTimeout = setTimeout(() => { highlightedExUiId = null; }, 5000);
+      const el = document.querySelector(`[data-ex-uid="${next.uiId}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function toggleLink(exUiId: string) {
+    const idx = uiExercises.findIndex(e => e.uiId === exUiId);
+    if (idx <= 0) return;
+    const current = uiExercises[idx];
+    const above = uiExercises[idx - 1];
+
+    if (current.groupId && current.groupId === above.groupId) {
+      // Unlink: remove current from group
+      current.groupId = null;
+      current.groupType = null;
+      // If only 1 left in old group, clear it too
+      const remaining = uiExercises.filter(e => e.groupId === above.groupId);
+      if (remaining.length === 1) { remaining[0].groupId = null; remaining[0].groupType = null; }
+      else { const t = remaining.length >= 3 ? 'circuit' : 'superset'; remaining.forEach(e => e.groupType = t); }
+    } else {
+      // Link: join current to above's group (or create new)
+      const gid = above.groupId || `g-${Date.now().toString(36)}`;
+      above.groupId = gid;
+      current.groupId = gid;
+      const group = uiExercises.filter(e => e.groupId === gid);
+      const t: 'superset' | 'circuit' = group.length >= 3 ? 'circuit' : 'superset';
+      group.forEach(e => e.groupType = t);
+    }
+    uiExercises = [...uiExercises];
+  }
+
   /** Play a short chime using Web Audio API (no audio file needed) */
   function playRestChime() {
+    // Haptic feedback
+    try { navigator.vibrate?.([200, 100, 200]); } catch {}
     try {
       const ctx = new AudioContext();
       // Two-tone chime: C5 then E5
@@ -984,12 +1201,23 @@
   }
 
   let restEndTime = $state<number>(0); // absolute ms timestamp when rest ends
+  let restNotifTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  /** Request notification permission (called on first set completion) */
+  async function ensureNotificationPermission() {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+  }
 
   function startRestTimer(exUiId: string) {
     restSecs = restDurationForExercise(exUiId);
     restEndTime = Date.now() + restSecs * 1000;
     restActive = true;
     if (restInterval) clearInterval(restInterval);
+    if (restNotifTimeout) clearTimeout(restNotifTimeout);
+
     restInterval = setInterval(() => {
       const remaining = Math.ceil((restEndTime - Date.now()) / 1000);
       restSecs = Math.max(0, remaining);
@@ -1000,10 +1228,25 @@
         playRestChime();
       }
     }, 1000);
+
+    // Schedule notification for when rest ends (works when app is backgrounded)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      restNotifTimeout = setTimeout(() => {
+        try {
+          new Notification('Rest Complete', {
+            body: 'Time for your next set!',
+            icon: '/icons/icon-192.png',
+            tag: 'rest-timer', // replaces previous notification
+            requireInteraction: false,
+          });
+        } catch { /* notification not supported in this context */ }
+      }, restSecs * 1000);
+    }
   }
 
   function skipRest() {
     if (restInterval) { clearInterval(restInterval); restInterval = null; }
+    if (restNotifTimeout) { clearTimeout(restNotifTimeout); restNotifTimeout = null; }
     restActive = false;
     restEndTime = 0;
   }
@@ -1017,11 +1260,42 @@
       let pool = allExercises.filter(e => {
         if (filterRegion !== 'all' && e.body_region !== filterRegion) return false;
         if (filterType !== 'all' && e.movement_type !== filterType) return false;
+        if (filterEquip !== 'all') {
+          const prefix = e.name?.split('_')[0] ?? '';
+          if (filterEquip === 'barbell' && prefix !== 'barbell') return false;
+          if (filterEquip === 'dumbbell' && prefix !== 'db') return false;
+          if (filterEquip === 'cable' && prefix !== 'cable') return false;
+          if (filterEquip === 'machine' && prefix !== 'machine') return false;
+          if (filterEquip === 'bodyweight' && !['bodyweight', 'body', 'weighted'].includes(prefix)) return false;
+          if (filterEquip === 'kettlebell' && prefix !== 'kb') return false;
+          if (filterEquip === 'smith' && prefix !== 'smith') return false;
+          if (filterEquip === 'band' && prefix !== 'band') return false;
+        }
         return true;
       });
 
+      // When swapping, sort by relevance to the exercise being replaced
+      if (swapTargetUiId) {
+        const swapEx = uiExercises.find(e => e.uiId === swapTargetUiId);
+        const origExercise = swapEx ? getEx(swapEx.exerciseId) : null;
+        if (origExercise) {
+          const origMuscles = new Set(origExercise.primary_muscles);
+          const origType = origExercise.movement_type;
+          pool.sort((a, b) => {
+            const aMusc = a.primary_muscles.some(m => origMuscles.has(m)) ? 1 : 0;
+            const bMusc = b.primary_muscles.some(m => origMuscles.has(m)) ? 1 : 0;
+            const aType = a.movement_type === origType ? 1 : 0;
+            const bType = b.movement_type === origType ? 1 : 0;
+            const aScore = aMusc * 2 + aType;
+            const bScore = bMusc * 2 + bType;
+            return bScore - aScore;
+          });
+        }
+      }
+
       if (!q) {
-        // Show recents (matching filters) first
+        // Show recents (matching filters) first, or full sorted list for swaps
+        if (swapTargetUiId) return pool.slice(0, 50);
         const recentIds = new Set(recentExercises.map(e => e.id));
         const poolIds = new Set(pool.map(e => e.id));
         const recent = recentExercises.filter(e => poolIds.has(e.id)).slice(0, 10);
@@ -1087,6 +1361,8 @@
           sets: newSets,
           isUnilateral: pickingExercise.is_unilateral,
           customRestSecs: null,
+          groupId: oldEx.groupId,
+          groupType: oldEx.groupType,
         };
         uiExercises = [...uiExercises];
       }
@@ -1114,6 +1390,8 @@
         sets,
         isUnilateral: pickingExercise.is_unilateral,
         customRestSecs: null,
+        groupId: null,
+        groupType: null,
       }];
     }
     showAddModal = false;
@@ -1534,6 +1812,22 @@
         {/each}
       </div>
 
+      <!-- Session notes -->
+      <div class="mb-4">
+        <label class="text-xs text-zinc-500 block mb-1">Workout notes (optional)</label>
+        <textarea
+          placeholder="How did it feel? Energy level, sleep, anything notable..."
+          class="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white resize-none"
+          style="font-size: 16px;"
+          rows="2"
+          oninput={(e) => {
+            // Save to localStorage keyed by session ID
+            const note = (e.target as HTMLTextAreaElement).value;
+            if (sessionId) localStorage.setItem(`hgt_session_note_${sessionId}`, note);
+          }}
+        ></textarea>
+      </div>
+
       <a href="/" class="btn-primary w-full text-center block">Back to Dashboard</a>
     </div>
   </div>
@@ -1554,7 +1848,23 @@
         <div class="flex-1 min-w-0">
           <h1 class="text-sm font-semibold truncate text-zinc-200">{workoutName}</h1>
           <div class="flex items-center gap-3 mt-0.5">
-            <span class="text-base font-mono font-bold text-primary-400">{formatClock(elapsed)}</span>
+            <button
+              onclick={() => {
+                if (clockPaused) {
+                  // Resume: add pause duration to offset
+                  pauseOffset += Date.now() - (startedAt + (elapsed * 1000) + pauseOffset);
+                  clockInterval = setInterval(() => {
+                    elapsed = Math.max(0, Math.floor((Date.now() - startedAt - pauseOffset) / 1000));
+                  }, 1000);
+                } else {
+                  // Pause: stop the clock
+                  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+                }
+                clockPaused = !clockPaused;
+              }}
+              class="text-base font-mono font-bold {clockPaused ? 'text-amber-400 animate-pulse' : 'text-primary-400'}"
+              title={clockPaused ? 'Resume timer' : 'Pause timer'}
+            >{formatClock(elapsed)}{clockPaused ? ' ⏸' : ''}</button>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
           </div>
         </div>
@@ -1583,12 +1893,29 @@
     <div class="flex-1 overflow-y-auto pb-36">
       <div class="max-w-2xl mx-auto px-3 py-4 space-y-3">
 
-        {#each uiExercises as ex (ex.uiId)}
+        {#each exerciseGroups as group}
+          <div class={group.groupId ? 'border-l-[3px] border-primary-500 rounded-l-lg pl-1 space-y-1' : 'space-y-3'}>
+          {#if group.groupId}
+            <div class="text-xs text-primary-400 font-semibold px-3 pt-1">
+              {group.groupType === 'circuit' ? `Circuit (${group.exercises.length})` : 'Superset'}
+            </div>
+          {/if}
+          {#each group.exercises as ex (ex.uiId)}
           {@const exercise = getEx(ex.exerciseId)}
           {@const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped)}
           {@const isAssistedEx = exercise?.is_assisted ?? false}
+          {@const exIdx = uiExercises.indexOf(ex)}
 
-          <div class="exercise-card {allDone ? 'exercise-card-done' : ''}">
+          <!-- Link/unlink button between exercises -->
+          {#if exIdx > 0}
+            <button
+              onclick={() => toggleLink(ex.uiId)}
+              class="w-full py-1 text-[10px] font-medium transition-colors rounded {ex.groupId && ex.groupId === uiExercises[exIdx - 1]?.groupId ? 'text-primary-400 bg-primary-500/10 hover:bg-primary-500/20' : 'text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50'}"
+            >{ex.groupId && ex.groupId === uiExercises[exIdx - 1]?.groupId ? 'Unlink' : 'Link as superset'}</button>
+          {/if}
+
+          <div class="exercise-card {allDone ? 'exercise-card-done' : ''} {highlightedExUiId === ex.uiId ? 'ring-2 ring-primary-400 ring-offset-1 ring-offset-zinc-900' : ''}"
+               data-ex-uid={ex.uiId}>
             <!-- Exercise header -->
             <div class="flex items-start justify-between mb-3">
               <div>
@@ -1598,9 +1925,26 @@
                     <span class="ml-2 text-green-400 text-sm">✓</span>
                   {/if}
                 </h3>
-                {#if exercise?.primary_muscles?.length}
-                  <p class="text-xs text-zinc-500 mt-0.5 capitalize">{muscleLabel(ex.exerciseId)}</p>
-                {/if}
+                <div class="flex items-center gap-2 mt-0.5">
+                  {#if exercise?.primary_muscles?.length}
+                    <p class="text-xs text-zinc-500 capitalize">{muscleLabel(ex.exerciseId)}</p>
+                  {/if}
+                  <button
+                    onclick={() => {
+                      const current = restDurationForExercise(ex.uiId);
+                      const input = prompt(`Rest time for this exercise (seconds):`, String(current));
+                      if (input != null) {
+                        const val = parseInt(input);
+                        if (!isNaN(val) && val > 0) {
+                          ex.customRestSecs = val;
+                          uiExercises = [...uiExercises];
+                        }
+                      }
+                    }}
+                    class="text-[10px] text-zinc-600 hover:text-zinc-400 transition-colors"
+                    title="Tap to override rest time for this exercise"
+                  >⏱ {Math.floor(restDurationForExercise(ex.uiId) / 60)}:{String(restDurationForExercise(ex.uiId) % 60).padStart(2, '0')}{ex.customRestSecs != null ? ' ✎' : ''}</button>
+                </div>
                 <!-- Persistent exercise note -->
                 {#if editingNoteId === ex.exerciseId}
                   <div class="flex gap-1 mt-1">
@@ -1696,7 +2040,7 @@
                       disabled: set.done || set.skipped,
                     }}
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
-                    style="grid-template-columns: 4.5rem 1fr 1fr 1fr 5.5rem"
+                    style="grid-template-columns: 4.5rem 1fr auto auto auto"
                   >
                     <select
                       value={set.setType || 'standard'}
@@ -1710,11 +2054,13 @@
                       }}
                       disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
-                             {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                             {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
+                              set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                               set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
+                      <option value="warmup">Warmup</option>
                       <option value="myo_rep">Myo Rep</option>
                       {#if ex.sets.indexOf(set) > 0}
                         <option value="myo_rep_match">Myo Match</option>
@@ -1760,10 +2106,10 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
+                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                         {/if}
                       {/if}
                       {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
@@ -1781,107 +2127,86 @@
                       {/if}
                     </div>
 
-                    <!-- Left reps -->
-                    <input
-                      type="number" inputmode="decimal"
-                      value={set.repsLeft ?? ''}
-                      oninput={(e) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        const r = v === '' ? null : parseInt(v);
-                        set.repsLeft = r;
-                        // Epley: auto-adjust weight when reps change
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                          const newW = epleyWeight(set.oneRM, r);
-                          set.weightLbs = newW;
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                    <!-- Left reps + L✓ -->
+                    <div class="flex gap-1 items-center">
+                      <input
+                        type="number" inputmode="decimal"
+                        value={set.repsLeft ?? ''}
+                        oninput={(e) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          const r = v === '' ? null : parseInt(v);
+                          set.repsLeft = r;
+                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                            const newW = epleyWeight(set.oneRM, r);
+                            set.weightLbs = newW;
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                            }
                           }
-                        }
-                        uiExercises = [...uiExercises];
-                      }}
-                      disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
-                      class="set-input {set.doneLeft && !set.done ? 'opacity-50' : ''}"
-                    />
+                          uiExercises = [...uiExercises];
+                        }}
+                        disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
+                        class="set-input flex-1 {set.doneLeft && !set.done ? 'opacity-50' : ''}"
+                      />
+                      {#if !set.saving && !set.skipped && !set.done}
+                        {#if set.doneLeft}
+                          <button onclick={() => undoSide(ex.uiId, set.localId, 'left')}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
+                        {:else}
+                          <button onclick={() => completeSide(ex.uiId, set.localId, 'left')}
+                                  disabled={(set.repsLeft ?? 0) <= 0}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
+                        {/if}
+                      {/if}
+                    </div>
 
-                    <!-- Right reps -->
-                    <input
-                      type="number" inputmode="decimal"
-                      value={set.repsRight ?? ''}
-                      oninput={(e) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        const r = v === '' ? null : parseInt(v);
-                        set.repsRight = r;
-                        // Epley: auto-adjust weight when reps change
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                          const newW = epleyWeight(set.oneRM, r);
-                          set.weightLbs = newW;
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                    <!-- Right reps + R✓ -->
+                    <div class="flex gap-1 items-center">
+                      <input
+                        type="number" inputmode="decimal"
+                        value={set.repsRight ?? ''}
+                        oninput={(e) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          const r = v === '' ? null : parseInt(v);
+                          set.repsRight = r;
+                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                            const newW = epleyWeight(set.oneRM, r);
+                            set.weightLbs = newW;
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                            }
                           }
-                        }
-                        uiExercises = [...uiExercises];
-                      }}
-                      disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
-                      class="set-input {set.doneRight && !set.done ? 'opacity-50' : ''}"
-                    />
+                          uiExercises = [...uiExercises];
+                        }}
+                        disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
+                        class="set-input flex-1 {set.doneRight && !set.done ? 'opacity-50' : ''}"
+                      />
+                      {#if !set.saving && !set.skipped && !set.done}
+                        {#if set.doneRight}
+                          <button onclick={() => undoSide(ex.uiId, set.localId, 'right')}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
+                        {:else}
+                          <button onclick={() => completeSide(ex.uiId, set.localId, 'right')}
+                                  disabled={(set.repsRight ?? 0) <= 0}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
+                        {/if}
+                      {/if}
+                    </div>
 
-                    <!-- Complete L/R / Skip / Undo -->
+                    <!-- Skip / Undo (full set) -->
                     {#if set.saving}
-                      <div class="flex gap-1 justify-center"><span class="text-zinc-400 text-xs">…</span></div>
+                      <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
                     {:else if set.skipped}
-                      <button
-                        onclick={() => unskipSet(ex.uiId, set.localId)}
-                        class="h-12 px-3 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors"
-                        title="Undo skip"
-                      >Undo</button>
+                      <button onclick={() => unskipSet(ex.uiId, set.localId)}
+                              class="h-10 px-2 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors">Undo</button>
                     {:else if set.done}
-                      <button
-                        onclick={() => uncompleteSet(ex.uiId, set.localId)}
-                        class="h-12 w-12 rounded-xl bg-green-700/30 hover:bg-zinc-700 text-green-400 font-bold text-lg transition-colors"
-                        title="Undo — mark as incomplete"
-                      >✓</button>
+                      <button onclick={() => uncompleteSet(ex.uiId, set.localId)}
+                              class="h-10 w-10 rounded-xl bg-green-700/30 hover:bg-zinc-700 text-green-400 font-bold text-lg transition-colors">✓</button>
                     {:else}
-                      <div class="flex flex-col gap-1">
-                        <!-- Per-side check buttons -->
-                        <div class="flex gap-1">
-                          {#if set.doneLeft}
-                            <button
-                              onclick={() => undoSide(ex.uiId, set.localId, 'left')}
-                              class="h-6 flex-1 rounded-lg bg-green-700/30 text-green-400 text-[10px] font-bold transition-colors hover:bg-zinc-700"
-                              title="Undo left side"
-                            >L ✓</button>
-                          {:else}
-                            <button
-                              onclick={() => completeSide(ex.uiId, set.localId, 'left')}
-                              disabled={(set.repsLeft ?? 0) <= 0}
-                              class="h-6 flex-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-[10px] font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                              title={(set.repsLeft ?? 0) > 0 ? 'Log left side' : 'Enter left reps first'}
-                            >L ✓</button>
-                          {/if}
-                          {#if set.doneRight}
-                            <button
-                              onclick={() => undoSide(ex.uiId, set.localId, 'right')}
-                              class="h-6 flex-1 rounded-lg bg-green-700/30 text-green-400 text-[10px] font-bold transition-colors hover:bg-zinc-700"
-                              title="Undo right side"
-                            >R ✓</button>
-                          {:else}
-                            <button
-                              onclick={() => completeSide(ex.uiId, set.localId, 'right')}
-                              disabled={(set.repsRight ?? 0) <= 0}
-                              class="h-6 flex-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-[10px] font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                              title={(set.repsRight ?? 0) > 0 ? 'Log right side' : 'Enter right reps first'}
-                            >R ✓</button>
-                          {/if}
-                        </div>
-                        <!-- Single skip for entire set -->
-                        <button
-                          onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-5 w-full rounded-lg bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-[10px] font-medium transition-colors"
-                          title="Skip this set"
-                        >Skip</button>
-                      </div>
+                      <button onclick={() => skipSet(ex.uiId, set.localId)}
+                              class="h-10 px-2 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors">Skip</button>
                     {/if}
                   </div>
                   <!-- Rep range advisories (unilateral) -->
@@ -1943,11 +2268,13 @@
                       }}
                       disabled={set.done || isMyoMatchLocked(ex, set)}
                       class="set-type-select w-full
-                             {set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
+                             {set.setType === 'warmup' ? '!bg-orange-500/15 !border-orange-500/30 text-orange-400' :
+                              set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                               set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
+                      <option value="warmup">Warmup</option>
                       <option value="myo_rep">Myo Rep</option>
                       {#if ex.sets.indexOf(set) > 0}
                         <option value="myo_rep_match">Myo Match</option>
@@ -1989,10 +2316,10 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null}
+                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} />
+                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                         {/if}
                       {/if}
                       {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
@@ -2110,6 +2437,12 @@
                 onclick={() => addSetRow(ex.uiId)}
                 class="text-xs px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded transition-colors"
               >+ Add Set</button>
+              {#if shouldShowPlates(exercise) && ex.sets.some(s => s.setType !== 'warmup' && s.weightLbs != null && s.weightLbs > 0)}
+                <button
+                  onclick={() => generateWarmups(ex.uiId)}
+                  class="text-xs px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded transition-colors"
+                >{ex.sets.some(s => s.setType === 'warmup') ? 'Redo Warmups' : '+ Warmups'}</button>
+              {/if}
               {#if ex.sets.length > 1 && !ex.sets[ex.sets.length - 1].done}
                 <button
                   onclick={() => removeSet(ex.uiId, ex.sets[ex.sets.length - 1].localId)}
@@ -2117,6 +2450,8 @@
                 >− Remove Last</button>
               {/if}
             </div>
+          </div>
+        {/each}
           </div>
         {/each}
 
@@ -2236,6 +2571,19 @@
                   class="px-2.5 py-1 rounded text-xs font-medium transition-colors {
                     filterType === val
                       ? 'bg-indigo-600 text-white'
+                      : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+                  }"
+                >{label}</button>
+              {/each}
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-xs text-zinc-500 w-12 shrink-0">Equip</span>
+              {#each [['all','All'], ['barbell','Barbell'], ['dumbbell','DB'], ['cable','Cable'], ['machine','Machine'], ['bodyweight','BW'], ['smith','Smith'], ['kettlebell','KB']] as [val, label]}
+                <button
+                  onclick={() => filterEquip = val}
+                  class="px-2.5 py-1 rounded text-xs font-medium transition-colors {
+                    filterEquip === val
+                      ? 'bg-green-600 text-white'
                       : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
                   }"
                 >{label}</button>

@@ -75,7 +75,7 @@ async def add_entry(
     entry = BodyWeightEntry(
         weight_kg=data.weight_kg,
         body_fat_pct=data.body_fat_pct,
-        recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.now(timezone.utc),
+        recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.utcnow(),
         notes=data.notes,
         user_id=user.id,
     )

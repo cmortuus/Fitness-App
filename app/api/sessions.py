@@ -188,7 +188,7 @@ async def start_session(
         )
 
     workout_session.status = WorkoutStatus.IN_PROGRESS
-    workout_session.started_at = datetime.now(timezone.utc)
+    workout_session.started_at = datetime.utcnow()
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
@@ -215,7 +215,7 @@ async def complete_session(
         )
 
     workout_session.status = WorkoutStatus.COMPLETED
-    workout_session.completed_at = datetime.now(timezone.utc)
+    workout_session.completed_at = datetime.utcnow()
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
@@ -304,6 +304,9 @@ async def update_set(
 
     update_data = set_data.model_dump(exclude_unset=True)
     for field, value in update_data.items():
+        # Strip timezone info — DB uses naive timestamps
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            value = value.replace(tzinfo=None)
         setattr(exercise_set, field, value)
 
     # Update session totals
@@ -708,3 +711,53 @@ async def create_session_from_plan(
     )
     workout_session = refetch.scalar_one()
     return serialize_session(workout_session)
+
+
+@router.get("/export/csv")
+async def export_sessions_csv(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Export all workout data as CSV."""
+    import csv
+    import io
+    from fastapi.responses import StreamingResponse
+
+    result = await db.execute(
+        select(WorkoutSession)
+        .options(selectinload(WorkoutSession.sets))
+        .where(WorkoutSession.user_id == user.id)
+        .where(WorkoutSession.status == WorkoutStatus.COMPLETED)
+        .order_by(desc(WorkoutSession.date))
+    )
+    sessions = result.scalars().all()
+
+    # Get exercise names
+    ex_result = await db.execute(select(Exercise))
+    exercises = {e.id: e.display_name for e in ex_result.scalars().all()}
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["Date", "Workout", "Exercise", "Set", "Weight (kg)", "Reps", "Set Type", "Notes"])
+
+    for session in sessions:
+        for s in sorted(session.sets, key=lambda x: (x.exercise_id, x.set_number)):
+            if s.actual_reps is None and s.actual_weight_kg is None:
+                continue
+            writer.writerow([
+                session.date,
+                session.name or "",
+                exercises.get(s.exercise_id, f"Exercise {s.exercise_id}"),
+                s.set_number,
+                round(s.actual_weight_kg or 0, 2),
+                s.actual_reps or 0,
+                s.set_type or "standard",
+                s.notes or "",
+            ])
+
+    output.seek(0)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=gymtracker-export.csv"},
+    )

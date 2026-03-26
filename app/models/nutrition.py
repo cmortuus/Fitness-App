@@ -29,7 +29,7 @@ class FoodItem(Base):
     micronutrients: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: per-100g values
     is_custom: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
 
@@ -54,7 +54,7 @@ class NutritionEntry(Base):
     fat: Mapped[float] = mapped_column(Float, nullable=False)
     micronutrients: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: actual intake values
     logged_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
 
@@ -72,7 +72,7 @@ class MacroGoal(Base):
     effective_from: Mapped[date_type] = mapped_column(Date, nullable=False)
     micronutrient_goals: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: RDA targets
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
 
@@ -96,5 +96,5 @@ class DietPhase(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     ended_on: Mapped[date_type | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
     )

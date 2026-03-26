@@ -18,21 +18,65 @@
     <div style="display: contents">%sveltekit.body%</div>
     <script>
       if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('/sw.js').catch(() => {});
-        // Show update banner when a new version is deployed
-        navigator.serviceWorker.addEventListener('message', (e) => {
-          if (e.data && e.data.type === 'SW_UPDATED') {
-            var banner = document.createElement('div');
-            banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:12px 16px;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-family:system-ui';
-            banner.innerHTML = '<span>A new version is available</span><button id="sw-update-btn" style="background:#fff;color:#1d4ed8;border:none;padding:6px 16px;border-radius:8px;font-weight:600;cursor:pointer">Update</button>';
-            document.getElementById('sw-update-btn').onclick = async function() {
-              if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k) { return caches.delete(k); })); }
-              window.location.reload();
-            };
-            document.body.appendChild(banner);
-          }
+        function showUpdateBanner() {
+          if (document.getElementById('sw-update-banner')) return; // already showing
+          var banner = document.createElement('div');
+          banner.id = 'sw-update-banner';
+          banner.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:9999;padding:12px 16px;background:#1d4ed8;color:#fff;display:flex;align-items:center;justify-content:space-between;font-size:14px;font-family:system-ui';
+          banner.innerHTML = '<span>A new version is available</span><button style="background:#fff;color:#1d4ed8;border:none;padding:6px 16px;border-radius:8px;font-weight:600;cursor:pointer">Update</button>';
+          banner.querySelector('button').onclick = async function() {
+            if ('caches' in window) { var keys = await caches.keys(); await Promise.all(keys.map(function(k) { return caches.delete(k); })); }
+            window.location.reload();
+          };
+          document.body.appendChild(banner);
+        }
+
+        navigator.serviceWorker.register('/sw.js').then(function(reg) {
+          // Check for updates every 5 minutes
+          setInterval(function() { reg.update(); }, 5 * 60 * 1000);
+          // Detect when a new SW is waiting
+          reg.addEventListener('updatefound', function() {
+            var newWorker = reg.installing;
+            if (newWorker) {
+              newWorker.addEventListener('statechange', function() {
+                if (newWorker.state === 'activated') showUpdateBanner();
+              });
+            }
+          });
+        }).catch(function() {});
+
+        // Also listen for SW messages (backup)
+        navigator.serviceWorker.addEventListener('message', function(e) {
+          if (e.data && e.data.type === 'SW_UPDATED') showUpdateBanner();
+        });
+
+        // Detect controller change (new SW took over)
+        navigator.serviceWorker.addEventListener('controllerchange', function() {
+          showUpdateBanner();
         });
       }
+    </script>
+    <script>
+      // Global error reporter — sends unhandled errors to backend
+      window.addEventListener('error', function(e) {
+        try {
+          fetch('/api/errors/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: e.message, stack: e.error?.stack, url: e.filename + ':' + e.lineno })
+          }).catch(function(){});
+        } catch(ex) {}
+      });
+      window.addEventListener('unhandledrejection', function(e) {
+        try {
+          var msg = e.reason?.message || String(e.reason);
+          fetch('/api/errors/', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: msg, stack: e.reason?.stack, url: window.location.href })
+          }).catch(function(){});
+        } catch(ex) {}
+      });
     </script>
   </body>
 </html>

@@ -122,18 +122,25 @@ migrate_to_docker() {
   }
 
   # 8. Copy existing database into Docker volumes
-  if [ -f "$APP_DIR/homegym.db" ]; then
-    log "Copying existing database into main container volume..."
-    # Create volumes and copy data
-    docker compose up -d main
-    sleep 2
-    docker compose cp "$APP_DIR/homegym.db" main:/app/data/homegym.db
-    docker compose restart main
-  fi
+  # 8. Start PostgreSQL first, let it initialize
+  log "Starting PostgreSQL..."
+  docker compose up -d db
+  sleep 5
 
-  # 9. Start everything
+  # 9. Start app containers (alembic runs in entrypoint)
   docker compose up -d
-  sleep 3
+  sleep 10
+
+  # 10. Migrate SQLite data to PostgreSQL if SQLite DB exists
+  if [ -f "$APP_DIR/homegym.db" ]; then
+    log "Migrating SQLite data to PostgreSQL..."
+    docker compose cp "$APP_DIR/homegym.db" main:/tmp/homegym.db
+    docker compose exec -T main bash -c "PYTHONPATH=/app python scripts/migrate_sqlite_to_pg.py /tmp/homegym.db" || {
+      warn "SQLite migration had issues — check manually"
+    }
+    mv "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_pre_postgres_${TIMESTAMP}.db"
+    log "SQLite backup saved. PostgreSQL is now the database."
+  fi
 
   # 10. Mark as Docker mode
   touch "$APP_DIR/.docker-mode"
@@ -171,19 +178,20 @@ docker_deploy() {
 
   if [ "$target" = "dev" ]; then
     log "Updating dev branch only..."
-    local current_branch
-    current_branch=$(git branch --show-current)
-    git checkout dev 2>/dev/null || git checkout -b dev origin/dev
-    git reset --hard origin/dev
-    git checkout "$current_branch"
+    git fetch origin dev
 
     log "Rebuilding dev container..."
-    docker compose build dev
-    docker compose up -d dev
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    git archive origin/dev | tar -x -C "$tmpdir"
+    docker build -t fitness-app-dev "$tmpdir"
+    rm -rf "$tmpdir"
+    docker compose up -d --no-build dev
     docker_health_check_async dev
     return
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
+    git fetch origin main
     git reset --hard origin/main
 
     log "Rebuilding main container..."
@@ -193,20 +201,20 @@ docker_deploy() {
     return
   else
     log "Updating all branches..."
+    git fetch origin
     git reset --hard origin/main
 
-    # Also update dev branch
-    local current_branch
-    current_branch=$(git branch --show-current)
-    if git rev-parse --verify origin/dev &>/dev/null; then
-      git checkout dev 2>/dev/null || git checkout -b dev origin/dev
-      git reset --hard origin/dev
-      git checkout "$current_branch"
-    fi
+    log "Rebuilding main container..."
+    docker compose build main
 
-    log "Rebuilding containers..."
-    docker compose build
-    docker compose up -d
+    log "Rebuilding dev container..."
+    local tmpdir
+    tmpdir=$(mktemp -d)
+    git archive origin/dev | tar -x -C "$tmpdir"
+    docker build -t fitness-app-dev "$tmpdir"
+    rm -rf "$tmpdir"
+
+    docker compose up -d --no-build
   fi
 
   docker_health_check_async all
@@ -225,35 +233,33 @@ docker_deploy() {
 
 docker_health_check() {
   local target="${1:-all}"
-  local max_wait=300  # 5 minutes
-  local delay=10
   local start_time=$SECONDS
 
-  log "Health check started (target: $target, timeout: ${max_wait}s)..."
+  log "Health check (target: $target)..."
 
-  while (( SECONDS - start_time < max_wait )); do
+  for i in $(seq 1 20); do
     local ok=true
 
     if [ "$target" = "dev" ] || [ "$target" = "all" ]; then
-      if ! docker compose exec -T dev curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
+      if ! docker compose exec -T dev curl -so /dev/null -w '' http://localhost:3000/ 2>/dev/null; then
         ok=false
       fi
     fi
 
     if [ "$target" = "main" ] || [ "$target" = "all" ]; then
-      if ! docker compose exec -T main curl -sf http://localhost:8000/docs > /dev/null 2>&1; then
+      if ! docker compose exec -T main curl -so /dev/null -w '' http://localhost:3000/ 2>/dev/null; then
         ok=false
       fi
     fi
 
     if $ok; then
-      log "App is healthy after $(( SECONDS - start_time ))s"
+      log "Healthy after $(( SECONDS - start_time ))s"
       return 0
     fi
-    sleep $delay
+    sleep 5
   done
 
-  err "Health check failed after ${max_wait}s — check: docker compose logs -f"
+  warn "Health check didn't pass after 100s — check: docker compose logs -f"
   return 1
 }
 
@@ -297,6 +303,13 @@ ensure_env() {
     local jwt_secret
     jwt_secret=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
     echo "JWT_SECRET_KEY=${jwt_secret}" >> "$APP_DIR/.env"
+  fi
+  # Ensure POSTGRES_PASSWORD exists
+  if ! grep -q '^POSTGRES_PASSWORD=' "$APP_DIR/.env"; then
+    log "Adding POSTGRES_PASSWORD to .env..."
+    local pg_pass
+    pg_pass=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+    echo "POSTGRES_PASSWORD=${pg_pass}" >> "$APP_DIR/.env"
   fi
 }
 

@@ -170,6 +170,20 @@
     return allSessions.filter(s => s.date >= isoDate(weekAgo) && s.status === 'completed').length;
   })());
 
+  // Streak: consecutive completed sessions without a skip/miss
+  // Counts backwards from the most recent session
+  let streak = $derived((() => {
+    const sorted = [...allSessions]
+      .filter(s => s.status === 'completed' || s.status === 'skipped')
+      .sort((a, b) => b.date.localeCompare(a.date));
+    let count = 0;
+    for (const s of sorted) {
+      if (s.status === 'completed') count++;
+      else break; // skipped session breaks the streak
+    }
+    return count;
+  })());
+
   let weeklySets = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
     const weekStr = isoDate(weekAgo);
@@ -181,26 +195,42 @@
   })());
 
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
+
+  // Last completed session with a plan — for "Repeat Last" button
+  let lastWorkout = $derived((() => {
+    const last = allSessions.find(s => s.status === 'completed' && s.workout_plan_id);
+    if (!last) return null;
+    const plan = $workoutPlans.find(p => p.id === last.workout_plan_id);
+    if (!plan) return null;
+    // Find which day this was
+    const dayName = last.name?.split(' - ').pop() ?? '';
+    const day = plan.days.find(d => last.name?.includes(d.day_name)) ?? plan.days[0];
+    return { plan, day, session: last };
+  })());
 </script>
 
 <div class="page-content space-y-5">
 
   <!-- ── Quick stats strip ───────────────────────────────────────────── -->
   {#if !loading && allSessions.length > 0}
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-4 gap-2">
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-primary-400">{weeklyWorkouts}</p>
         <p class="text-xs text-zinc-500 mt-0.5">workouts</p>
       </div>
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-green-400">{weeklySets.completed}</p>
-        <p class="text-xs text-zinc-500 mt-0.5">sets this week</p>
+        <p class="text-xs text-zinc-500 mt-0.5">sets</p>
       </div>
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-accent-400">
           {weeklyVolume > 999 ? (weeklyVolume / 1000).toFixed(1) + 'k' : weeklyVolume.toFixed(0)}
         </p>
-        <p class="text-xs text-zinc-500 mt-0.5">{volUnit()} volume</p>
+        <p class="text-xs text-zinc-500 mt-0.5">{volUnit()}</p>
+      </div>
+      <div class="card text-center py-3">
+        <p class="text-2xl font-bold text-amber-400">{streak}</p>
+        <p class="text-xs text-zinc-500 mt-0.5">streak</p>
       </div>
     </div>
   {/if}
@@ -353,7 +383,23 @@
       </div>
     </a>
 
-  {:else}
+  {/if}
+
+  {#if lastWorkout && !$currentSession}
+    <button
+      onclick={() => window.location.href = `/workout/active?plan=${lastWorkout!.plan.id}&day=${lastWorkout!.day.day_number}`}
+      class="w-full text-left px-4 py-3 rounded-xl bg-zinc-800/60 hover:bg-zinc-800 border border-zinc-700/50 transition-colors">
+      <div class="flex items-center justify-between">
+        <div>
+          <p class="text-[10px] text-zinc-500 uppercase tracking-wider">Repeat Last</p>
+          <p class="text-sm font-medium text-zinc-300">{lastWorkout.session.name}</p>
+        </div>
+        <span class="text-zinc-600">→</span>
+      </div>
+    </button>
+  {/if}
+
+  {#if !nextWorkout && !$currentSession}
     <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
       <p class="text-4xl mb-3">💪</p>
       <p class="text-zinc-400 mb-4">Create a plan to get started.</p>

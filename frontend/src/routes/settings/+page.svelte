@@ -2,10 +2,53 @@
   import { onMount } from 'svelte';
   import { settings, latestBodyWeight } from '$lib/stores';
   import type { RestDurations } from '$lib/stores';
-  import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser } from '$lib/api';
+  import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser, recalculateWeights } from '$lib/api';
   import type { BodyWeightEntry } from '$lib/api';
 
   const currentUser = getStoredUser();
+
+  // Collapsible sections
+  let showBars = $state(false);
+  let showPlateLoaded = $state(false);
+
+  // Machine key → exercise name pattern for retroactive recalculation
+  const MACHINE_PATTERNS: Record<string, string> = {
+    smithMachine: 'smith', legPress: 'leg_press', hackSquat: 'hack_squat',
+    tBarRow: 't_bar', beltSquat: 'belt', chestPress: 'chest_press',
+    shoulderPress: 'shoulder_press', inclinePress: 'incline', declinePress: 'decline',
+    calfRaise: 'calf', seatedRow: 'seated_row', latPulldown: 'lat_pulldown',
+    pendulumSquat: 'pendulum', hipThrust: 'hip_thrust', legExtension: 'leg_extension',
+    legCurl: 'leg_curl',
+  };
+
+  async function handleMachineWeightChange(key: string, newVal: number) {
+    const oldVal = $settings.machineWeights?.[key] ?? 0;
+    settings.update(s => ({ ...s, machineWeights: { ...s.machineWeights, [key]: newVal } }));
+
+    if (oldVal > 0 && Math.abs(newVal - oldVal) > 0.1) {
+      const pattern = MACHINE_PATTERNS[key];
+      if (pattern) {
+        const apply = confirm(
+          `Apply this weight change retroactively to all past workouts on this machine?\n\n` +
+          `OK = Recalculate past workouts\nCancel = Future workouts only`
+        );
+        if (apply) {
+          try {
+            const result = await recalculateWeights(
+              pattern,
+              oldVal * LBS_TO_KG,
+              newVal * LBS_TO_KG
+            );
+            if (result.adjusted > 0) {
+              alert(`Updated ${result.adjusted} historical sets.`);
+            }
+          } catch {
+            alert('Failed to recalculate past workouts.');
+          }
+        }
+      }
+    }
+  }
 
   function logout() {
     clearAuthTokens();
@@ -405,10 +448,15 @@
       <p class="text-sm text-zinc-400 mt-1">Set the unloaded weight of your equipment for accurate plate calculations.</p>
     </div>
 
-    <!-- Bars -->
+    <!-- Bars (collapsible) -->
     <div>
-      <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Bars</h4>
-      <div class="space-y-2">
+      <button onclick={() => showBars = !showBars}
+              class="w-full flex items-center justify-between py-1">
+        <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Bars</h4>
+        <span class="text-zinc-500 text-sm transition-transform duration-200" class:rotate-180={showBars}>▾</span>
+      </button>
+      {#if showBars}
+      <div class="space-y-2 mt-2">
         {#each [
           ['barbell', 'Standard Barbell (Olympic)'],
           ['ezBar', 'EZ Curl Bar'],
@@ -435,18 +483,35 @@
           </div>
         {/each}
       </div>
+      {/if}
     </div>
 
-    <!-- Plate-loaded machines -->
+    <!-- Plate-loaded machines (collapsible) -->
     <div>
-      <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Plate-Loaded Machines</h4>
-      <div class="space-y-3">
+      <button onclick={() => showPlateLoaded = !showPlateLoaded}
+              class="w-full flex items-center justify-between py-1">
+        <h4 class="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Plate-Loaded Machines</h4>
+        <span class="text-zinc-500 text-sm transition-transform duration-200" class:rotate-180={showPlateLoaded}>▾</span>
+      </button>
+      {#if showPlateLoaded}
+      <div class="space-y-3 mt-2">
         {#each [
           ['smithMachine', 'Smith Machine'],
           ['legPress', 'Leg Press'],
           ['hackSquat', 'Hack Squat'],
           ['tBarRow', 'T-Bar Row'],
           ['beltSquat', 'Belt Squat'],
+          ['chestPress', 'Chest Press'],
+          ['shoulderPress', 'Shoulder Press'],
+          ['inclinePress', 'Incline Press'],
+          ['declinePress', 'Decline Press'],
+          ['calfRaise', 'Calf Raise'],
+          ['seatedRow', 'Seated Row'],
+          ['latPulldown', 'Lat Pulldown'],
+          ['pendulumSquat', 'Pendulum Squat'],
+          ['hipThrust', 'Hip Thrust Machine'],
+          ['legExtension', 'Leg Extension'],
+          ['legCurl', 'Leg Curl'],
         ] as [key, label]}
           <div class="space-y-1">
             <div class="flex items-center justify-between gap-4">
@@ -456,10 +521,7 @@
                        value={$settings.machineWeights?.[key] ?? 0}
                        onchange={(e) => {
                          const val = parseFloat((e.target as HTMLInputElement).value) || 0;
-                         settings.update(s => ({
-                           ...s,
-                           machineWeights: { ...s.machineWeights, [key]: val }
-                         }));
+                         handleMachineWeightChange(key, val);
                        }}
                        class="w-20 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-2 text-white"
                        style="font-size: 16px;" />
@@ -484,6 +546,26 @@
               </div>
             </div>
           </div>
+        {/each}
+      </div>
+      {/if}
+    </div>
+  </div>
+
+  <!-- ── Warmup Settings ────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Warmups</h3>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Max warmup sets</p>
+        <p class="text-xs text-zinc-500">Limit auto-generated warmup sets per exercise</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [1, 2, 3, 4] as n}
+          <button onclick={() => settings.update(s => ({ ...s, maxWarmupSets: n }))}
+                  class="w-8 h-8 rounded-lg text-sm font-medium transition-colors {$settings.maxWarmupSets === n ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {n}
+          </button>
         {/each}
       </div>
     </div>
@@ -616,9 +698,28 @@
     {#if currentUser}
       <p class="text-sm text-zinc-400">Signed in as <span class="text-white font-medium">{currentUser.username}</span></p>
     {/if}
-    <button onclick={logout}
-            class="w-full py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
-      Sign Out
-    </button>
+    <div class="flex gap-2">
+      <button
+        onclick={async () => {
+          try {
+            const token = localStorage.getItem('hgt_access_token');
+            const res = await fetch('/api/sessions/export/csv', {
+              headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'gymtracker-export.csv';
+            a.click(); URL.revokeObjectURL(url);
+          } catch { alert('Export failed'); }
+        }}
+        class="flex-1 py-2.5 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-300 hover:bg-zinc-700 transition-colors">
+        Export CSV
+      </button>
+      <button onclick={logout}
+              class="flex-1 py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+        Sign Out
+      </button>
+    </div>
   </div>
 </div>

@@ -2,18 +2,12 @@
 set -e
 
 echo "[entrypoint] Running database migrations..."
-DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/homegym.db}" \
-DATABASE_SYNC_URL="${DATABASE_SYNC_URL:-sqlite:///./data/homegym.db}" \
 alembic upgrade head || echo "[entrypoint] Migration warning (may be first run)"
 
-echo "[entrypoint] Updating exercise data..."
-DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/homegym.db}" \
-DATABASE_SYNC_URL="${DATABASE_SYNC_URL:-sqlite:///./data/homegym.db}" \
-PYTHONPATH=/app python scripts/seed_all_exercises.py || echo "[entrypoint] Seed warning (may already be up to date)"
+echo "[entrypoint] Seeding exercises..."
+PYTHONPATH=/app python scripts/seed_all_exercises.py || echo "[entrypoint] Seed warning"
 
 echo "[entrypoint] Starting backend..."
-DATABASE_URL="${DATABASE_URL:-sqlite+aiosqlite:///./data/homegym.db}" \
-DATABASE_SYNC_URL="${DATABASE_SYNC_URL:-sqlite:///./data/homegym.db}" \
 uvicorn app.main:app --host 0.0.0.0 --port 8000 &
 
 echo "[entrypoint] Starting frontend..."

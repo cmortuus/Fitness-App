@@ -1,4 +1,20 @@
 services:
+  # PostgreSQL — shared database for all app containers
+  db:
+    image: postgres:16-alpine
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=homegym
+      - POSTGRES_USER=homegym
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-homegym_secret}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U homegym"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
   # Nginx router — cookie-based routing between main and dev
   router:
     image: nginx:alpine
@@ -20,28 +36,30 @@ services:
       dockerfile: Dockerfile
     expose:
       - "80"
-    volumes:
-      - shared_data:/app/data
     env_file: .env
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/homegym.db
-      - DATABASE_SYNC_URL=sqlite:///./data/homegym.db
+      - DATABASE_URL=postgresql+asyncpg://homegym:${POSTGRES_PASSWORD:-homegym_secret}@db:5432/homegym
+      - DATABASE_SYNC_URL=postgresql://homegym:${POSTGRES_PASSWORD:-homegym_secret}@db:5432/homegym
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
-  # Dev branch — built from the dev branch checkout
+  # Dev branch
   dev:
     build:
       context: .
       dockerfile: Dockerfile
     expose:
       - "80"
-    volumes:
-      - shared_data:/app/data
     env_file: .env
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///./data/homegym.db
-      - DATABASE_SYNC_URL=sqlite:///./data/homegym.db
+      - DATABASE_URL=postgresql+asyncpg://homegym:${POSTGRES_PASSWORD:-homegym_secret}@db:5432/homegym
+      - DATABASE_SYNC_URL=postgresql://homegym:${POSTGRES_PASSWORD:-homegym_secret}@db:5432/homegym
+    depends_on:
+      db:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
-  shared_data:
+  pg_data:
