@@ -740,9 +740,9 @@
         <button
           onclick={() => {
             if (document.cookie.includes('gymtracker_branch=dev')) {
-              document.cookie = 'gymtracker_branch=; path=/; max-age=0';
+              document.cookie = 'gymtracker_branch=; path=/; max-age=0; Secure; SameSite=Lax';
             } else {
-              document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000';
+              document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
             }
             window.location.reload();
           }}
