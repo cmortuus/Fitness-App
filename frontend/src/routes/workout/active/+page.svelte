@@ -1717,7 +1717,7 @@
                       disabled: set.done || set.skipped,
                     }}
                     class="grid gap-2 items-center {set.done ? 'opacity-50' : set.skipped ? 'opacity-30 line-through' : ''}"
-                    style="grid-template-columns: 4.5rem 1fr 1fr 1fr 5.5rem"
+                    style="grid-template-columns: 4.5rem 1fr auto auto auto"
                   >
                     <select
                       value={set.setType || 'standard'}
@@ -1802,107 +1802,86 @@
                       {/if}
                     </div>
 
-                    <!-- Left reps -->
-                    <input
-                      type="number" inputmode="decimal"
-                      value={set.repsLeft ?? ''}
-                      oninput={(e) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        const r = v === '' ? null : parseInt(v);
-                        set.repsLeft = r;
-                        // Epley: auto-adjust weight when reps change
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                          const newW = epleyWeight(set.oneRM, r);
-                          set.weightLbs = newW;
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                    <!-- Left reps + L✓ -->
+                    <div class="flex gap-1 items-center">
+                      <input
+                        type="number" inputmode="decimal"
+                        value={set.repsLeft ?? ''}
+                        oninput={(e) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          const r = v === '' ? null : parseInt(v);
+                          set.repsLeft = r;
+                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                            const newW = epleyWeight(set.oneRM, r);
+                            set.weightLbs = newW;
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                            }
                           }
-                        }
-                        uiExercises = [...uiExercises];
-                      }}
-                      disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
-                      class="set-input {set.doneLeft && !set.done ? 'opacity-50' : ''}"
-                    />
+                          uiExercises = [...uiExercises];
+                        }}
+                        disabled={set.done || set.doneLeft || isMyoMatchLocked(ex, set)} min="0" placeholder="L"
+                        class="set-input flex-1 {set.doneLeft && !set.done ? 'opacity-50' : ''}"
+                      />
+                      {#if !set.saving && !set.skipped && !set.done}
+                        {#if set.doneLeft}
+                          <button onclick={() => undoSide(ex.uiId, set.localId, 'left')}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
+                        {:else}
+                          <button onclick={() => completeSide(ex.uiId, set.localId, 'left')}
+                                  disabled={(set.repsLeft ?? 0) <= 0}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
+                        {/if}
+                      {/if}
+                    </div>
 
-                    <!-- Right reps -->
-                    <input
-                      type="number" inputmode="decimal"
-                      value={set.repsRight ?? ''}
-                      oninput={(e) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        const r = v === '' ? null : parseInt(v);
-                        set.repsRight = r;
-                        // Epley: auto-adjust weight when reps change
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                          const newW = epleyWeight(set.oneRM, r);
-                          set.weightLbs = newW;
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                    <!-- Right reps + R✓ -->
+                    <div class="flex gap-1 items-center">
+                      <input
+                        type="number" inputmode="decimal"
+                        value={set.repsRight ?? ''}
+                        oninput={(e) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          const r = v === '' ? null : parseInt(v);
+                          set.repsRight = r;
+                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                            const newW = epleyWeight(set.oneRM, r);
+                            set.weightLbs = newW;
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                            }
                           }
-                        }
-                        uiExercises = [...uiExercises];
-                      }}
-                      disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
-                      class="set-input {set.doneRight && !set.done ? 'opacity-50' : ''}"
-                    />
+                          uiExercises = [...uiExercises];
+                        }}
+                        disabled={set.done || set.doneRight || isMyoMatchLocked(ex, set)} min="0" placeholder="R"
+                        class="set-input flex-1 {set.doneRight && !set.done ? 'opacity-50' : ''}"
+                      />
+                      {#if !set.saving && !set.skipped && !set.done}
+                        {#if set.doneRight}
+                          <button onclick={() => undoSide(ex.uiId, set.localId, 'right')}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-green-700/30 text-green-400 text-xs font-bold transition-colors hover:bg-zinc-700">✓</button>
+                        {:else}
+                          <button onclick={() => completeSide(ex.uiId, set.localId, 'right')}
+                                  disabled={(set.repsRight ?? 0) <= 0}
+                                  class="h-10 w-10 shrink-0 rounded-xl bg-primary-600 hover:bg-primary-500 text-white text-xs font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed">✓</button>
+                        {/if}
+                      {/if}
+                    </div>
 
-                    <!-- Complete L/R / Skip / Undo -->
+                    <!-- Skip / Undo (full set) -->
                     {#if set.saving}
-                      <div class="flex gap-1 justify-center"><span class="text-zinc-400 text-xs">…</span></div>
+                      <div class="flex justify-center"><span class="text-zinc-400 text-xs">…</span></div>
                     {:else if set.skipped}
-                      <button
-                        onclick={() => unskipSet(ex.uiId, set.localId)}
-                        class="h-12 px-3 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors"
-                        title="Undo skip"
-                      >Undo</button>
+                      <button onclick={() => unskipSet(ex.uiId, set.localId)}
+                              class="h-10 px-2 rounded-xl bg-amber-600/20 hover:bg-zinc-700 text-amber-400 text-xs font-semibold transition-colors">Undo</button>
                     {:else if set.done}
-                      <button
-                        onclick={() => uncompleteSet(ex.uiId, set.localId)}
-                        class="h-12 w-12 rounded-xl bg-green-700/30 hover:bg-zinc-700 text-green-400 font-bold text-lg transition-colors"
-                        title="Undo — mark as incomplete"
-                      >✓</button>
+                      <button onclick={() => uncompleteSet(ex.uiId, set.localId)}
+                              class="h-10 w-10 rounded-xl bg-green-700/30 hover:bg-zinc-700 text-green-400 font-bold text-lg transition-colors">✓</button>
                     {:else}
-                      <div class="flex flex-col gap-1">
-                        <!-- Per-side check buttons -->
-                        <div class="flex gap-1">
-                          {#if set.doneLeft}
-                            <button
-                              onclick={() => undoSide(ex.uiId, set.localId, 'left')}
-                              class="h-6 flex-1 rounded-lg bg-green-700/30 text-green-400 text-[10px] font-bold transition-colors hover:bg-zinc-700"
-                              title="Undo left side"
-                            >L ✓</button>
-                          {:else}
-                            <button
-                              onclick={() => completeSide(ex.uiId, set.localId, 'left')}
-                              disabled={(set.repsLeft ?? 0) <= 0}
-                              class="h-6 flex-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-[10px] font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                              title={(set.repsLeft ?? 0) > 0 ? 'Log left side' : 'Enter left reps first'}
-                            >L ✓</button>
-                          {/if}
-                          {#if set.doneRight}
-                            <button
-                              onclick={() => undoSide(ex.uiId, set.localId, 'right')}
-                              class="h-6 flex-1 rounded-lg bg-green-700/30 text-green-400 text-[10px] font-bold transition-colors hover:bg-zinc-700"
-                              title="Undo right side"
-                            >R ✓</button>
-                          {:else}
-                            <button
-                              onclick={() => completeSide(ex.uiId, set.localId, 'right')}
-                              disabled={(set.repsRight ?? 0) <= 0}
-                              class="h-6 flex-1 rounded-lg bg-primary-600 hover:bg-primary-500 text-white text-[10px] font-bold transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                              title={(set.repsRight ?? 0) > 0 ? 'Log right side' : 'Enter right reps first'}
-                            >R ✓</button>
-                          {/if}
-                        </div>
-                        <!-- Single skip for entire set -->
-                        <button
-                          onclick={() => skipSet(ex.uiId, set.localId)}
-                          class="h-5 w-full rounded-lg bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-[10px] font-medium transition-colors"
-                          title="Skip this set"
-                        >Skip</button>
-                      </div>
+                      <button onclick={() => skipSet(ex.uiId, set.localId)}
+                              class="h-10 px-2 rounded-xl bg-zinc-800 hover:bg-amber-600/20 text-zinc-500 hover:text-amber-400 text-xs font-medium transition-colors">Skip</button>
                     {/if}
                   </div>
                   <!-- Rep range advisories (unilateral) -->
