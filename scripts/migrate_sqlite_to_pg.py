@@ -55,20 +55,36 @@ def migrate(sqlite_path: str, pg_url: str):
             placeholders = ", ".join(["%s"] * len(cols))
             col_names = ", ".join(f'"{c}"' for c in cols)
 
-            # Clear existing data in PG
-            pcur.execute(f'DELETE FROM "{table}"')
+            # Clear existing data in PG (cascade to handle FK deps)
+            pcur.execute(f'TRUNCATE "{table}" CASCADE')
 
+            # Get PG column types to convert SQLite int→bool
+            pcur.execute("""
+                SELECT column_name, data_type FROM information_schema.columns
+                WHERE table_name = %s
+            """, (table,))
+            bool_cols = {r[0] for r in pcur.fetchall() if r[1] == 'boolean'}
+
+            inserted = 0
             for row in rows:
-                values = tuple(row)
+                # Convert SQLite integers to Python bools for boolean columns
+                values = []
+                for col, val in zip(cols, row):
+                    if col in bool_cols and isinstance(val, int):
+                        values.append(bool(val))
+                    else:
+                        values.append(val)
                 try:
                     pcur.execute(
                         f'INSERT INTO "{table}" ({col_names}) VALUES ({placeholders})',
-                        values
+                        tuple(values)
                     )
+                    inserted += 1
                 except Exception as e:
-                    print(f"  {table} row error: {e}")
                     pconn.rollback()
+                    # Re-delete and re-insert everything up to this point
                     pcur.execute(f'DELETE FROM "{table}"')
+                    print(f"  {table} row error (skipping rest): {e}")
                     break
 
             # Reset sequence for tables with auto-increment
