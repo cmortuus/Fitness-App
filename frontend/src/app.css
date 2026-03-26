@@ -183,3 +183,41 @@ html, body {
 }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { @apply bg-zinc-700 rounded-full; }
+
+/* ── Accessibility: larger touch targets ──────────────────────────────── */
+body.large-targets button,
+body.large-targets a,
+body.large-targets select,
+body.large-targets input,
+body.large-targets [role="button"] {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+body.large-targets .bottom-nav-item {
+  min-height: 56px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+body.large-targets .set-input {
+  min-height: 48px;
+  font-size: 16px;
+}
+
+body.large-targets .card {
+  padding: 1.25rem;
+}
+
+/* ── Screen reader only (visible on focus for skip links) ─────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}

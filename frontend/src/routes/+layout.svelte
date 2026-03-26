@@ -63,6 +63,13 @@
     }
   });
 
+  // ── Accessibility: larger touch targets ──────────────────────────────
+  $effect(() => {
+    if (typeof document !== 'undefined') {
+      document.body.classList.toggle('large-targets', $settings.largerTouchTargets);
+    }
+  });
+
   // ── Offline detection + sync ──────────────────────────────────────────
   $effect(() => {
     if (typeof window === 'undefined') return;
@@ -165,6 +172,12 @@
 <!-- ── Full-height shell ──────────────────────────────────────────────── -->
 <div class="min-h-screen flex flex-col bg-zinc-950">
 
+  <!-- Skip to main content (screen reader / keyboard nav) -->
+  <a href="#main-content"
+     class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:bg-primary-600 focus:text-white focus:px-4 focus:py-2 focus:rounded-lg focus:text-sm">
+    Skip to main content
+  </a>
+
   <!-- ── Top header bar ────────────────────────────────────────────────── -->
   <header class="shrink-0 sticky top-0 z-30 bg-zinc-950/90 border-b border-white/5"
           style="padding-top: env(safe-area-inset-top);"
@@ -174,7 +187,7 @@
 
       <div class="flex items-center gap-3">
         <!-- Desktop nav links (hidden on mobile) -->
-        <nav class="hidden md:flex items-center gap-1">
+        <nav aria-label="Main navigation" class="hidden md:flex items-center gap-1">
           {#each staticNavItems as item}
             <a href={item.path}
                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm transition-colors
@@ -191,13 +204,13 @@
   </header>
 
   <!-- ── Main content ────────────────────────────────────────────────────── -->
-  <main class="flex-1 w-full max-w-2xl mx-auto md:max-w-4xl">
+  <main id="main-content" class="flex-1 w-full max-w-2xl mx-auto md:max-w-4xl">
     {@render children()}
   </main>
 
   <!-- ── Offline banner ──────────────────────────────────────────────── -->
   {#if !$isOnline}
-    <div class="fixed top-0 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium">
+    <div role="alert" class="fixed top-0 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium">
       📡 Offline — changes will sync when reconnected
       {#if $pendingSyncCount > 0}
         <span class="ml-1 opacity-80">({$pendingSyncCount} pending)</span>
@@ -210,7 +223,7 @@
   {/if}
 
   <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
-  <nav class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
+  <nav aria-label="Mobile navigation" class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
     {#each staticNavItems as item}
       <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
         <span class="text-xl leading-none">{item.icon}</span>
