@@ -184,7 +184,11 @@
   let chartOptions = $derived({
     responsive: true,
     plugins: {
-      legend: { position: 'top' as const },
+      legend: {
+        position: 'top' as const,
+        display: selectedExercise !== 'all' || exercises.length <= 6,
+        labels: { color: '#d1d5db', boxWidth: 12, padding: 8, font: { size: 11 } },
+      },
       title: {
         display: true,
         text: chartTitle,
