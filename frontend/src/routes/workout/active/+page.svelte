@@ -235,6 +235,7 @@
   // Filters for the exercise picker
   let filterRegion = $state<'all' | 'upper' | 'lower' | 'full_body'>('all');
   let filterType = $state<'all' | 'compound' | 'isolation'>('all');
+  let filterEquip = $state<string>('all');
   let pickingExercise = $state<Exercise | null>(null);
   let recentExercises = $state<Exercise[]>([]);
   // Swap mode: when set, the modal replaces this exercise instead of adding
@@ -1259,6 +1260,17 @@
       let pool = allExercises.filter(e => {
         if (filterRegion !== 'all' && e.body_region !== filterRegion) return false;
         if (filterType !== 'all' && e.movement_type !== filterType) return false;
+        if (filterEquip !== 'all') {
+          const prefix = e.name?.split('_')[0] ?? '';
+          if (filterEquip === 'barbell' && prefix !== 'barbell') return false;
+          if (filterEquip === 'dumbbell' && prefix !== 'db') return false;
+          if (filterEquip === 'cable' && prefix !== 'cable') return false;
+          if (filterEquip === 'machine' && prefix !== 'machine') return false;
+          if (filterEquip === 'bodyweight' && !['bodyweight', 'body', 'weighted'].includes(prefix)) return false;
+          if (filterEquip === 'kettlebell' && prefix !== 'kb') return false;
+          if (filterEquip === 'smith' && prefix !== 'smith') return false;
+          if (filterEquip === 'band' && prefix !== 'band') return false;
+        }
         return true;
       });
 
@@ -2543,6 +2555,19 @@
                   class="px-2.5 py-1 rounded text-xs font-medium transition-colors {
                     filterType === val
                       ? 'bg-indigo-600 text-white'
+                      : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
+                  }"
+                >{label}</button>
+              {/each}
+            </div>
+            <div class="flex items-center gap-1.5 flex-wrap">
+              <span class="text-xs text-zinc-500 w-12 shrink-0">Equip</span>
+              {#each [['all','All'], ['barbell','Barbell'], ['dumbbell','DB'], ['cable','Cable'], ['machine','Machine'], ['bodyweight','BW'], ['smith','Smith'], ['kettlebell','KB']] as [val, label]}
+                <button
+                  onclick={() => filterEquip = val}
+                  class="px-2.5 py-1 rounded text-xs font-medium transition-colors {
+                    filterEquip === val
+                      ? 'bg-green-600 text-white'
                       : 'bg-zinc-800 hover:bg-zinc-700 text-zinc-300'
                   }"
                 >{label}</button>
