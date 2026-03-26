@@ -170,6 +170,20 @@
     return allSessions.filter(s => s.date >= isoDate(weekAgo) && s.status === 'completed').length;
   })());
 
+  // Streak: consecutive completed sessions without a skip/miss
+  // Counts backwards from the most recent session
+  let streak = $derived((() => {
+    const sorted = [...allSessions]
+      .filter(s => s.status === 'completed' || s.status === 'skipped')
+      .sort((a, b) => b.date.localeCompare(a.date));
+    let count = 0;
+    for (const s of sorted) {
+      if (s.status === 'completed') count++;
+      else break; // skipped session breaks the streak
+    }
+    return count;
+  })());
+
   let weeklySets = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
     const weekStr = isoDate(weekAgo);
@@ -187,20 +201,24 @@
 
   <!-- ── Quick stats strip ───────────────────────────────────────────── -->
   {#if !loading && allSessions.length > 0}
-    <div class="grid grid-cols-3 gap-3">
+    <div class="grid grid-cols-4 gap-2">
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-primary-400">{weeklyWorkouts}</p>
         <p class="text-xs text-zinc-500 mt-0.5">workouts</p>
       </div>
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-green-400">{weeklySets.completed}</p>
-        <p class="text-xs text-zinc-500 mt-0.5">sets this week</p>
+        <p class="text-xs text-zinc-500 mt-0.5">sets</p>
       </div>
       <div class="card text-center py-3">
         <p class="text-2xl font-bold text-accent-400">
           {weeklyVolume > 999 ? (weeklyVolume / 1000).toFixed(1) + 'k' : weeklyVolume.toFixed(0)}
         </p>
-        <p class="text-xs text-zinc-500 mt-0.5">{volUnit()} volume</p>
+        <p class="text-xs text-zinc-500 mt-0.5">{volUnit()}</p>
+      </div>
+      <div class="card text-center py-3">
+        <p class="text-2xl font-bold text-amber-400">{streak}</p>
+        <p class="text-xs text-zinc-500 mt-0.5">streak</p>
       </div>
     </div>
   {/if}
