@@ -870,6 +870,7 @@
         }
       }
       // Start rest timer only on successful save
+      ensureNotificationPermission();
       startRestTimer(exUiId);
     } catch (e) {
       console.error('Failed to complete set:', e);
@@ -1005,12 +1006,23 @@
   }
 
   let restEndTime = $state<number>(0); // absolute ms timestamp when rest ends
+  let restNotifTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  /** Request notification permission (called on first set completion) */
+  async function ensureNotificationPermission() {
+    if (typeof Notification === 'undefined') return;
+    if (Notification.permission === 'default') {
+      await Notification.requestPermission();
+    }
+  }
 
   function startRestTimer(exUiId: string) {
     restSecs = restDurationForExercise(exUiId);
     restEndTime = Date.now() + restSecs * 1000;
     restActive = true;
     if (restInterval) clearInterval(restInterval);
+    if (restNotifTimeout) clearTimeout(restNotifTimeout);
+
     restInterval = setInterval(() => {
       const remaining = Math.ceil((restEndTime - Date.now()) / 1000);
       restSecs = Math.max(0, remaining);
@@ -1021,10 +1033,25 @@
         playRestChime();
       }
     }, 1000);
+
+    // Schedule notification for when rest ends (works when app is backgrounded)
+    if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+      restNotifTimeout = setTimeout(() => {
+        try {
+          new Notification('Rest Complete', {
+            body: 'Time for your next set!',
+            icon: '/icons/icon-192.png',
+            tag: 'rest-timer', // replaces previous notification
+            requireInteraction: false,
+          });
+        } catch { /* notification not supported in this context */ }
+      }, restSecs * 1000);
+    }
   }
 
   function skipRest() {
     if (restInterval) { clearInterval(restInterval); restInterval = null; }
+    if (restNotifTimeout) { clearTimeout(restNotifTimeout); restNotifTimeout = null; }
     restActive = false;
     restEndTime = 0;
   }
