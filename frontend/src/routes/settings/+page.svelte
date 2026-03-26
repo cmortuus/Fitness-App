@@ -588,6 +588,59 @@
     </div>
   </div>
 
+  <!-- ── Deload ───────────────────────────────────────────────────── -->
+  <div class="card space-y-4">
+    <div>
+      <h3 class="text-lg font-semibold">Deload</h3>
+      <p class="text-sm text-zinc-400 mt-1">Configure how deload weeks reduce intensity and volume.</p>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Sessions per deload</p>
+        <p class="text-xs text-zinc-500">0 = match your plan's days</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [0, 1, 2, 3, 4, 5] as n}
+          <button onclick={() => settings.update(s => ({ ...s, deload: { ...s.deload, sessions: n } }))}
+                  class="w-8 h-8 rounded-lg text-sm font-medium transition-colors {($settings.deload?.sessions ?? 0) === n ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {n === 0 ? 'Auto' : n}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Weight reduction</p>
+        <p class="text-xs text-zinc-500">% of working weight to use</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [50, 60, 70, 80] as pct}
+          <button onclick={() => settings.update(s => ({ ...s, deload: { ...s.deload, weightPercent: pct } }))}
+                  class="w-10 h-8 rounded-lg text-sm font-medium transition-colors {($settings.deload?.weightPercent ?? 70) === pct ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {pct}%
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Volume reduction</p>
+        <p class="text-xs text-zinc-500">% of working sets to keep</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [40, 50, 60, 80] as pct}
+          <button onclick={() => settings.update(s => ({ ...s, deload: { ...s.deload, volumePercent: pct } }))}
+                  class="w-10 h-8 rounded-lg text-sm font-medium transition-colors {($settings.deload?.volumePercent ?? 60) === pct ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {pct}%
+          </button>
+        {/each}
+      </div>
+    </div>
+  </div>
+
   <!-- ── Progression / Autoregulation ───────────────────────────────── -->
   <div class="card space-y-5">
     <div>
