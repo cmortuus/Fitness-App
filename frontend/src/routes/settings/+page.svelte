@@ -571,6 +571,91 @@
     </div>
   </div>
 
+  <!-- ── Progression / Autoregulation ───────────────────────────────── -->
+  <div class="card space-y-5">
+    <div>
+      <h3 class="text-lg font-semibold">Progression</h3>
+      <p class="text-sm text-zinc-400 mt-1">
+        Controls how fast the app suggests increasing weight and volume.
+      </p>
+    </div>
+
+    <!-- Training level -->
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm text-zinc-300">Training Level</p>
+        <p class="text-xs text-zinc-500">Sets default increments and rep ranges</p>
+      </div>
+      <div class="flex rounded-lg overflow-hidden border border-zinc-700">
+        {#each [['beginner', 'Beginner'], ['intermediate', 'Intermediate'], ['advanced', 'Advanced']] as [val, label]}
+          <button onclick={() => {
+            const presets: Record<string, any> = {
+              beginner:     { upperWeightIncrement: 5, lowerWeightIncrement: 10, maxSetsPerExercise: 5, minRepsForIncrease: 8, maxRepsForIncrease: 12 },
+              intermediate: { upperWeightIncrement: 2.5, lowerWeightIncrement: 5, maxSetsPerExercise: 6, minRepsForIncrease: 6, maxRepsForIncrease: 10 },
+              advanced:     { upperWeightIncrement: 1.25, lowerWeightIncrement: 2.5, maxSetsPerExercise: 8, minRepsForIncrease: 5, maxRepsForIncrease: 8 },
+            };
+            settings.update(s => ({ ...s, progression: { ...s.progression, trainingLevel: val as any, ...presets[val] } }));
+          }}
+          class="px-3 py-1.5 text-xs transition-colors {$settings.progression?.trainingLevel === val ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {label}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Weight increments -->
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label">Upper body increment ({$settings.weightUnit})</label>
+        <input type="number" step="0.5" min="0.5" max="20"
+               value={$settings.progression?.upperWeightIncrement ?? 2.5}
+               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, upperWeightIncrement: parseFloat((e.target as HTMLInputElement).value) } }))}
+               class="input" style="font-size: 16px;" />
+      </div>
+      <div>
+        <label class="label">Lower body increment ({$settings.weightUnit})</label>
+        <input type="number" step="0.5" min="0.5" max="20"
+               value={$settings.progression?.lowerWeightIncrement ?? 5}
+               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, lowerWeightIncrement: parseFloat((e.target as HTMLInputElement).value) } }))}
+               class="input" style="font-size: 16px;" />
+      </div>
+    </div>
+
+    <!-- Rep range -->
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label">Min reps to increase weight</label>
+        <input type="number" min="1" max="30"
+               value={$settings.progression?.minRepsForIncrease ?? 8}
+               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, minRepsForIncrease: parseInt((e.target as HTMLInputElement).value) } }))}
+               class="input" style="font-size: 16px;" />
+      </div>
+      <div>
+        <label class="label">Max reps before forced increase</label>
+        <input type="number" min="1" max="50"
+               value={$settings.progression?.maxRepsForIncrease ?? 12}
+               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, maxRepsForIncrease: parseInt((e.target as HTMLInputElement).value) } }))}
+               class="input" style="font-size: 16px;" />
+      </div>
+    </div>
+
+    <!-- Max sets -->
+    <div class="flex items-center justify-between">
+      <div>
+        <p class="text-sm text-zinc-300">Max sets per exercise</p>
+        <p class="text-xs text-zinc-500">Upper limit for auto-added volume</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [4, 5, 6, 7, 8] as n}
+          <button onclick={() => settings.update(s => ({ ...s, progression: { ...s.progression, maxSetsPerExercise: n } }))}
+                  class="w-8 h-8 rounded-lg text-sm font-medium transition-colors {($settings.progression?.maxSetsPerExercise ?? 6) === n ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {n}
+          </button>
+        {/each}
+      </div>
+    </div>
+  </div>
+
   <!-- ── Rest Timer ──────────────────────────────────────────────────── -->
   <div class="card space-y-5">
     <div>
