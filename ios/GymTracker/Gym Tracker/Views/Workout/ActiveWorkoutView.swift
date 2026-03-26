@@ -756,11 +756,14 @@ struct ActiveWorkoutView: View {
                     sets: sets.enumerated().map { i, s in
                         let w = s.planned_weight_kg != nil ? fromKg(s.planned_weight_kg!) : nil
                         let r = s.planned_reps
+                        let isUni = ex.is_unilateral ?? false
                         return UISet(
                             backendId: s.id,
                             setNumber: i + 1,
                             weight: s.actual_weight_kg != nil ? fromKg(s.actual_weight_kg!) : w,
                             reps: s.actual_reps ?? r,
+                            repsLeft: isUni ? (s.reps_left ?? s.planned_reps_left ?? r) : nil,
+                            repsRight: isUni ? (s.reps_right ?? s.planned_reps_right ?? r) : nil,
                             done: s.completed_at != nil,
                             skipped: s.skipped_at != nil,
                             setType: SetType(rawValue: s.set_type ?? "standard") ?? .standard,
