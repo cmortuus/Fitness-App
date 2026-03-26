@@ -138,6 +138,22 @@
     }, {})
   );
 
+  // Week view: last 7 days
+  let weekDays = $derived((() => {
+    const days: { key: string; label: string; dayNum: number; isToday: boolean }[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push({
+        key: isoDate(d),
+        label: d.toLocaleDateString('en-US', { weekday: 'short' }),
+        dayNum: d.getDate(),
+        isToday: i === 0,
+      });
+    }
+    return days;
+  })());
+
   let firstDayOfMonth = $derived(new Date(calYear, calMonth, 1).getDay());
   let daysInMonth     = $derived(new Date(calYear, calMonth + 1, 0).getDate());
   let monthLabel = $derived(
@@ -213,6 +229,7 @@
     recentSessions: 'Recent Workouts',
     plans: 'Manage Plans',
     repeatLast: 'Repeat Last Workout',
+    weekView: 'Week View',
     calculator: '1RM Calculator',
     pinnedCharts: 'Quick Charts',
     trainingLog: 'Training Log',
@@ -681,6 +698,32 @@
     </div>
     <span class="text-zinc-600 text-sm">›</span>
   </a>
+
+  {:else if widget.id === 'weekView'}
+  <!-- ── 7-Day Week View ───────────────────────────────────────────── -->
+  <div class="card !py-3">
+    <div class="flex items-center justify-between mb-2">
+      <h3 class="font-semibold text-zinc-200 text-sm">This Week</h3>
+      <a href="/calendar" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">Full Calendar →</a>
+    </div>
+    <div class="grid grid-cols-7 gap-1">
+      {#each weekDays as day}
+        {@const hits = (sessionsByDate[day.key] ?? []).filter(s => s.status === 'completed')}
+        {@const hasWorkout = hits.length > 0}
+        <div class="flex flex-col items-center gap-0.5 py-1.5 rounded-lg {day.isToday ? 'ring-1 ring-primary-500 bg-primary-500/10' : hasWorkout ? 'bg-zinc-800/60' : ''}">
+          <span class="text-[10px] text-zinc-500">{day.label}</span>
+          <span class="text-sm font-medium {day.isToday ? 'text-primary-400' : hasWorkout ? 'text-white' : 'text-zinc-600'}">{day.dayNum}</span>
+          {#if hasWorkout}
+            <div class="w-1.5 h-1.5 rounded-full bg-green-500"></div>
+          {:else if day.isToday}
+            <div class="w-1.5 h-1.5 rounded-full bg-primary-500/30"></div>
+          {:else}
+            <div class="w-1.5 h-1.5"></div>
+          {/if}
+        </div>
+      {/each}
+    </div>
+  </div>
 
   {:else if widget.id === 'calendar'}
   <!-- ── Calendar ────────────────────────────────────────────────────── -->
