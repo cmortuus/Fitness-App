@@ -92,7 +92,8 @@
     // Original suggestions for deviation warning
     initWeight: number | null;
     initReps: number | null;
-    setType: string;  // 'standard' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
+    setType: string;  // 'standard' | 'standard_partials' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
+    partialReps: number | null;  // for standard_partials — partial ROM reps after full ROM
     drops: { weightLbs: number | null; reps: number | null }[];  // for drop sets only
   }
 
@@ -566,7 +567,8 @@
               initWeight: suggestedWeight,
               initReps:   suggestedReps,
               setType: bset?.set_type || 'standard',
-              drops: bset?.sub_sets ? bset.sub_sets.map((d: any) => ({
+              partialReps: bset?.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
+              drops: bset?.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
                 weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
                 reps: d.reps ?? null,
               })) : [],
@@ -729,7 +731,8 @@
             initWeight: sugW,
             initReps: sugR,
             setType: bset.set_type || 'standard',
-            drops: bset.sub_sets ? bset.sub_sets.map((d: any) => ({
+            partialReps: bset.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
+            drops: bset.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
               weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
               reps: d.reps ?? null,
             })) : [],
@@ -941,6 +944,8 @@
             weight_kg: d.weightLbs ? toKg(d.weightLbs) : 0,
             reps: d.reps ?? 0,
           }))
+        : set.setType === 'standard_partials' && set.partialReps
+        ? [{ weight_kg: weightKg, reps: set.partialReps, type: 'partial' }]
         : undefined;
 
       await updateSet(sessionId, bId, {
@@ -1142,7 +1147,7 @@
       initWeight: null,
       initReps: null,
       setType: ex.sets[0]?.setType || 'standard',
-      drops: [],
+      partialReps: null, drops: [],
     }];
     uiExercises = [...uiExercises];
   }
@@ -1193,7 +1198,7 @@
           repsRight: ex.isUnilateral ? w.reps : null,
           done: false, skipped: false, doneLeft: false, doneRight: false,
           saving: false, oneRM: null, initWeight: null, initReps: null,
-          setType: 'warmup', drops: [],
+          setType: 'warmup', partialReps: null, drops: [],
         });
       }
       ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
@@ -1233,7 +1238,7 @@
         initWeight: null,
         initReps: null,
         setType: 'warmup',
-        drops: [],
+        partialReps: null, drops: [],
       });
     }
 
@@ -1507,7 +1512,7 @@
           saving: false,
           oneRM: null, initWeight: null, initReps: null,
           setType: 'standard' as string,
-          drops: [] as { weightLbs: number | null; reps: number | null }[],
+          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[],
         }));
         // Delete old backend sets
         for (const s of oldEx.sets) {
@@ -2228,8 +2233,10 @@
                                   set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                                   set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                                   set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                                  set.setType === 'standard_partials' ? '!bg-teal-500/15 !border-teal-500/30 text-teal-400' :
                                   'text-zinc-400'}">
                           <option value="standard">Straight</option>
+                          <option value="standard_partials">+ Partials</option>
                           <option value="warmup">Warmup</option>
                           <option value="myo_rep">Myo Rep</option>
                           {#if ex.sets.indexOf(set) > 0}
@@ -2409,8 +2416,10 @@
                               set.setType === 'myo_rep' ? '!bg-purple-500/15 !border-purple-500/30 text-purple-400' :
                               set.setType === 'myo_rep_match' ? '!bg-blue-500/15 !border-blue-500/30 text-blue-400' :
                               set.setType === 'drop_set' ? '!bg-amber-500/15 !border-amber-500/30 text-amber-400' :
+                              set.setType === 'standard_partials' ? '!bg-teal-500/15 !border-teal-500/30 text-teal-400' :
                               'text-zinc-400'}">
                       <option value="standard">Straight</option>
+                      <option value="standard_partials">+ Partials</option>
                       <option value="warmup">Warmup</option>
                       <option value="myo_rep">Myo Rep</option>
                       {#if ex.sets.indexOf(set) > 0}
@@ -2474,28 +2483,41 @@
                       {/if}
                     </div>
 
-                    <!-- Reps -->
-                    <input
-                      type="number" inputmode="decimal"
-                      value={set.reps ?? ''}
-                      oninput={(e) => {
-                        const v = (e.target as HTMLInputElement).value;
-                        const r = v === '' ? null : parseInt(v);
-                        set.reps = r;
-                        // Epley: auto-adjust weight when reps change
-                        if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                          const newW = epleyWeight(set.oneRM, r);
-                          set.weightLbs = newW;
-                          const idx = ex.sets.indexOf(set);
-                          for (let i = idx + 1; i < ex.sets.length; i++) {
-                            if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                    <!-- Reps + optional partials -->
+                    <div class="flex flex-col gap-0.5">
+                      <input
+                        type="number" inputmode="decimal"
+                        value={set.reps ?? ''}
+                        oninput={(e) => {
+                          const v = (e.target as HTMLInputElement).value;
+                          const r = v === '' ? null : parseInt(v);
+                          set.reps = r;
+                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
+                            const newW = epleyWeight(set.oneRM, r);
+                            set.weightLbs = newW;
+                            const idx = ex.sets.indexOf(set);
+                            for (let i = idx + 1; i < ex.sets.length; i++) {
+                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
+                            }
                           }
-                        }
-                        uiExercises = [...uiExercises];
-                      }}
-                      disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
-                      class="set-input"
-                    />
+                          uiExercises = [...uiExercises];
+                        }}
+                        disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
+                        class="set-input"
+                      />
+                      {#if set.setType === 'standard_partials'}
+                        <input
+                          type="number" inputmode="decimal"
+                          value={set.partialReps ?? ''}
+                          oninput={(e) => {
+                            set.partialReps = (e.target as HTMLInputElement).value === '' ? null : parseInt((e.target as HTMLInputElement).value);
+                            uiExercises = [...uiExercises];
+                          }}
+                          disabled={set.done} min="0" placeholder="partials"
+                          class="set-input !text-teal-400 !border-teal-500/30 text-xs"
+                        />
+                      {/if}
+                    </div>
 
                     <!-- Complete / Skip / Undo -->
                     {#if set.saving}
