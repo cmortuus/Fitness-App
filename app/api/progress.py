@@ -1,6 +1,6 @@
 """Progress tracking API endpoints."""
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
