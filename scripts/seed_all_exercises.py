@@ -18,6 +18,7 @@ EQUIPMENT_MAP = {
     "band": "band",
     "tbar": "plate_loaded",
     "belt": "plate_loaded",
+    "plate": "plate_loaded",  # plate_loaded_ prefix exercises
     "weighted": "bodyweight",  # weighted pullups/dips are still bodyweight category
     "assist": "machine",       # assisted pullups/dips use a machine
     "press": "machine",        # calf press machines
@@ -109,6 +110,25 @@ def generate_all_exercises():
     # BELT SQUAT
     for s in ["standard", "wide", "narrow", "marching", "calf_raise"]:
         ex.append({"name": f"belt_{s}_squat", "display": f"Belt {s.replace('_', ' ').title()} Squat", "type": "squat", "primary": ["quads", "glutes"], "secondary": ["hamstrings"]})
+
+    # PLATE-LOADED machine variants (equipment_type set via EQUIPMENT_MAP "plate_loaded_" prefix)
+    plate_loaded_machines = [
+        {"name": "plate_loaded_chest_press", "display": "Plate-Loaded Chest Press", "type": "compound", "primary": ["chest", "triceps"], "secondary": ["shoulders"]},
+        {"name": "plate_loaded_incline_press", "display": "Plate-Loaded Incline Press", "type": "compound", "primary": ["upper_chest", "triceps"], "secondary": ["shoulders"]},
+        {"name": "plate_loaded_decline_press", "display": "Plate-Loaded Decline Press", "type": "compound", "primary": ["chest", "triceps"], "secondary": ["shoulders"]},
+        {"name": "plate_loaded_shoulder_press", "display": "Plate-Loaded Shoulder Press", "type": "compound", "primary": ["shoulders", "triceps"], "secondary": ["upper_chest"]},
+        {"name": "plate_loaded_seated_row", "display": "Plate-Loaded Seated Row", "type": "compound", "primary": ["lats", "rhomboids"], "secondary": ["biceps", "rear_delts"]},
+        {"name": "plate_loaded_lat_pulldown", "display": "Plate-Loaded Lat Pulldown", "type": "compound", "primary": ["lats"], "secondary": ["biceps", "rear_delts"]},
+        {"name": "plate_loaded_leg_extension", "display": "Plate-Loaded Leg Extension", "type": "isolation", "primary": ["quads"], "secondary": []},
+        {"name": "plate_loaded_leg_curl", "display": "Plate-Loaded Leg Curl", "type": "isolation", "primary": ["hamstrings"], "secondary": ["glutes"]},
+        {"name": "plate_loaded_calf_raise", "display": "Plate-Loaded Calf Raise", "type": "isolation", "primary": ["gastrocnemius", "soleus"], "secondary": []},
+        {"name": "plate_loaded_hip_thrust", "display": "Plate-Loaded Hip Thrust", "type": "compound", "primary": ["glutes"], "secondary": ["hamstrings"]},
+        {"name": "plate_loaded_pendulum_squat", "display": "Plate-Loaded Pendulum Squat", "type": "squat", "primary": ["quads", "glutes"], "secondary": ["hamstrings"]},
+        {"name": "plate_loaded_rear_delt", "display": "Plate-Loaded Rear Delt", "type": "isolation", "primary": ["rear_delts"], "secondary": ["rhomboids"]},
+        {"name": "plate_loaded_lateral_raise", "display": "Plate-Loaded Lateral Raise", "type": "isolation", "primary": ["lateral_delts"], "secondary": ["traps"]},
+        {"name": "plate_loaded_shrug", "display": "Plate-Loaded Shrug", "type": "isolation", "primary": ["traps"], "secondary": ["rhomboids"]},
+    ]
+    ex.extend(plate_loaded_machines)
 
     return ex
 
