@@ -833,4 +833,20 @@ export async function getExerciseFeedback(sessionId: number): Promise<any[]> {
   return response.data;
 }
 
+// ── Volume landmarks ────────────────────────────────────────────────────────
+
+export interface VolumeLandmark {
+  muscle: string;
+  sets: number;
+  mev: number;
+  mav: number;
+  mrv: number;
+  status: 'below_mev' | 'in_range' | 'above_mav' | 'above_mrv';
+}
+
+export async function getVolumeLandmarks(days: number = 7): Promise<{ days: number; muscles: VolumeLandmark[]; total_sets: number }> {
+  const response = await api.get(`/progress/volume-landmarks?days=${days}`);
+  return response.data;
+}
+
 export default api;
