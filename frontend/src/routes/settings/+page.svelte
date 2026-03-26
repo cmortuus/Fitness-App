@@ -739,11 +739,14 @@
         </div>
         <button
           onclick={() => {
-            if (document.cookie.includes('gymtracker_branch=dev')) {
-              document.cookie = 'gymtracker_branch=; path=/; max-age=0; Secure; SameSite=Lax';
-            } else {
+            const switchingToDev = !document.cookie.includes('gymtracker_branch=dev');
+            if (switchingToDev) {
               document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
+            } else {
+              document.cookie = 'gymtracker_branch=; path=/; max-age=0; Secure; SameSite=Lax';
             }
+            // Persist to DB so it survives cache clears
+            settings.update(s => ({ ...s, branchPreference: switchingToDev ? 'dev' : 'main' }));
             window.location.reload();
           }}
           class="px-4 py-2 rounded-lg text-sm font-medium transition-colors {onDev ? 'bg-green-600/20 text-green-400 hover:bg-green-600/30' : 'bg-amber-600/20 text-amber-400 hover:bg-amber-600/30'}"

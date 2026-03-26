@@ -148,6 +148,35 @@
   let cancelling = $state(false);
   // (showFinishWarning removed — finish button is disabled until all sets done)
 
+  // ─── PR celebration ──────────────────────────────────────────────────
+  let prCelebration = $state<{ exercise: string; type: string; value: string } | null>(null);
+  let prTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function checkForPR(ex: UIExercise, set: UISet) {
+    const exercise = allExercises.find(e => e.id === ex.exerciseId);
+    if (!exercise || !set.initWeight || !set.initReps) return;
+    const w = set.weightLbs ?? 0;
+    const r = ex.isUnilateral ? Math.min(set.repsLeft ?? 0, set.repsRight ?? 0) : (set.reps ?? 0);
+    const isAsst = exercise.is_assisted ?? false;
+
+    let prType = '';
+    let prValue = '';
+    if (!isAsst && w > (set.initWeight ?? 0)) {
+      prType = 'Weight PR';
+      prValue = `${w} ${unit}`;
+    } else if (r > (set.initReps ?? 0)) {
+      prType = 'Rep PR';
+      prValue = `${r} reps`;
+    }
+
+    if (prType) {
+      prCelebration = { exercise: exercise.display_name, type: prType, value: prValue };
+      if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      if (prTimeout) clearTimeout(prTimeout);
+      prTimeout = setTimeout(() => { prCelebration = null; }, 4000);
+    }
+  }
+
   // ─── Autoregulation feedback ──────────────────────────────────────────
   // Track which muscle groups have been asked about recovery (only ask once per muscle per workout)
   let recoveryAskedMuscles = $state<Set<string>>(new Set());
@@ -1030,6 +1059,8 @@
           });
         }
       }
+      // Check for PR before rest timer
+      checkForPR(ex, set);
       // Start rest timer (group-aware for supersets/circuits)
       ensureNotificationPermission();
       handlePostSetCompletion(exUiId);
@@ -2932,6 +2963,18 @@
         {/if}
       </div>
 
+    </div>
+  </div>
+{/if}
+
+<!-- PR Celebration Toast -->
+{#if prCelebration}
+  <div class="fixed top-4 left-4 right-4 z-50 animate-bounce">
+    <div class="bg-gradient-to-r from-amber-600 to-yellow-500 rounded-2xl px-5 py-4 shadow-2xl text-center">
+      <p class="text-2xl mb-1">🎉🏆🎉</p>
+      <p class="text-lg font-bold text-white">{prCelebration.type}!</p>
+      <p class="text-sm text-white/90">{prCelebration.exercise}</p>
+      <p class="text-xl font-bold text-white mt-1">{prCelebration.value}</p>
     </div>
   </div>
 {/if}
