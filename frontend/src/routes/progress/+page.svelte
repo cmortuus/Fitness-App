@@ -13,8 +13,8 @@
     Legend,
     Filler,
   } from 'chart.js';
-  import { getProgress, getRecommendations } from '$lib/api';
-  import type { ProgressMetric, ProgressionRecommendation } from '$lib/api';
+  import { getProgress, getRecommendations, getExercises } from '$lib/api';
+  import type { ProgressMetric, ProgressionRecommendation, Exercise } from '$lib/api';
   import { settings } from '$lib/stores';
 
   // Register Chart.js components (required by svelte-chartjs)
@@ -33,6 +33,7 @@
 
   let progressData = $state<ProgressMetric[]>([]);
   let recommendations = $state<ProgressionRecommendation[]>([]);
+  let allExercises = $state<Exercise[]>([]);
   let selectedExercise = $state<string>('all');
   let timeRange = $state<string>('30d');
   let chartMode = $state<'1rm' | 'volume' | 'weight'>('1rm');
@@ -62,12 +63,14 @@
       }
 
       const daysBack = parseInt(timeRange.replace('d', ''));
-      const [progress, recs] = await Promise.all([
+      const [progress, recs, exList] = await Promise.all([
         getProgress({ start_date: startDate, end_date: endDate }),
         getRecommendations(daysBack),
+        allExercises.length === 0 ? getExercises() : Promise.resolve(allExercises),
       ]);
       progressData = progress;
       recommendations = recs;
+      allExercises = exList;
     } catch (e) {
       error = 'Failed to load progress data. Please try again.';
       console.error('Failed to load progress:', e);
@@ -83,6 +86,67 @@
 
   // Get unique exercise names across all data (not just filtered)
   let exercises = $derived([...new Set(progressData.map(p => p.exercise_name))].sort());
+
+  // ─── Muscle group average 1RM rate of change ──────────────────────
+  interface MuscleGroupTrend {
+    muscle: string;
+    avgChangePercent: number;
+    exerciseCount: number;
+  }
+
+  let muscleGroupTrends = $derived.by((): MuscleGroupTrend[] => {
+    if (progressData.length === 0 || allExercises.length === 0) return [];
+
+    // Build exercise → primary muscles map
+    const exMuscleMap = new Map<string, string[]>();
+    for (const ex of allExercises) {
+      exMuscleMap.set(ex.name, ex.primary_muscles ?? []);
+    }
+
+    // For each exercise, compute % change between first and last 1RM
+    const exerciseChanges = new Map<string, number>(); // exercise → % change
+    const exercisesByName = [...new Set(progressData.map(p => p.exercise_name))];
+
+    for (const exName of exercisesByName) {
+      const points = progressData
+        .filter(p => p.exercise_name === exName && p.estimated_1rm != null && p.estimated_1rm > 0)
+        .sort((a, b) => a.date.localeCompare(b.date));
+      if (points.length < 2) continue;
+      const first = points[0].estimated_1rm!;
+      const last = points[points.length - 1].estimated_1rm!;
+      const pctChange = ((last - first) / first) * 100;
+      exerciseChanges.set(exName, pctChange);
+    }
+
+    // Group by muscle
+    const muscleChanges = new Map<string, number[]>();
+    for (const [exName, pctChange] of exerciseChanges) {
+      const muscles = exMuscleMap.get(exName) ?? [];
+      if (muscles.length === 0) {
+        // Fallback: use exercise name prefix as muscle group
+        const group = exName.split('_').slice(-1)[0] || 'other';
+        if (!muscleChanges.has(group)) muscleChanges.set(group, []);
+        muscleChanges.get(group)!.push(pctChange);
+      }
+      for (const muscle of muscles) {
+        if (!muscleChanges.has(muscle)) muscleChanges.set(muscle, []);
+        muscleChanges.get(muscle)!.push(pctChange);
+      }
+    }
+
+    // Average per muscle group
+    const results: MuscleGroupTrend[] = [];
+    for (const [muscle, changes] of muscleChanges) {
+      const avg = changes.reduce((s, v) => s + v, 0) / changes.length;
+      results.push({
+        muscle: muscle.replace(/_/g, ' '),
+        avgChangePercent: Math.round(avg * 10) / 10,
+        exerciseCount: changes.length,
+      });
+    }
+
+    return results.sort((a, b) => b.avgChangePercent - a.avgChangePercent);
+  });
 
   // Colour palette for chart lines
   const COLORS = ['#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
@@ -323,6 +387,25 @@
       </p>
     {/if}
   </div>
+
+  <!-- Muscle Group Trends -->
+  {#if muscleGroupTrends.length > 0}
+    <div class="card">
+      <h3 class="text-lg font-semibold mb-3">Strength Trends by Muscle</h3>
+      <p class="text-xs text-zinc-500 mb-4">Average 1RM change across exercises in each muscle group over the selected period</p>
+      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {#each muscleGroupTrends as trend}
+          <div class="bg-zinc-800/50 rounded-lg px-3 py-2">
+            <p class="text-xs text-zinc-400 capitalize truncate">{trend.muscle}</p>
+            <p class="text-lg font-bold {trend.avgChangePercent > 0 ? 'text-green-400' : trend.avgChangePercent < 0 ? 'text-red-400' : 'text-zinc-400'}">
+              {trend.avgChangePercent > 0 ? '+' : ''}{trend.avgChangePercent}%
+            </p>
+            <p class="text-[10px] text-zinc-600">{trend.exerciseCount} exercise{trend.exerciseCount !== 1 ? 's' : ''}</p>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
 
   <!-- Detailed Stats -->
   <div class="card">
