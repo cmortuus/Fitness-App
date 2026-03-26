@@ -1,7 +1,14 @@
 import axios, { AxiosError } from 'axios';
+import { Capacitor } from '@capacitor/core';
+
+// When running as a native app (Capacitor), API calls must use absolute URL
+// since the frontend is loaded from a local bundle, not the server.
+const API_BASE = Capacitor.isNativePlatform()
+  ? 'https://lethal.dev/api'
+  : '/api';
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE,
   headers: {
     'Content-Type': 'application/json',
   },
