@@ -198,8 +198,11 @@
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
 
   // Last completed session with a plan — for "Repeat Last" button
-  // ── Dashboard customization ──────────────────────────────────────────
-  let showCustomize = $state(false);
+  // ── Dashboard customization (Apple-style widget editing) ─────────────
+  let editMode = $state(false);
+  let showAddPanel = $state(false);
+
+  const REQUIRED_WIDGETS = new Set(['nextWorkout', 'plans']);
 
   const WIDGET_LABELS: Record<string, string> = {
     stats: 'Quick Stats',
@@ -214,43 +217,144 @@
     trainingLog: 'Training Log',
   };
 
-  function isWidgetEnabled(id: string): boolean {
-    return $settings.dashboardWidgets?.find(w => w.id === id)?.enabled ?? true;
-  }
-
-  function toggleWidget(id: string) {
+  function removeWidget(id: string) {
+    if (REQUIRED_WIDGETS.has(id)) return;
     const widgets = [...($settings.dashboardWidgets ?? [])];
     const idx = widgets.findIndex(w => w.id === id);
     if (idx >= 0) {
-      widgets[idx] = { ...widgets[idx], enabled: !widgets[idx].enabled };
+      widgets[idx] = { ...widgets[idx], enabled: false };
       settings.update(s => ({ ...s, dashboardWidgets: widgets }));
     }
   }
 
-  function moveWidget(id: string, dir: -1 | 1) {
+  function addWidget(id: string) {
     const widgets = [...($settings.dashboardWidgets ?? [])];
     const idx = widgets.findIndex(w => w.id === id);
-    const target = idx + dir;
-    if (target < 0 || target >= widgets.length) return;
-    [widgets[idx], widgets[target]] = [widgets[target], widgets[idx]];
-    settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+    if (idx >= 0) {
+      widgets[idx] = { ...widgets[idx], enabled: true };
+      settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+    }
+    showAddPanel = false;
   }
 
   let orderedWidgets = $derived($settings.dashboardWidgets ?? []);
+  let hiddenWidgets = $derived(orderedWidgets.filter(w => !w.enabled && !REQUIRED_WIDGETS.has(w.id)));
 
   // Long-press to enter edit mode
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function handlePointerDown() {
+  function handlePointerDown(e: PointerEvent) {
+    // Don't trigger on buttons, inputs, links
+    const tag = (e.target as HTMLElement).tagName;
+    if (['BUTTON', 'INPUT', 'SELECT', 'A', 'LABEL'].includes(tag)) return;
+    if ((e.target as HTMLElement).closest('button, a, input, select')) return;
+
     longPressTimer = setTimeout(() => {
-      showCustomize = true;
-      // Haptic feedback if available
+      editMode = true;
       if (navigator.vibrate) navigator.vibrate(50);
     }, 600);
   }
 
   function handlePointerUp() {
     if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  }
+
+  // ── Drag-to-reorder ────────────────────────────────────────────────
+  let dragWidgetId = $state<string | null>(null);
+  let dragOverWidgetId = $state<string | null>(null);
+
+  function handleDragStart(e: DragEvent, widgetId: string) {
+    if (!editMode) return;
+    dragWidgetId = widgetId;
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', widgetId);
+    }
+  }
+
+  function handleDragOver(e: DragEvent, widgetId: string) {
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    dragOverWidgetId = widgetId;
+  }
+
+  function handleDragLeave() {
+    dragOverWidgetId = null;
+  }
+
+  function handleDrop(e: DragEvent, targetId: string) {
+    e.preventDefault();
+    dragOverWidgetId = null;
+    if (!dragWidgetId || dragWidgetId === targetId) { dragWidgetId = null; return; }
+
+    const widgets = [...($settings.dashboardWidgets ?? [])];
+    const fromIdx = widgets.findIndex(w => w.id === dragWidgetId);
+    const toIdx = widgets.findIndex(w => w.id === targetId);
+    if (fromIdx < 0 || toIdx < 0) { dragWidgetId = null; return; }
+
+    const [moved] = widgets.splice(fromIdx, 1);
+    widgets.splice(toIdx, 0, moved);
+    settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+    dragWidgetId = null;
+  }
+
+  function handleDragEnd() {
+    dragWidgetId = null;
+    dragOverWidgetId = null;
+  }
+
+  // Touch drag (mobile)
+  let touchDragId = $state<string | null>(null);
+  let touchStartY = $state(0);
+  let touchDragEl: HTMLElement | null = null;
+
+  function handleTouchStart(e: TouchEvent, widgetId: string) {
+    if (!editMode) return;
+    touchDragId = widgetId;
+    touchStartY = e.touches[0].clientY;
+    touchDragEl = (e.currentTarget as HTMLElement);
+    touchDragEl.style.zIndex = '50';
+    touchDragEl.style.opacity = '0.8';
+  }
+
+  function handleTouchMove(e: TouchEvent) {
+    if (!touchDragId || !touchDragEl) return;
+    e.preventDefault();
+    const dy = e.touches[0].clientY - touchStartY;
+    touchDragEl.style.transform = `translateY(${dy}px)`;
+
+    // Find which widget we're over
+    const els = document.querySelectorAll('[data-widget-id]');
+    const touchY = e.touches[0].clientY;
+    for (const el of els) {
+      const rect = el.getBoundingClientRect();
+      if (touchY > rect.top && touchY < rect.bottom && el.getAttribute('data-widget-id') !== touchDragId) {
+        dragOverWidgetId = el.getAttribute('data-widget-id');
+        break;
+      }
+    }
+  }
+
+  function handleTouchEnd() {
+    if (touchDragEl) {
+      touchDragEl.style.zIndex = '';
+      touchDragEl.style.opacity = '';
+      touchDragEl.style.transform = '';
+    }
+    if (touchDragId && dragOverWidgetId) {
+      // Reorder
+      const widgets = [...($settings.dashboardWidgets ?? [])];
+      const fromIdx = widgets.findIndex(w => w.id === touchDragId);
+      const toIdx = widgets.findIndex(w => w.id === dragOverWidgetId);
+      if (fromIdx >= 0 && toIdx >= 0) {
+        const [moved] = widgets.splice(fromIdx, 1);
+        widgets.splice(toIdx, 0, moved);
+        settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+      }
+    }
+    touchDragId = null;
+    dragOverWidgetId = null;
+    touchDragEl = null;
   }
 
   let lastWorkout = $derived((() => {
@@ -265,51 +369,63 @@
   })());
 </script>
 
-<div class="page-content space-y-5"
+<div class="page-content space-y-5 {editMode ? 'edit-mode' : ''}"
      onpointerdown={handlePointerDown}
      onpointerup={handlePointerUp}
      onpointercancel={handlePointerUp}
-     oncontextmenu={(e) => { if (showCustomize) e.preventDefault(); }}>
+     oncontextmenu={(e) => { if (editMode) e.preventDefault(); }}
+     ontouchmove={(e) => handleTouchMove(e)}
+     ontouchend={handleTouchEnd}>
 
-  <!-- ── Customize panel (triggered by long-press) ─────────────────── -->
-  {#if showCustomize}
-    <div class="card border border-primary-500/30 bg-primary-500/5">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="text-sm font-semibold text-zinc-300">Customize Dashboard</h3>
-        <button onclick={() => showCustomize = false}
-                class="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">✕ Done</button>
-      </div>
-      <p class="text-xs text-zinc-500 mb-3">Reorder widgets and toggle visibility. Long-press anywhere to open this again.</p>
-      <div class="space-y-1">
-        {#each orderedWidgets as widget, idx}
-          {@const isRequired = widget.id === 'nextWorkout' || widget.id === 'plans'}
-          <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50">
-            <div class="flex flex-col gap-0.5">
-              <button onclick={() => moveWidget(widget.id, -1)} disabled={idx === 0}
-                      class="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-20">▲</button>
-              <button onclick={() => moveWidget(widget.id, 1)} disabled={idx === orderedWidgets.length - 1}
-                      class="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-20">▼</button>
-            </div>
-            <label class="flex items-center gap-2 flex-1 {isRequired ? 'cursor-not-allowed' : 'cursor-pointer'}">
-              {#if isRequired}
-                <input type="checkbox" checked={true} disabled
-                       class="rounded border-zinc-600 bg-zinc-700 text-primary-500 opacity-50" />
-                <span class="text-sm text-zinc-200">{WIDGET_LABELS[widget.id] ?? widget.id} <span class="text-[10px] text-zinc-500">(required)</span></span>
-              {:else}
-                <input type="checkbox" checked={widget.enabled}
-                       onchange={() => toggleWidget(widget.id)}
-                       class="rounded border-zinc-600 bg-zinc-700 text-primary-500 focus:ring-primary-500" />
-                <span class="text-sm {widget.enabled ? 'text-zinc-200' : 'text-zinc-500'}">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
-              {/if}
-            </label>
-          </div>
-        {/each}
+  <!-- ── Edit mode header ──────────────────────────────────────────── -->
+  {#if editMode}
+    <div class="flex items-center justify-between sticky top-0 z-40 bg-zinc-950/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-zinc-800">
+      <span class="text-sm font-semibold text-zinc-300">Editing Dashboard</span>
+      <div class="flex items-center gap-3">
+        {#if hiddenWidgets.length > 0}
+          <button onclick={() => showAddPanel = !showAddPanel}
+                  class="w-8 h-8 rounded-full bg-primary-600 text-white flex items-center justify-center text-lg font-bold hover:bg-primary-500 transition-colors">+</button>
+        {/if}
+        <button onclick={() => { editMode = false; showAddPanel = false; }}
+                class="text-sm font-semibold text-primary-400 hover:text-primary-300 transition-colors">Done</button>
       </div>
     </div>
+
+    <!-- Add widget panel -->
+    {#if showAddPanel && hiddenWidgets.length > 0}
+      <div class="card border border-zinc-700">
+        <p class="text-xs text-zinc-500 mb-2">Add widgets</p>
+        <div class="space-y-1">
+          {#each hiddenWidgets as widget}
+            <button onclick={() => addWidget(widget.id)}
+                    class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
+              <span class="text-green-400 text-lg">+</span>
+              <span class="text-sm text-zinc-300">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
+            </button>
+          {/each}
+        </div>
+      </div>
+    {/if}
   {/if}
 
   <!-- ── Widgets rendered in user-defined order ────────────────────── -->
-  {#each orderedWidgets.filter(w => w.enabled || w.id === 'nextWorkout' || w.id === 'plans') as widget (widget.id)}
+  {#each orderedWidgets.filter(w => w.enabled || REQUIRED_WIDGETS.has(w.id)) as widget (widget.id)}
+  <div class="widget-wrapper {editMode ? 'jiggle' : ''} {dragOverWidgetId === widget.id ? 'drag-over' : ''} relative"
+       data-widget-id={widget.id}
+       draggable={editMode ? 'true' : 'false'}
+       ondragstart={(e) => handleDragStart(e, widget.id)}
+       ondragover={(e) => handleDragOver(e, widget.id)}
+       ondragleave={handleDragLeave}
+       ondrop={(e) => handleDrop(e, widget.id)}
+       ondragend={handleDragEnd}
+       ontouchstart={(e) => handleTouchStart(e, widget.id)}>
+
+    <!-- Remove button (edit mode only) -->
+    {#if editMode && !REQUIRED_WIDGETS.has(widget.id)}
+      <button onclick={() => removeWidget(widget.id)}
+              class="absolute -top-2 -left-2 z-10 w-6 h-6 rounded-full bg-red-500 text-white text-xs font-bold
+                     flex items-center justify-center shadow-lg hover:bg-red-400 transition-colors">−</button>
+    {/if}
 
   {#if widget.id === 'stats'}
   <!-- ── Quick stats strip ───────────────────────────────────────────── -->
@@ -681,6 +797,32 @@
   {/if}
 
   {/if}
+  </div>
   {/each}
 
 </div>
+
+<style>
+  /* Apple-style jiggle animation for edit mode */
+  @keyframes jiggle {
+    0%, 100% { transform: rotate(-0.5deg); }
+    50% { transform: rotate(0.5deg); }
+  }
+  :global(.jiggle) {
+    animation: jiggle 0.15s ease-in-out infinite alternate;
+  }
+  :global(.jiggle:nth-child(even)) {
+    animation-delay: 0.075s;
+  }
+  :global(.drag-over) {
+    outline: 2px dashed rgba(59, 130, 246, 0.5);
+    outline-offset: 4px;
+    border-radius: 1rem;
+  }
+  :global(.edit-mode .widget-wrapper) {
+    cursor: grab;
+  }
+  :global(.edit-mode .widget-wrapper:active) {
+    cursor: grabbing;
+  }
+</style>
