@@ -5,6 +5,7 @@
   import { activeDietPhase, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl, settings, isOnline, pendingSyncCount, syncStatus } from '$lib/stores';
   import { getExercises, getLatestBodyWeight, getPlans, getActivePhase, isAuthenticated, getStoredUser, clearAuthTokens } from '$lib/api';
   import type { AuthUser } from '$lib/api';
+  import { initLocale } from '$lib/i18n';
 
   const staticNavItems = [
     { path: '/',          label: 'Training',  icon: '🏋️' },
@@ -19,6 +20,7 @@
   const PUBLIC_PATHS = ['/login', '/signup'];
 
   onMount(async () => {
+    initLocale(); // load saved language preference
     // Auth check
     const path = window.location.pathname;
     if (PUBLIC_PATHS.some(p => path.startsWith(p))) {

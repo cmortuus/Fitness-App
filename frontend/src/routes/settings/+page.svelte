@@ -4,6 +4,7 @@
   import type { RestDurations } from '$lib/stores';
   import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser, recalculateWeights } from '$lib/api';
   import { writeBodyWeight, isHealthKitAvailable, requestHealthKitPermissions } from '$lib/healthkit';
+  import { locale, setLocale, SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '$lib/i18n';
 
   let healthKitAvailable = $state(false);
   let healthKitConnected = $state(false);
@@ -803,6 +804,20 @@
         <div class="border-t border-zinc-800"></div>
       {/if}
     {/each}
+  </div>
+
+  <!-- ── Language ─────────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Language</h3>
+    <select
+      class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm"
+      value={$locale}
+      onchange={(e) => setLocale((e.target as HTMLSelectElement).value as Locale)}
+    >
+      {#each SUPPORTED_LOCALES as loc}
+        <option value={loc}>{LOCALE_NAMES[loc]}</option>
+      {/each}
+    </select>
   </div>
 
   <!-- ── Apple Health ──────────────────────────────────────────────── -->
