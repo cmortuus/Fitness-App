@@ -188,7 +188,7 @@ async def start_session(
         )
 
     workout_session.status = WorkoutStatus.IN_PROGRESS
-    workout_session.started_at = datetime.now(timezone.utc)
+    workout_session.started_at = datetime.utcnow()
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
@@ -215,7 +215,7 @@ async def complete_session(
         )
 
     workout_session.status = WorkoutStatus.COMPLETED
-    workout_session.completed_at = datetime.now(timezone.utc)
+    workout_session.completed_at = datetime.utcnow()
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
