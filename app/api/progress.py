@@ -272,7 +272,7 @@ async def get_insights(
     # 3. Workout frequency
     ws_result = await db.execute(
         select(func.count(WorkoutSession.id))
-        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time()))
         .where(WorkoutSession.completed_at.isnot(None))
         .where(WorkoutSession.user_id == user.id)
     )
@@ -285,7 +285,7 @@ async def get_insights(
     # 4. Weight trend
     bw_result = await db.execute(
         select(BodyWeightEntry)
-        .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(BodyWeightEntry.recorded_at >= datetime.combine(week_ago, datetime.min.time()))
         .where(BodyWeightEntry.user_id == user.id)
         .order_by(BodyWeightEntry.recorded_at)
     )
@@ -306,7 +306,7 @@ async def get_insights(
         select(ExerciseSet, Exercise.name)
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
         .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
-        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at >= datetime.combine(week_ago, datetime.min.time()))
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
         .where(WorkoutSession.user_id == user.id)
@@ -324,8 +324,8 @@ async def get_insights(
         select(ExerciseSet, Exercise.name)
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
         .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
-        .where(WorkoutSession.started_at >= datetime.combine(prev_week_ago, datetime.min.time(), tzinfo=timezone.utc))
-        .where(WorkoutSession.started_at < datetime.combine(week_ago, datetime.min.time(), tzinfo=timezone.utc))
+        .where(WorkoutSession.started_at >= datetime.combine(prev_week_ago, datetime.min.time()))
+        .where(WorkoutSession.started_at < datetime.combine(week_ago, datetime.min.time()))
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
         .where(WorkoutSession.user_id == user.id)
