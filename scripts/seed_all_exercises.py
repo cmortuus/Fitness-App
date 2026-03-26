@@ -17,8 +17,17 @@ EQUIPMENT_MAP = {
     "machine": "machine",
     "band": "band",
     "tbar": "plate_loaded",
+    "t_bar": "plate_loaded",
     "belt": "plate_loaded",
+    "belt_squat": "plate_loaded",
     "plate": "plate_loaded",  # plate_loaded_ prefix exercises
+    "plate_loaded": "plate_loaded",
+    "safety_squat": "barbell",
+    "trap_bar": "barbell",
+    "ez_bar": "barbell",
+    "cambered_bar": "barbell",
+    "swiss_bar": "barbell",
+    "axle_bar": "barbell",
     "weighted": "bodyweight",  # weighted pullups/dips are still bodyweight category
     "assist": "machine",       # assisted pullups/dips use a machine
     "press": "machine",        # calf press machines
@@ -30,7 +39,13 @@ EQUIPMENT_MAP = {
 
 def get_equipment_type(name: str) -> str:
     """Determine equipment type from exercise name prefix."""
-    prefix = name.split("_")[0]
+    parts = name.split("_")
+    # Check two-word prefixes first (e.g. t_bar, plate_loaded, safety_squat)
+    if len(parts) >= 2:
+        two_word = f"{parts[0]}_{parts[1]}"
+        if two_word in EQUIPMENT_MAP:
+            return EQUIPMENT_MAP[two_word]
+    prefix = parts[0]
     return EQUIPMENT_MAP.get(prefix, "other")
 
 
