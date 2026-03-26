@@ -460,23 +460,24 @@
       if (planId) {
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
-        // Apply deload reductions: ~70% weight, drop last set(s)
+        // Apply deload reductions using settings
         if (isDeload && uiExercises.length > 0) {
+          const dl = $settings.deload;
+          const weightMult = (dl.weightPercent ?? 70) / 100;
+          const volumeMult = (dl.volumePercent ?? 60) / 100;
           workoutName = '🔄 Deload — ' + workoutName;
           for (const ex of uiExercises) {
-            // Reduce weight to ~70%
             for (const set of ex.sets) {
               if (set.weightLbs != null) {
-                set.weightLbs = Math.round(set.weightLbs * 0.7 / 2.5) * 2.5; // round to nearest 2.5
+                set.weightLbs = Math.round(set.weightLbs * weightMult / 2.5) * 2.5;
               }
             }
-            // Drop ~40% of sets (keep at least 2)
-            const targetSets = Math.max(2, Math.round(ex.sets.length * 0.6));
+            const targetSets = Math.max(2, Math.round(ex.sets.length * volumeMult));
             while (ex.sets.length > targetSets) {
               ex.sets.pop();
             }
           }
-          uiExercises = [...uiExercises]; // trigger reactivity
+          uiExercises = [...uiExercises];
         }
       } else if ($currentSession) {
         // ── Resume in-progress session (store still set) ────────────────
