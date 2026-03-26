@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights } from '$lib/api';
+  import type { DashboardWidget } from '$lib/stores';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, saveSettings } from '$lib/api';
   import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
   const KG_TO_LBS = 2.20462;
@@ -197,6 +198,45 @@
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
 
   // Last completed session with a plan — for "Repeat Last" button
+  // ── Dashboard customization ──────────────────────────────────────────
+  let showCustomize = $state(false);
+
+  const WIDGET_LABELS: Record<string, string> = {
+    stats: 'Quick Stats',
+    nextWorkout: 'Next Workout',
+    nutrition: 'Nutrition',
+    insights: 'Insights',
+    calendar: 'Calendar',
+    recentSessions: 'Recent Workouts',
+    plans: 'Manage Plans',
+    repeatLast: 'Repeat Last Workout',
+    pinnedCharts: 'Pinned Charts',
+  };
+
+  function isWidgetEnabled(id: string): boolean {
+    return $settings.dashboardWidgets?.find(w => w.id === id)?.enabled ?? true;
+  }
+
+  function toggleWidget(id: string) {
+    const widgets = [...($settings.dashboardWidgets ?? [])];
+    const idx = widgets.findIndex(w => w.id === id);
+    if (idx >= 0) {
+      widgets[idx] = { ...widgets[idx], enabled: !widgets[idx].enabled };
+      settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+    }
+  }
+
+  function moveWidget(id: string, dir: -1 | 1) {
+    const widgets = [...($settings.dashboardWidgets ?? [])];
+    const idx = widgets.findIndex(w => w.id === id);
+    const target = idx + dir;
+    if (target < 0 || target >= widgets.length) return;
+    [widgets[idx], widgets[target]] = [widgets[target], widgets[idx]];
+    settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+  }
+
+  let orderedWidgets = $derived($settings.dashboardWidgets ?? []);
+
   let lastWorkout = $derived((() => {
     const last = allSessions.find(s => s.status === 'completed' && s.workout_plan_id);
     if (!last) return null;
@@ -211,6 +251,44 @@
 
 <div class="page-content space-y-5">
 
+  <!-- ── Customize button ──────────────────────────────────────────── -->
+  <div class="flex justify-end">
+    <button onclick={() => showCustomize = !showCustomize}
+            class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
+      <span>{showCustomize ? '✕ Done' : '⚙ Customize'}</span>
+    </button>
+  </div>
+
+  <!-- ── Customize modal ───────────────────────────────────────────── -->
+  {#if showCustomize}
+    <div class="card border border-zinc-700">
+      <h3 class="text-sm font-semibold text-zinc-300 mb-3">Dashboard Widgets</h3>
+      <p class="text-xs text-zinc-500 mb-3">Toggle and reorder widgets. Changes save automatically.</p>
+      <div class="space-y-1">
+        {#each orderedWidgets as widget, idx}
+          <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50">
+            <div class="flex flex-col gap-0.5">
+              <button onclick={() => moveWidget(widget.id, -1)} disabled={idx === 0}
+                      class="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-20">▲</button>
+              <button onclick={() => moveWidget(widget.id, 1)} disabled={idx === orderedWidgets.length - 1}
+                      class="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-20">▼</button>
+            </div>
+            <label class="flex items-center gap-2 flex-1 cursor-pointer">
+              <input type="checkbox" checked={widget.enabled}
+                     onchange={() => toggleWidget(widget.id)}
+                     class="rounded border-zinc-600 bg-zinc-700 text-primary-500 focus:ring-primary-500" />
+              <span class="text-sm {widget.enabled ? 'text-zinc-200' : 'text-zinc-500'}">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
+            </label>
+          </div>
+        {/each}
+      </div>
+    </div>
+  {/if}
+
+  <!-- ── Widgets rendered in user-defined order ────────────────────── -->
+  {#each orderedWidgets.filter(w => w.enabled) as widget (widget.id)}
+
+  {#if widget.id === 'stats'}
   <!-- ── Quick stats strip ───────────────────────────────────────────── -->
   {#if !loading && allSessions.length > 0}
     <div class="grid grid-cols-4 gap-2">
@@ -235,6 +313,7 @@
     </div>
   {/if}
 
+  {:else if widget.id === 'nutrition'}
   <!-- ── Nutrition at-a-glance ──────────────────────────────────────── -->
   {#if nutritionSummary?.goals}
     {@const g = nutritionSummary.goals}
@@ -299,6 +378,7 @@
     </a>
   {/if}
 
+  {:else if widget.id === 'insights'}
   <!-- ── Insights ─────────────────────────────────────────────────────── -->
   {#if insights.length > 0}
     <div class="space-y-1.5">
@@ -312,6 +392,7 @@
     </div>
   {/if}
 
+  {:else if widget.id === 'nextWorkout'}
   <!-- ── Next / Active workout hero ─────────────────────────────────── -->
   {#if $currentSession}
     <a href="/workout/active"
@@ -385,6 +466,16 @@
 
   {/if}
 
+  {#if !nextWorkout && !$currentSession}
+    <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
+      <p class="text-4xl mb-3">💪</p>
+      <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
+      <a href="/plans/create" class="btn-primary">Create a Plan</a>
+    </div>
+  {/if}
+
+  {:else if widget.id === 'repeatLast'}
+  <!-- ── Repeat last workout ───────────────────────────────────────── -->
   {#if lastWorkout && !$currentSession}
     <button
       onclick={() => window.location.href = `/workout/active?plan=${lastWorkout!.plan.id}&day=${lastWorkout!.day.day_number}`}
@@ -399,14 +490,7 @@
     </button>
   {/if}
 
-  {#if !nextWorkout && !$currentSession}
-    <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
-      <p class="text-4xl mb-3">💪</p>
-      <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
-      <a href="/plans/create" class="btn-primary">Create a Plan</a>
-    </div>
-  {/if}
-
+  {:else if widget.id === 'plans'}
   <!-- ── Quick link to Plans ────────────────────────────────────────── -->
   <a href="/plans" class="card !p-4 flex items-center gap-3 hover:bg-zinc-800/80 transition-colors group">
     <span class="text-2xl">📋</span>
@@ -417,6 +501,7 @@
     <span class="text-zinc-600 text-sm">›</span>
   </a>
 
+  {:else if widget.id === 'calendar'}
   <!-- ── Calendar ────────────────────────────────────────────────────── -->
   <div class="card">
     <div class="flex items-center justify-between mb-4">
@@ -478,6 +563,36 @@
     {/if}
   </div>
 
+  {:else if widget.id === 'pinnedCharts'}
+  <!-- ── Pinned Charts ─────────────────────────────────────────────── -->
+  <div class="card">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-semibold text-zinc-200">Quick Charts</h3>
+      <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">
+        Full Progress →
+      </a>
+    </div>
+    <div class="grid grid-cols-2 gap-3">
+      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-xs text-zinc-500">Body Weight</p>
+        <p class="text-sm font-semibold text-primary-400 mt-0.5">Trend →</p>
+      </a>
+      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-xs text-zinc-500">Est. 1RM</p>
+        <p class="text-sm font-semibold text-green-400 mt-0.5">All Lifts →</p>
+      </a>
+      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-xs text-zinc-500">Volume</p>
+        <p class="text-sm font-semibold text-amber-400 mt-0.5">Weekly →</p>
+      </a>
+      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-xs text-zinc-500">Records</p>
+        <p class="text-sm font-semibold text-purple-400 mt-0.5">PRs →</p>
+      </a>
+    </div>
+  </div>
+
+  {:else if widget.id === 'recentSessions'}
   <!-- ── Recent sessions ─────────────────────────────────────────────── -->
   {#if recentSessions.length > 0}
     <div class="card">
@@ -504,5 +619,7 @@
     </div>
   {/if}
 
+  {/if}
+  {/each}
 
 </div>
