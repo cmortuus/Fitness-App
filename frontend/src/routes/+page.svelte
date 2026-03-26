@@ -803,16 +803,17 @@
 </div>
 
 <style>
-  /* Apple-style jiggle animation for edit mode */
+  /* Apple-style jiggle animation — very subtle */
   @keyframes jiggle {
-    0%, 100% { transform: rotate(-0.5deg); }
-    50% { transform: rotate(0.5deg); }
+    0%, 100% { transform: rotate(-0.15deg); }
+    50% { transform: rotate(0.15deg); }
   }
   :global(.jiggle) {
-    animation: jiggle 0.15s ease-in-out infinite alternate;
+    animation: jiggle 0.3s ease-in-out infinite alternate;
   }
   :global(.jiggle:nth-child(even)) {
-    animation-delay: 0.075s;
+    animation-delay: 0.15s;
+    animation-direction: alternate-reverse;
   }
   :global(.drag-over) {
     outline: 2px dashed rgba(59, 130, 246, 0.5);
