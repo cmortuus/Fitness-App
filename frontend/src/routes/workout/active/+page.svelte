@@ -247,6 +247,7 @@
       const params = new URLSearchParams(window.location.search);
       const planId = params.get('plan');
       const dayNumber = parseInt(params.get('day') || '1');
+      const isDeload = params.get('deload') === 'true';
 
       const [exData, notesData] = await Promise.all([getExercises(), getAllExerciseNotes()]);
       allExercises = exData;
@@ -264,6 +265,24 @@
       if (planId) {
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
+        // Apply deload reductions: ~70% weight, drop last set(s)
+        if (isDeload && uiExercises.length > 0) {
+          workoutName = '🔄 Deload — ' + workoutName;
+          for (const ex of uiExercises) {
+            // Reduce weight to ~70%
+            for (const set of ex.sets) {
+              if (set.weightLbs != null) {
+                set.weightLbs = Math.round(set.weightLbs * 0.7 / 2.5) * 2.5; // round to nearest 2.5
+              }
+            }
+            // Drop ~40% of sets (keep at least 2)
+            const targetSets = Math.max(2, Math.round(ex.sets.length * 0.6));
+            while (ex.sets.length > targetSets) {
+              ex.sets.pop();
+            }
+          }
+          uiExercises = [...uiExercises]; // trigger reactivity
+        }
       } else if ($currentSession) {
         // ── Resume in-progress session (store still set) ────────────────
         await resumeSession();
