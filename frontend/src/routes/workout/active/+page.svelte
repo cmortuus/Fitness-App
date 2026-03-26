@@ -1095,6 +1095,14 @@
     uiExercises = [...uiExercises];
   }
 
+  function moveExercise(idx: number, dir: -1 | 1) {
+    const target = idx + dir;
+    if (target < 0 || target >= uiExercises.length) return;
+    const arr = [...uiExercises];
+    [arr[idx], arr[target]] = [arr[target], arr[idx]];
+    uiExercises = arr;
+  }
+
   async function removeExercise(exUiId: string) {
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (ex && sessionId) {
@@ -1919,12 +1927,23 @@
             <!-- Exercise header -->
             <div class="flex items-start justify-between mb-3">
               <div>
-                <h3 class="font-semibold">
-                  {exercise?.display_name ?? `Exercise ${ex.exerciseId}`}
-                  {#if allDone}
-                    <span class="ml-2 text-green-400 text-sm">✓</span>
-                  {/if}
-                </h3>
+                <div class="flex items-center gap-1">
+                  <h3 class="font-semibold">
+                    {exercise?.display_name ?? `Exercise ${ex.exerciseId}`}
+                    {#if allDone}
+                      <span class="ml-2 text-green-400 text-sm">✓</span>
+                    {/if}
+                  </h3>
+                  <!-- Reorder buttons -->
+                  <div class="flex items-center gap-0.5 ml-1">
+                    <button onclick={() => moveExercise(exIdx, -1)} disabled={exIdx === 0}
+                            class="w-5 h-5 rounded text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 disabled:opacity-20 transition-colors"
+                            title="Move up">▲</button>
+                    <button onclick={() => moveExercise(exIdx, 1)} disabled={exIdx === uiExercises.length - 1}
+                            class="w-5 h-5 rounded text-[10px] text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 disabled:opacity-20 transition-colors"
+                            title="Move down">▼</button>
+                  </div>
+                </div>
                 <div class="flex items-center gap-2 mt-0.5">
                   {#if exercise?.primary_muscles?.length}
                     <p class="text-xs text-zinc-500 capitalize">{muscleLabel(ex.exerciseId)}</p>
