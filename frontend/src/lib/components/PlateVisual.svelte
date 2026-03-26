@@ -1,16 +1,17 @@
 <script lang="ts">
   /**
    * Visual plate breakdown — shows colored plates on a bar, per side.
-   * Props: totalWeight, barWeight, isLbs
+   * Props: totalWeight, barWeight, isLbs, oneSided, prevWeight
    */
   interface Props {
     totalWeight: number;
     barWeight: number;
     isLbs: boolean;
     oneSided?: boolean; // t-bar row, landmine — plates on one end only
+    prevWeight?: number | null; // previous exercise/set weight for delta display
   }
 
-  let { totalWeight, barWeight, isLbs, oneSided = false }: Props = $props();
+  let { totalWeight, barWeight, isLbs, oneSided = false, prevWeight = null }: Props = $props();
 
   // Standard gym plate colors (lbs) — sizes proportional to real plates
   const PLATES_LBS: [number, string, string][] = [
@@ -40,23 +41,52 @@
     count: number;
   }
 
-  let plates = $derived.by(() => {
-    const perSide = oneSided ? (totalWeight - barWeight) : (totalWeight - barWeight) / 2;
+  function calcPlates(weight: number): PlateSlice[] {
+    const perSide = oneSided ? (weight - barWeight) : (weight - barWeight) / 2;
     if (perSide <= 0) return [];
 
     const available = isLbs ? PLATES_LBS : PLATES_KG;
     let remaining = perSide;
     const result: PlateSlice[] = [];
 
-    for (const [weight, color, height] of available) {
-      const count = Math.floor(remaining / weight);
+    for (const [w, color, height] of available) {
+      const count = Math.floor(remaining / w);
       if (count > 0) {
-        result.push({ weight, color, height, count });
-        remaining -= count * weight;
+        result.push({ weight: w, color, height, count });
+        remaining -= count * w;
       }
     }
     if (remaining > 0.1) return []; // can't make exact weight
     return result;
+  }
+
+  let plates = $derived(calcPlates(totalWeight));
+
+  // Plate delta — what to add/remove compared to previous weight
+  let plateDelta = $derived.by(() => {
+    if (prevWeight == null || prevWeight === totalWeight || prevWeight <= barWeight) return null;
+    const prevPlates = calcPlates(prevWeight);
+    if (prevPlates.length === 0 || plates.length === 0) return null;
+
+    // Build weight→count maps
+    const prevMap = new Map<number, number>();
+    for (const p of prevPlates) prevMap.set(p.weight, p.count);
+    const curMap = new Map<number, number>();
+    for (const p of plates) curMap.set(p.weight, p.count);
+
+    const allWeights = new Set([...prevMap.keys(), ...curMap.keys()]);
+    const add: string[] = [];
+    const remove: string[] = [];
+
+    for (const w of [...allWeights].sort((a, b) => b - a)) {
+      const prev = prevMap.get(w) ?? 0;
+      const cur = curMap.get(w) ?? 0;
+      if (cur > prev) add.push(`${cur - prev}×${w}`);
+      else if (prev > cur) remove.push(`${prev - cur}×${w}`);
+    }
+
+    if (add.length === 0 && remove.length === 0) return null;
+    return { add, remove };
   });
 </script>
 
@@ -95,4 +125,18 @@
   <p class="text-[9px] text-zinc-500 text-center">
     {plates.map(p => `${p.count}×${p.weight}`).join(' + ')} {oneSided ? '' : '/side'}
   </p>
+  {#if plateDelta}
+    <p class="text-[9px] text-center mt-0.5">
+      {#if plateDelta.remove.length > 0}
+        <span class="text-red-400">−{plateDelta.remove.join(', ')}</span>
+      {/if}
+      {#if plateDelta.remove.length > 0 && plateDelta.add.length > 0}
+        <span class="text-zinc-600"> → </span>
+      {/if}
+      {#if plateDelta.add.length > 0}
+        <span class="text-green-400">+{plateDelta.add.join(', ')}</span>
+      {/if}
+      <span class="text-zinc-600"> /side</span>
+    </p>
+  {/if}
 {/if}
