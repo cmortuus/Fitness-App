@@ -196,6 +196,8 @@ export interface PlannedExercise {
   notes?: string | null;
   set_type?: string;
   drops?: number | null;
+  group_id?: string | null;
+  group_type?: 'superset' | 'circuit' | null;
 }
 
 export interface PlannedDay {

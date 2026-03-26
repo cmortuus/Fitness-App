@@ -101,7 +101,30 @@
     sets: UISet[];
     isUnilateral: boolean;     // overrides exercise default; shows L/R inputs
     customRestSecs: number | null; // null = use category default
+    groupId: string | null;    // shared ID for superset/circuit grouping
+    groupType: 'superset' | 'circuit' | null;
   }
+
+  interface ExerciseGroup {
+    groupId: string | null;
+    groupType: 'superset' | 'circuit' | null;
+    exercises: UIExercise[];
+  }
+
+  function computeGroups(exercises: UIExercise[]): ExerciseGroup[] {
+    const groups: ExerciseGroup[] = [];
+    for (const ex of exercises) {
+      const last = groups[groups.length - 1];
+      if (ex.groupId && last?.groupId === ex.groupId) {
+        last.exercises.push(ex);
+      } else {
+        groups.push({ groupId: ex.groupId, groupType: ex.groupType, exercises: [ex] });
+      }
+    }
+    return groups;
+  }
+
+  let exerciseGroups = $derived(computeGroups(uiExercises));
 
   // ─── State ────────────────────────────────────────────────────────────────
   let loading = $state(true);
@@ -392,6 +415,8 @@
             sets,
             isUnilateral: isUni,
             customRestSecs: null,
+            groupId: pe.group_id ?? null,
+            groupType: pe.group_type ?? null,
           };
         });
       }
@@ -554,6 +579,8 @@
           sets,
           isUnilateral: isUni,
           customRestSecs: null,
+          groupId: null,
+          groupType: null,
         };
       });
     } catch (e) {
@@ -869,9 +896,9 @@
           });
         }
       }
-      // Start rest timer only on successful save
+      // Start rest timer (group-aware for supersets/circuits)
       ensureNotificationPermission();
-      startRestTimer(exUiId);
+      handlePostSetCompletion(exUiId);
     } catch (e) {
       console.error('Failed to complete set:', e);
       alert('Failed to save set. Please try again.');
@@ -895,8 +922,8 @@
     else set.doneRight = true;
     uiExercises = [...uiExercises];
 
-    // Start rest timer after completing either side
-    startRestTimer(exUiId);
+    // Start rest timer (group-aware for supersets/circuits)
+    handlePostSetCompletion(exUiId);
 
     // If both sides are now resolved, trigger the full backend save
     if (set.doneLeft && set.doneRight) {
@@ -1038,6 +1065,59 @@
     if (isLower && !isCompound) return d.lowerIsolation;
     if (!isLower && isCompound) return d.upperCompound;
     return d.upperIsolation;
+  }
+
+  // ─── Superset/Circuit grouping ──────────────────────────────────────────
+  let highlightedExUiId = $state<string | null>(null);
+  let highlightTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  function handlePostSetCompletion(exUiId: string) {
+    const ex = uiExercises.find(e => e.uiId === exUiId);
+    if (!ex?.groupId) {
+      startRestTimer(exUiId);
+      return;
+    }
+    const group = uiExercises.filter(e => e.groupId === ex.groupId);
+    const myDone = ex.sets.filter(s => s.done || s.skipped).length;
+    const allCaughtUp = group.every(g => g.sets.filter(s => s.done || s.skipped).length >= myDone);
+    if (allCaughtUp) {
+      startRestTimer(exUiId);
+    } else {
+      // Highlight next exercise in group
+      const myIdx = group.indexOf(ex);
+      const next = group[(myIdx + 1) % group.length];
+      highlightedExUiId = next.uiId;
+      if (highlightTimeout) clearTimeout(highlightTimeout);
+      highlightTimeout = setTimeout(() => { highlightedExUiId = null; }, 5000);
+      const el = document.querySelector(`[data-ex-uid="${next.uiId}"]`);
+      el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }
+
+  function toggleLink(exUiId: string) {
+    const idx = uiExercises.findIndex(e => e.uiId === exUiId);
+    if (idx <= 0) return;
+    const current = uiExercises[idx];
+    const above = uiExercises[idx - 1];
+
+    if (current.groupId && current.groupId === above.groupId) {
+      // Unlink: remove current from group
+      current.groupId = null;
+      current.groupType = null;
+      // If only 1 left in old group, clear it too
+      const remaining = uiExercises.filter(e => e.groupId === above.groupId);
+      if (remaining.length === 1) { remaining[0].groupId = null; remaining[0].groupType = null; }
+      else { const t = remaining.length >= 3 ? 'circuit' : 'superset'; remaining.forEach(e => e.groupType = t); }
+    } else {
+      // Link: join current to above's group (or create new)
+      const gid = above.groupId || `g-${Date.now().toString(36)}`;
+      above.groupId = gid;
+      current.groupId = gid;
+      const group = uiExercises.filter(e => e.groupId === gid);
+      const t: 'superset' | 'circuit' = group.length >= 3 ? 'circuit' : 'superset';
+      group.forEach(e => e.groupType = t);
+    }
+    uiExercises = [...uiExercises];
   }
 
   /** Play a short chime using Web Audio API (no audio file needed) */
@@ -1195,6 +1275,8 @@
           sets: newSets,
           isUnilateral: pickingExercise.is_unilateral,
           customRestSecs: null,
+          groupId: oldEx.groupId,
+          groupType: oldEx.groupType,
         };
         uiExercises = [...uiExercises];
       }
@@ -1222,6 +1304,8 @@
         sets,
         isUnilateral: pickingExercise.is_unilateral,
         customRestSecs: null,
+        groupId: null,
+        groupType: null,
       }];
     }
     showAddModal = false;
@@ -1691,12 +1775,29 @@
     <div class="flex-1 overflow-y-auto pb-36">
       <div class="max-w-2xl mx-auto px-3 py-4 space-y-3">
 
-        {#each uiExercises as ex (ex.uiId)}
+        {#each exerciseGroups as group}
+          <div class={group.groupId ? 'border-l-[3px] border-primary-500 rounded-l-lg pl-1 space-y-1' : 'space-y-3'}>
+          {#if group.groupId}
+            <div class="text-xs text-primary-400 font-semibold px-3 pt-1">
+              {group.groupType === 'circuit' ? `Circuit (${group.exercises.length})` : 'Superset'}
+            </div>
+          {/if}
+          {#each group.exercises as ex (ex.uiId)}
           {@const exercise = getEx(ex.exerciseId)}
           {@const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped)}
           {@const isAssistedEx = exercise?.is_assisted ?? false}
+          {@const exIdx = uiExercises.indexOf(ex)}
 
-          <div class="exercise-card {allDone ? 'exercise-card-done' : ''}">
+          <!-- Link/unlink button between exercises -->
+          {#if exIdx > 0}
+            <button
+              onclick={() => toggleLink(ex.uiId)}
+              class="w-full py-1 text-[10px] font-medium transition-colors rounded {ex.groupId && ex.groupId === uiExercises[exIdx - 1]?.groupId ? 'text-primary-400 bg-primary-500/10 hover:bg-primary-500/20' : 'text-zinc-600 hover:text-zinc-400 hover:bg-zinc-800/50'}"
+            >{ex.groupId && ex.groupId === uiExercises[exIdx - 1]?.groupId ? 'Unlink' : 'Link as superset'}</button>
+          {/if}
+
+          <div class="exercise-card {allDone ? 'exercise-card-done' : ''} {highlightedExUiId === ex.uiId ? 'ring-2 ring-primary-400 ring-offset-1 ring-offset-zinc-900' : ''}"
+               data-ex-uid={ex.uiId}>
             <!-- Exercise header -->
             <div class="flex items-start justify-between mb-3">
               <div>
@@ -2214,6 +2315,8 @@
                 >− Remove Last</button>
               {/if}
             </div>
+          </div>
+        {/each}
           </div>
         {/each}
 
