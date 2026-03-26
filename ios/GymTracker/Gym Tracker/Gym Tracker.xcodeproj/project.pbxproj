@@ -19,6 +19,7 @@
 		78C114B6D4824EBAAEA6283E /* WorkoutModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 944509D18D822235CDAF0C58 /* WorkoutModels.swift */; };
 		7B88AE038D21520944833F96 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52BA5A3BFCC68A135D7DE31B /* SettingsView.swift */; };
 		8650B153D42268F73C208585 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B1B1C2D75D1D61271F652CC3 /* APIClient.swift */; };
+		9C5933DDE9D227FF14A93B70 /* ExerciseHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8B1AAB7690CAD0D298D9B5A4 /* ExerciseHistoryView.swift */; };
 		9CF002A4DCB6CECC1A7829B2 /* NutritionView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65CF36C83CDBCAB1CCEE9172 /* NutritionView.swift */; };
 		B7805E7E725E10D5F2DD1908 /* PlateVisualView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 943CBF0BF68EF4255FC5D1CF /* PlateVisualView.swift */; };
 		BF3B93880DF40A4ABA3A6EC9 /* ExercisePickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F7B5CBD20BDA26AE67C7205 /* ExercisePickerView.swift */; };
@@ -40,6 +41,7 @@
 		6CC10BDD71FDEA1E6C7F6203 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
 		77EA5B5BA3244D790478885B /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		7F4783261DC7AAAB340EF20F /* UIModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UIModels.swift; sourceTree = "<group>"; };
+		8B1AAB7690CAD0D298D9B5A4 /* ExerciseHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExerciseHistoryView.swift; sourceTree = "<group>"; };
 		932191EAD6E04CE0845DEFB7 /* Gym Tracker.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "Gym Tracker.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		943CBF0BF68EF4255FC5D1CF /* PlateVisualView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlateVisualView.swift; sourceTree = "<group>"; };
 		944509D18D822235CDAF0C58 /* WorkoutModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutModels.swift; sourceTree = "<group>"; };
@@ -57,6 +59,7 @@
 			children = (
 				A609786AAD7B80F0E083B0E3 /* BarcodeScannerView.swift */,
 				0959F00ADEF6DBE1B1F72EE7 /* ConfettiView.swift */,
+				8B1AAB7690CAD0D298D9B5A4 /* ExerciseHistoryView.swift */,
 				1F7B5CBD20BDA26AE67C7205 /* ExercisePickerView.swift */,
 				943CBF0BF68EF4255FC5D1CF /* PlateVisualView.swift */,
 				D7B4AB917F38FCBA4B921C35 /* WorkoutSummaryView.swift */,
@@ -240,6 +243,7 @@
 				5D1D72B7552E19E7A16559D6 /* ConfettiView.swift in Sources */,
 				379EB09C27EDEABF47D9B8BA /* DashboardView.swift in Sources */,
 				CE7C35033D93647AF1CCE475 /* DietPhaseSheet.swift in Sources */,
+				9C5933DDE9D227FF14A93B70 /* ExerciseHistoryView.swift in Sources */,
 				BF3B93880DF40A4ABA3A6EC9 /* ExercisePickerView.swift in Sources */,
 				10148A1DB56FC543DCC6CA25 /* GymTrackerApp.swift in Sources */,
 				0310119E197C683A56C62573 /* LoginView.swift in Sources */,

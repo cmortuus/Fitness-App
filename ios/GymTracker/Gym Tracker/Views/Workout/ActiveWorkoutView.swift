@@ -32,9 +32,10 @@ struct ActiveWorkoutView: View {
     @State private var finished = false
     @State private var showCancelConfirm = false
 
-    // Exercise picker
+    // Exercise picker + history
     @State private var showAddExercise = false
     @State private var swapTarget: UIExercise? = nil
+    @State private var historyExercise: UIExercise? = nil
 
     // PR celebration
     @State private var prCelebration: PR? = nil
@@ -99,6 +100,9 @@ struct ActiveWorkoutView: View {
         }
         .task { await startWorkout() }
         .onDisappear { stopTimers() }
+        .sheet(item: $historyExercise) { ex in
+            ExerciseHistoryView(exerciseId: ex.id, exerciseName: ex.name)
+        }
         .sheet(isPresented: $showAddExercise) {
             ExercisePickerView(
                 allExercises: allExercises,
@@ -331,8 +335,11 @@ struct ActiveWorkoutView: View {
                     .controlSize(.mini)
                 }
 
-                // Swap
+                // Menu (history, swap, remove)
                 Menu {
+                    Button(action: { historyExercise = exercise }) {
+                        Label("History", systemImage: "clock.arrow.circlepath")
+                    }
                     Button(action: { swapTarget = exercise; showAddExercise = true }) {
                         Label("Swap Exercise", systemImage: "arrow.triangle.2.circlepath")
                     }
