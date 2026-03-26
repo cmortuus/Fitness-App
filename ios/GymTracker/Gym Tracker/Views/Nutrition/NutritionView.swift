@@ -6,6 +6,7 @@ struct NutritionView: View {
     @State private var selectedDate = Date()
     @State private var showAddFood = false
     @State private var activePhase: DietPhase?
+    @State private var showPhaseSheet = false
 
     private var dateString: String {
         let df = DateFormatter()
@@ -54,8 +55,13 @@ struct NutritionView: View {
             .navigationTitle("Nutrition")
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
-                    Button(action: { showAddFood = true }) {
-                        Image(systemName: "plus.circle.fill")
+                    HStack(spacing: 12) {
+                        Button(action: { showPhaseSheet = true }) {
+                            Image(systemName: "chart.line.downtrend.xyaxis")
+                        }
+                        Button(action: { showAddFood = true }) {
+                            Image(systemName: "plus.circle.fill")
+                        }
                     }
                 }
             }
@@ -63,6 +69,9 @@ struct NutritionView: View {
             .refreshable { await loadDay() }
             .sheet(isPresented: $showAddFood) {
                 AddFoodView(date: dateString, onSave: { Task { await loadDay() } })
+            }
+            .sheet(isPresented: $showPhaseSheet) {
+                DietPhaseSheet(activePhase: activePhase, onUpdate: { Task { await loadPhase() } })
             }
         }
     }
@@ -172,6 +181,12 @@ struct AddFoodView: View {
     @State private var manualCarbs: Double?
     @State private var manualFat: Double?
     @State private var manualQty: Double = 100
+    // Barcode
+    @State private var showScanner = false
+    @State private var scannedBarcode: String?
+    @State private var barcodeResult: FoodResult?
+    @State private var barcodeNotFound = false
+    @State private var lookingUpBarcode = false
 
     var body: some View {
         NavigationStack {
@@ -179,16 +194,38 @@ struct AddFoodView: View {
                 Picker("", selection: $tab) {
                     Text("Search").tag(0)
                     Text("Manual").tag(1)
+                    Text("Scan").tag(2)
                 }
                 .pickerStyle(.segmented)
                 .padding()
 
-                if tab == 0 { searchTab } else { manualTab }
+                switch tab {
+                case 0: searchTab
+                case 1: manualTab
+                case 2: scanTab
+                default: EmptyView()
+                }
             }
             .navigationTitle("Add Food")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+            .fullScreenCover(isPresented: $showScanner) {
+                ZStack(alignment: .topTrailing) {
+                    BarcodeScannerView { barcode in
+                        scannedBarcode = barcode
+                        showScanner = false
+                        Task { await lookupBarcode(barcode) }
+                    }
+                    Button(action: { showScanner = false }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.title)
+                            .foregroundStyle(.white)
+                            .padding()
+                    }
+                }
+                .ignoresSafeArea()
             }
         }
     }
@@ -267,6 +304,127 @@ struct AddFoodView: View {
                     calories: manualCal ?? 0, protein: manualProtein ?? 0,
                     carbs: manualCarbs ?? 0, fat: manualFat ?? 0))
         onSave(); dismiss()
+    }
+
+    // MARK: - Scan Tab
+
+    private var scanTab: some View {
+        VStack(spacing: 16) {
+            if lookingUpBarcode {
+                ProgressView("Looking up barcode...")
+                    .padding(.top, 40)
+            } else if let result = barcodeResult {
+                // Found food from barcode
+                VStack(spacing: 12) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.title)
+                        .foregroundStyle(.green)
+                    Text(result.name)
+                        .font(.headline)
+                    if let brand = result.brand {
+                        Text(brand)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    HStack(spacing: 16) {
+                        macroLabel("Cal", Int(result.calories ?? 0), .orange)
+                        macroLabel("P", Int(result.protein ?? 0), .red)
+                        macroLabel("C", Int(result.carbs ?? 0), .blue)
+                        macroLabel("F", Int(result.fat ?? 0), .yellow)
+                    }
+                    .padding()
+
+                    HStack(spacing: 12) {
+                        Button("Scan Again") {
+                            barcodeResult = nil
+                            barcodeNotFound = false
+                            showScanner = true
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Add to Log") {
+                            Task { await logFood(result) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding()
+            } else if barcodeNotFound {
+                VStack(spacing: 12) {
+                    Image(systemName: "questionmark.circle")
+                        .font(.title)
+                        .foregroundStyle(.orange)
+                    Text("Barcode not found")
+                        .font(.headline)
+                    if let barcode = scannedBarcode {
+                        Text(barcode)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.secondary)
+                    }
+                    Text("Try searching by name or enter manually")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    HStack(spacing: 12) {
+                        Button("Scan Again") {
+                            barcodeNotFound = false
+                            showScanner = true
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Enter Manually") {
+                            tab = 1
+                            barcodeNotFound = false
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                }
+                .padding()
+            } else {
+                // Initial scan state
+                VStack(spacing: 16) {
+                    Image(systemName: "barcode.viewfinder")
+                        .font(.system(size: 60))
+                        .foregroundStyle(.blue)
+                    Text("Scan a barcode to look up nutrition info")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+
+                    Button(action: { showScanner = true }) {
+                        Label("Open Scanner", systemImage: "camera.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .padding(.horizontal, 40)
+                }
+                .padding(.top, 40)
+            }
+        }
+    }
+
+    private func macroLabel(_ label: String, _ value: Int, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(value)").font(.title3.bold()).foregroundStyle(color)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private func lookupBarcode(_ barcode: String) async {
+        lookingUpBarcode = true
+        barcodeNotFound = false
+        barcodeResult = nil
+
+        do {
+            let result: FoodResult = try await APIClient.shared.get(
+                "/nutrition/barcode/\(barcode)"
+            )
+            barcodeResult = result
+        } catch {
+            print("[Nutrition] Barcode lookup failed: \(error)")
+            barcodeNotFound = true
+        }
+        lookingUpBarcode = false
     }
 }
 

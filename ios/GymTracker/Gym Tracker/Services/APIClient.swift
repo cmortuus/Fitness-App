@@ -150,16 +150,14 @@ enum APIError: LocalizedError {
 
 // MARK: - Type erasure for Encodable (Sendable-safe)
 
-private struct EncodableWrapper: Encodable {
-    private let _encode: @Sendable (Encoder) throws -> Void
+private struct EncodableWrapper: Encodable, @unchecked Sendable {
+    private let wrapped: any Encodable
 
     init(_ wrapped: any Encodable) {
-        _encode = { encoder in
-            try wrapped.encode(to: encoder)
-        }
+        self.wrapped = wrapped
     }
 
     func encode(to encoder: Encoder) throws {
-        try _encode(encoder)
+        try wrapped.encode(to: encoder)
     }
 }
