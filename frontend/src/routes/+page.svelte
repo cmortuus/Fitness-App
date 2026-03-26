@@ -211,6 +211,7 @@
     plans: 'Manage Plans',
     repeatLast: 'Repeat Last Workout',
     pinnedCharts: 'Pinned Charts',
+    trainingLog: 'Training Log',
   };
 
   function isWidgetEnabled(id: string): boolean {
@@ -237,6 +238,21 @@
 
   let orderedWidgets = $derived($settings.dashboardWidgets ?? []);
 
+  // Long-press to enter edit mode
+  let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function handlePointerDown() {
+    longPressTimer = setTimeout(() => {
+      showCustomize = true;
+      // Haptic feedback if available
+      if (navigator.vibrate) navigator.vibrate(50);
+    }, 600);
+  }
+
+  function handlePointerUp() {
+    if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+  }
+
   let lastWorkout = $derived((() => {
     const last = allSessions.find(s => s.status === 'completed' && s.workout_plan_id);
     if (!last) return null;
@@ -249,23 +265,24 @@
   })());
 </script>
 
-<div class="page-content space-y-5">
+<div class="page-content space-y-5"
+     onpointerdown={handlePointerDown}
+     onpointerup={handlePointerUp}
+     onpointercancel={handlePointerUp}
+     oncontextmenu={(e) => { if (showCustomize) e.preventDefault(); }}>
 
-  <!-- ── Customize button ──────────────────────────────────────────── -->
-  <div class="flex justify-end">
-    <button onclick={() => showCustomize = !showCustomize}
-            class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors flex items-center gap-1">
-      <span>{showCustomize ? '✕ Done' : '⚙ Customize'}</span>
-    </button>
-  </div>
-
-  <!-- ── Customize modal ───────────────────────────────────────────── -->
+  <!-- ── Customize panel (triggered by long-press) ─────────────────── -->
   {#if showCustomize}
-    <div class="card border border-zinc-700">
-      <h3 class="text-sm font-semibold text-zinc-300 mb-3">Dashboard Widgets</h3>
-      <p class="text-xs text-zinc-500 mb-3">Toggle and reorder widgets. Changes save automatically.</p>
+    <div class="card border border-primary-500/30 bg-primary-500/5">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="text-sm font-semibold text-zinc-300">Customize Dashboard</h3>
+        <button onclick={() => showCustomize = false}
+                class="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">✕ Done</button>
+      </div>
+      <p class="text-xs text-zinc-500 mb-3">Reorder widgets and toggle visibility. Long-press anywhere to open this again.</p>
       <div class="space-y-1">
         {#each orderedWidgets as widget, idx}
+          {@const isRequired = widget.id === 'nextWorkout' || widget.id === 'plans'}
           <div class="flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50">
             <div class="flex flex-col gap-0.5">
               <button onclick={() => moveWidget(widget.id, -1)} disabled={idx === 0}
@@ -273,11 +290,17 @@
               <button onclick={() => moveWidget(widget.id, 1)} disabled={idx === orderedWidgets.length - 1}
                       class="text-[10px] text-zinc-500 hover:text-zinc-300 disabled:opacity-20">▼</button>
             </div>
-            <label class="flex items-center gap-2 flex-1 cursor-pointer">
-              <input type="checkbox" checked={widget.enabled}
-                     onchange={() => toggleWidget(widget.id)}
-                     class="rounded border-zinc-600 bg-zinc-700 text-primary-500 focus:ring-primary-500" />
-              <span class="text-sm {widget.enabled ? 'text-zinc-200' : 'text-zinc-500'}">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
+            <label class="flex items-center gap-2 flex-1 {isRequired ? 'cursor-not-allowed' : 'cursor-pointer'}">
+              {#if isRequired}
+                <input type="checkbox" checked={true} disabled
+                       class="rounded border-zinc-600 bg-zinc-700 text-primary-500 opacity-50" />
+                <span class="text-sm text-zinc-200">{WIDGET_LABELS[widget.id] ?? widget.id} <span class="text-[10px] text-zinc-500">(required)</span></span>
+              {:else}
+                <input type="checkbox" checked={widget.enabled}
+                       onchange={() => toggleWidget(widget.id)}
+                       class="rounded border-zinc-600 bg-zinc-700 text-primary-500 focus:ring-primary-500" />
+                <span class="text-sm {widget.enabled ? 'text-zinc-200' : 'text-zinc-500'}">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
+              {/if}
             </label>
           </div>
         {/each}
@@ -286,7 +309,7 @@
   {/if}
 
   <!-- ── Widgets rendered in user-defined order ────────────────────── -->
-  {#each orderedWidgets.filter(w => w.enabled) as widget (widget.id)}
+  {#each orderedWidgets.filter(w => w.enabled || w.id === 'nextWorkout' || w.id === 'plans') as widget (widget.id)}
 
   {#if widget.id === 'stats'}
   <!-- ── Quick stats strip ───────────────────────────────────────────── -->
@@ -591,6 +614,44 @@
       </a>
     </div>
   </div>
+
+  {:else if widget.id === 'trainingLog'}
+  <!-- ── Training Log (streak + monthly stats) ─────────────────────── -->
+  {#if !loading}
+    <div class="card">
+      <div class="flex items-center justify-between mb-3">
+        <h3 class="font-semibold text-zinc-200">Training Log</h3>
+        <a href="/calendar" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">Full Calendar →</a>
+      </div>
+      <div class="grid grid-cols-3 gap-3 mb-3">
+        <div class="bg-zinc-800/50 rounded-lg px-3 py-2 text-center">
+          <p class="text-xl font-bold text-primary-400">{streak}</p>
+          <p class="text-[10px] text-zinc-500">Day Streak</p>
+        </div>
+        <div class="bg-zinc-800/50 rounded-lg px-3 py-2 text-center">
+          <p class="text-xl font-bold text-green-400">{weeklyWorkouts}</p>
+          <p class="text-[10px] text-zinc-500">This Week</p>
+        </div>
+        <div class="bg-zinc-800/50 rounded-lg px-3 py-2 text-center">
+          <p class="text-xl font-bold text-amber-400">
+            {weeklyVolume > 999 ? (weeklyVolume / 1000).toFixed(1) + 'k' : weeklyVolume.toFixed(0)}
+          </p>
+          <p class="text-[10px] text-zinc-500">{volUnit()} this wk</p>
+        </div>
+      </div>
+      <!-- Last 5 workouts compact list -->
+      {#if recentSessions.length > 0}
+        <div class="space-y-1">
+          {#each recentSessions.slice(0, 3) as s}
+            <div class="flex items-center justify-between py-1.5 text-sm">
+              <span class="text-zinc-300 truncate">{s.name ?? 'Workout'}</span>
+              <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
+    </div>
+  {/if}
 
   {:else if widget.id === 'recentSessions'}
   <!-- ── Recent sessions ─────────────────────────────────────────────── -->
