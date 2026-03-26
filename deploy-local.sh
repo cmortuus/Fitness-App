@@ -59,10 +59,9 @@ build_image() {
 
   git archive "origin/$branch" | tar -x -C "$tmpdir"
 
-  docker buildx build \
+  docker build \
     --platform "$PLATFORM" \
     --tag "$tag:latest" \
-    --load \
     "$tmpdir"
 
   local duration=$((SECONDS - start_time))
@@ -132,11 +131,11 @@ fi
 
 # Health check
 log "Running health check..."
-sleep 3
-if ssh "$SERVER" "curl -sf http://localhost/ > /dev/null 2>&1"; then
+sleep 15
+if ssh "$SERVER" "docker compose exec -T main curl -so /dev/null http://localhost:3000/ 2>/dev/null"; then
   log "Health check passed"
 else
-  log "Health check failed — check server logs: ssh $SERVER 'docker compose -C $SERVER_DIR logs'"
+  log "Health check may still be starting — check: ssh $SERVER 'docker compose logs'"
 fi
 
 total_duration=$((SECONDS - total_start))
