@@ -29,6 +29,7 @@
     "@capacitor/cli": "^8.3.0",
     "@capacitor/core": "^8.3.0",
     "@capacitor/ios": "^8.3.0",
+    "@capgo/capacitor-health": "^8.4.2",
     "@tanstack/svelte-query": "^5.17.0",
     "axios": "^1.6.0",
     "chart.js": "^4.4.0",

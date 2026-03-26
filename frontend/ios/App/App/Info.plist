@@ -47,5 +47,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>GymTracker reads your health data to show body weight trends and sync workout history.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>GymTracker writes completed workouts, body weight, and nutrition data to Apple Health.</string>
 </dict>
 </plist>
