@@ -208,6 +208,7 @@
     if (prType) {
       prCelebration = { exercise: exercise.display_name, type: prType, value: prValue };
       if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      fireConfetti();
       if (prTimeout) clearTimeout(prTimeout);
       prTimeout = setTimeout(() => { prCelebration = null; }, 4000);
     }
@@ -1702,6 +1703,50 @@
   }
 
 
+  // ─── Confetti animation for PR celebrations ─────────────────────────────
+  function fireConfetti() {
+    const colors = ['#ffd700', '#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7'];
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden';
+    document.body.appendChild(container);
+
+    for (let i = 0; i < 50; i++) {
+      const piece = document.createElement('div');
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const left = Math.random() * 100;
+      const delay = Math.random() * 0.5;
+      const size = 6 + Math.random() * 6;
+      const rotation = Math.random() * 360;
+      piece.style.cssText = `
+        position:absolute;
+        left:${left}%;
+        top:-10px;
+        width:${size}px;
+        height:${size}px;
+        background:${color};
+        border-radius:${Math.random() > 0.5 ? '50%' : '2px'};
+        transform:rotate(${rotation}deg);
+        animation:confettiFall ${1.5 + Math.random()}s ease-in ${delay}s forwards;
+      `;
+      container.appendChild(piece);
+    }
+
+    // Add keyframes if not already present
+    if (!document.getElementById('confetti-style')) {
+      const style = document.createElement('style');
+      style.id = 'confetti-style';
+      style.textContent = `
+        @keyframes confettiFall {
+          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    setTimeout(() => container.remove(), 3000);
+  }
+
   // ─── Cancel workout ───────────────────────────────────────────────────────
   async function cancelWorkout() {
     if (!sessionId) { goto('/'); return; }
@@ -3054,5 +3099,16 @@
       oneSided={plateBanner.oneSided}
       prevWeight={plateBanner.prevWeight}
     />
+  </div>
+{/if}
+
+<!-- PR celebration overlay -->
+{#if prCelebration}
+  <div class="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
+    <div class="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 text-white px-6 py-3 rounded-2xl shadow-2xl shadow-yellow-500/30 text-center backdrop-blur-sm">
+      <div class="text-2xl font-black">🏆 NEW PR!</div>
+      <div class="text-sm font-semibold opacity-90">{prCelebration.exercise}</div>
+      <div class="text-lg font-bold">{prCelebration.type}: {prCelebration.value}</div>
+    </div>
   </div>
 {/if}
