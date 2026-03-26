@@ -882,4 +882,29 @@
   :global(.edit-mode .widget-wrapper:active) {
     cursor: grabbing;
   }
+  /* Prevent iOS link preview on long-press (#282) */
+  :global(.page-content) {
+    -webkit-touch-callout: none;
+  }
+  :global(.edit-mode) {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  :global(.edit-mode a) {
+    -webkit-touch-callout: none;
+    pointer-events: none;
+  }
+  :global(.edit-mode button:not([class*="rounded-full"])) {
+    pointer-events: none;
+  }
+  /* Re-enable the edit controls */
+  :global(.edit-mode .widget-wrapper > button) {
+    pointer-events: auto !important;
+  }
+  :global(.edit-mode [class*="sticky"] button) {
+    pointer-events: auto !important;
+  }
+  :global(.edit-mode [class*="sticky"] a) {
+    pointer-events: auto !important;
+  }
 </style>
