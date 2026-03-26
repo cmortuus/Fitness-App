@@ -2,7 +2,7 @@
   import '../app.css';
   import { onMount } from 'svelte';
   import { page } from '$app/stores';
-  import { activeDietPhase, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl } from '$lib/stores';
+  import { activeDietPhase, exercises, latestBodyWeight, workoutPlans, nextWorkoutUrl, settings } from '$lib/stores';
   import { getExercises, getLatestBodyWeight, getPlans, getActivePhase, isAuthenticated, getStoredUser, clearAuthTokens } from '$lib/api';
   import type { AuthUser } from '$lib/api';
 
