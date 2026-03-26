@@ -143,6 +143,7 @@
   let exerciseNotes = $state<Record<number, string>>({});
   let editingNoteId = $state<number | null>(null);
   let editingNoteText = $state('');
+  let focusedWeightSetId = $state<string | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
   let showCancelConfirm = $state(false);
@@ -2277,17 +2278,20 @@
                             disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                             placeholder={isAssistedEx ? `-assist` : unit}
                             class="set-input"
+                            onfocus={() => { focusedWeightSetId = set.localId; }}
+                            onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
                           />
                           {#if side === 'left'}
                             {#if isAssistedEx && set.weightLbs !== null}
                               <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                            {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
+                            {/if}
+                            {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
                               {@const bw = getBarWeight(exercise)}
                               {#if set.weightLbs > bw}
                                 <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                               {/if}
                             {/if}
-                            {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                               {#if estReps < 5}
                                 <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -2459,16 +2463,19 @@
                         disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                         placeholder={isAssistedEx ? `-assist` : unit}
                         class="set-input"
+                        onfocus={() => { focusedWeightSetId = set.localId; }}
+                        onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {:else if shouldShowPlates(exercise) && set.weightLbs != null && !set.done && set.localId === ex.sets.find(s => !s.done && !s.skipped)?.localId}
+                      {/if}
+                      {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
                         {@const bw = getBarWeight(exercise)}
                         {#if set.weightLbs > bw}
                           <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
                         {/if}
                       {/if}
-                      {#if !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                         {#if estReps < 5}
                           <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
