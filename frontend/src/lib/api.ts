@@ -371,6 +371,15 @@ export async function setExerciseNote(exerciseId: number, note: string): Promise
   await api.put(`/exercises/${exerciseId}/notes`, { note });
 }
 
+export async function recalculateWeights(pattern: string, oldBaseKg: number, newBaseKg: number): Promise<{ adjusted: number }> {
+  const response = await api.post('/exercises/recalculate-weights', {
+    exercise_name_pattern: pattern,
+    old_base_kg: oldBaseKg,
+    new_base_kg: newBaseKg,
+  });
+  return response.data;
+}
+
 // Get recently used exercises
 export async function getRecentExercises(limit: number = 10): Promise<RecentExercise[]> {
   const response = await api.get('/plans/exercises/recent', { params: { limit } });

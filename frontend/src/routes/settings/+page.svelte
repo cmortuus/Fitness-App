@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { settings, latestBodyWeight } from '$lib/stores';
   import type { RestDurations } from '$lib/stores';
-  import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser } from '$lib/api';
+  import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser, recalculateWeights } from '$lib/api';
   import type { BodyWeightEntry } from '$lib/api';
 
   const currentUser = getStoredUser();
@@ -10,6 +10,45 @@
   // Collapsible sections
   let showBars = $state(false);
   let showPlateLoaded = $state(false);
+
+  // Machine key → exercise name pattern for retroactive recalculation
+  const MACHINE_PATTERNS: Record<string, string> = {
+    smithMachine: 'smith', legPress: 'leg_press', hackSquat: 'hack_squat',
+    tBarRow: 't_bar', beltSquat: 'belt', chestPress: 'chest_press',
+    shoulderPress: 'shoulder_press', inclinePress: 'incline', declinePress: 'decline',
+    calfRaise: 'calf', seatedRow: 'seated_row', latPulldown: 'lat_pulldown',
+    pendulumSquat: 'pendulum', hipThrust: 'hip_thrust', legExtension: 'leg_extension',
+    legCurl: 'leg_curl',
+  };
+
+  async function handleMachineWeightChange(key: string, newVal: number) {
+    const oldVal = $settings.machineWeights?.[key] ?? 0;
+    settings.update(s => ({ ...s, machineWeights: { ...s.machineWeights, [key]: newVal } }));
+
+    if (oldVal > 0 && Math.abs(newVal - oldVal) > 0.1) {
+      const pattern = MACHINE_PATTERNS[key];
+      if (pattern) {
+        const apply = confirm(
+          `Apply this weight change retroactively to all past workouts on this machine?\n\n` +
+          `OK = Recalculate past workouts\nCancel = Future workouts only`
+        );
+        if (apply) {
+          try {
+            const result = await recalculateWeights(
+              pattern,
+              oldVal * LBS_TO_KG,
+              newVal * LBS_TO_KG
+            );
+            if (result.adjusted > 0) {
+              alert(`Updated ${result.adjusted} historical sets.`);
+            }
+          } catch {
+            alert('Failed to recalculate past workouts.');
+          }
+        }
+      }
+    }
+  }
 
   function logout() {
     clearAuthTokens();
@@ -482,10 +521,7 @@
                        value={$settings.machineWeights?.[key] ?? 0}
                        onchange={(e) => {
                          const val = parseFloat((e.target as HTMLInputElement).value) || 0;
-                         settings.update(s => ({
-                           ...s,
-                           machineWeights: { ...s.machineWeights, [key]: val }
-                         }));
+                         handleMachineWeightChange(key, val);
                        }}
                        class="w-20 text-center bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-2 text-white"
                        style="font-size: 16px;" />
