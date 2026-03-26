@@ -253,16 +253,35 @@
   // Long-press to enter edit mode
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
 
-  function handlePointerDown(e: PointerEvent) {
-    // Don't trigger on buttons, inputs, links
-    const tag = (e.target as HTMLElement).tagName;
-    if (['BUTTON', 'INPUT', 'SELECT', 'A', 'LABEL'].includes(tag)) return;
-    if ((e.target as HTMLElement).closest('button, a, input, select')) return;
+  let longPressTriggered = false;
 
+  function handleLongPressStart(e: TouchEvent) {
+    // Don't trigger on form elements
+    const tag = (e.target as HTMLElement).tagName;
+    if (['INPUT', 'SELECT'].includes(tag)) return;
+    if ((e.target as HTMLElement).closest('input, select')) return;
+    if (editMode) return;
+
+    longPressTriggered = false;
     longPressTimer = setTimeout(() => {
+      longPressTriggered = true;
       editMode = true;
       if (navigator.vibrate) navigator.vibrate(50);
-    }, 600);
+    }, 500);
+  }
+
+  function handlePointerDown(e: PointerEvent) {
+    // Desktop fallback — touch devices use handleTouchStart
+    if (e.pointerType === 'touch') return; // handled by touchstart
+    const tag = (e.target as HTMLElement).tagName;
+    if (['INPUT', 'SELECT'].includes(tag)) return;
+    if (editMode) return;
+
+    longPressTriggered = false;
+    longPressTimer = setTimeout(() => {
+      longPressTriggered = true;
+      editMode = true;
+    }, 500);
   }
 
   function handlePointerUp() {
@@ -380,12 +399,14 @@
 </script>
 
 <div class="page-content space-y-5 {editMode ? 'edit-mode' : ''}"
+     ontouchstart={(e) => handleLongPressStart(e)}
      onpointerdown={handlePointerDown}
      onpointerup={handlePointerUp}
      onpointercancel={handlePointerUp}
-     oncontextmenu={(e) => { if (editMode) e.preventDefault(); }}
-     ontouchmove={(e) => handleTouchMove(e)}
-     ontouchend={handleTouchEnd}>
+     onclick={(e) => { if (longPressTriggered) { e.preventDefault(); e.stopPropagation(); longPressTriggered = false; } }}
+     oncontextmenu={(e) => e.preventDefault()}
+     ontouchmove={(e) => { handleTouchMove(e); if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } }}
+     ontouchend={() => { handleTouchEnd(); if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } }}>
 
   <!-- ── Edit mode header ──────────────────────────────────────────── -->
   {#if editMode}
