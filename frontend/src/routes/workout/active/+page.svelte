@@ -2126,7 +2126,7 @@
                   </div>
                 {:else if exerciseNotes[ex.exerciseId]}
                   <button onclick={() => { editingNoteId = ex.exerciseId; editingNoteText = exerciseNotes[ex.exerciseId] || ''; }}
-                          class="text-xs text-amber-400/70 mt-1 text-left hover:text-amber-300 transition-colors">
+                          class="text-xs text-amber-400 mt-1 px-2 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20 text-left hover:bg-amber-500/20 transition-colors">
                     📝 {exerciseNotes[ex.exerciseId]}
                   </button>
                 {:else}
