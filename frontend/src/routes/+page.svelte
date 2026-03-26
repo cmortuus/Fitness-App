@@ -557,21 +557,32 @@
          style="background: linear-gradient(135deg, rgba(217,119,6,0.15), rgba(0,0,0,0));">
       <div class="flex items-start justify-between gap-4">
         <div>
-          <p class="text-xs font-bold uppercase tracking-widest text-amber-400 mb-1">Program Complete 🏆</p>
+          <p class="text-xs font-bold uppercase tracking-widest text-amber-400 mb-1">Mesocycle Complete 🏆</p>
           <h3 class="text-xl font-bold truncate">{nextWorkout.plan.name}</h3>
           <p class="text-sm text-zinc-400 mt-1">
-            All {nextWorkout.plan.duration_weeks} weeks done. What's next?
+            All {nextWorkout.plan.duration_weeks} weeks done!
           </p>
         </div>
         <span class="text-4xl shrink-0">🏆</span>
       </div>
-      <div class="flex gap-3 mt-4">
-        <button onclick={() => handleArchive(nextWorkout!.plan.id)} disabled={archiving}
-                class="btn-primary flex-1 text-sm !py-2">
-          {archiving ? 'Archiving…' : 'Archive & Start New'}
-        </button>
-        <a href="/workout/active?plan={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
-           class="btn-secondary flex-1 text-sm !py-2 text-center">Keep Going</a>
+
+      <!-- Deload recommendation -->
+      <div class="mt-3 px-3 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
+        <p class="text-xs text-blue-300 font-medium mb-1">Deload week recommended</p>
+        <p class="text-[11px] text-zinc-400">A recovery week with reduced volume (~60%) and intensity (~70%) helps consolidate gains before your next cycle.</p>
+      </div>
+
+      <div class="flex flex-col gap-2 mt-4">
+        <a href="/workout/active?plan={nextWorkout.plan.id}&day=1&deload=true"
+           class="btn-primary text-sm !py-2.5 text-center">Start Deload Week</a>
+        <div class="flex gap-2">
+          <a href="/workout/active?plan={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+             class="btn-secondary flex-1 text-sm !py-2 text-center">Skip Deload</a>
+          <button onclick={() => handleArchive(nextWorkout!.plan.id)} disabled={archiving}
+                  class="flex-1 text-sm py-2 rounded-lg bg-zinc-800 text-zinc-400 hover:bg-zinc-700 transition-colors">
+            {archiving ? 'Archiving…' : 'Archive'}
+          </button>
+        </div>
       </div>
     </div>
 
