@@ -32,6 +32,7 @@ export interface AppSettings {
   progressionStyle: 'rep' | 'weight';
   profile: UserProfile;
   machineWeights: MachineWeights;
+  maxWarmupSets: number; // max number of auto-generated warmup sets (default 4)
 }
 
 const SETTINGS_KEY = 'hgt_settings';
@@ -75,6 +76,7 @@ const defaultSettings: AppSettings = {
     legExtension: 0,
     legCurl: 0,
   },
+  maxWarmupSets: 4,
 };
 
 function deepMergeSettings(stored: any): AppSettings {

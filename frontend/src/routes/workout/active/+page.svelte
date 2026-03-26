@@ -994,13 +994,53 @@
     const exercise = getEx(ex.exerciseId);
     const barWeight = getBarWeight(exercise);
 
-    // Standard warmup ramp: bar only, 50%, 70%, 85%
-    const warmupScheme = [
-      { pct: 0, reps: 10, label: 'Bar' },    // empty bar
+    // Check if this muscle group was already warmed up by a prior exercise
+    const myMuscles = exercise?.primary_muscles ?? [];
+    const exIdx = uiExercises.indexOf(ex);
+    const alreadyWarmed = exIdx > 0 && uiExercises.slice(0, exIdx).some(prev => {
+      const prevEx = getEx(prev.exerciseId);
+      const prevMuscles = prevEx?.primary_muscles ?? [];
+      const overlap = myMuscles.some(m => prevMuscles.includes(m));
+      const hasDoneSets = prev.sets.some(s => s.done || s.setType === 'warmup');
+      return overlap && hasDoneSets;
+    });
+
+    // Standard warmup ramp
+    const fullScheme = [
+      { pct: 0, reps: 10 },    // empty bar
       { pct: 0.5, reps: 5 },
       { pct: 0.7, reps: 3 },
       { pct: 0.85, reps: 1 },
     ];
+
+    // If muscles already warmed, just do 1 set at 70%
+    if (alreadyWarmed) {
+      const warmupScheme = [{ pct: 0.7, reps: 3 }];
+      const warmupSets: typeof ex.sets = [];
+      for (const w of warmupScheme) {
+        const weight = roundWeight(target * w.pct);
+        if (weight >= target) continue;
+        warmupSets.push({
+          localId: `${ex.exerciseId}-warmup-0-${Date.now()}`,
+          backendId: null, setNumber: 1,
+          weightLbs: weight, reps: w.reps,
+          repsLeft: ex.isUnilateral ? w.reps : null,
+          repsRight: ex.isUnilateral ? w.reps : null,
+          done: false, skipped: false, doneLeft: false, doneRight: false,
+          saving: false, oneRM: null, initWeight: null, initReps: null,
+          setType: 'warmup', drops: [],
+        });
+      }
+      ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
+      ex.sets = [...warmupSets, ...ex.sets];
+      ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
+      uiExercises = [...uiExercises];
+      return;
+    }
+
+    // Trim to user's max warmup sets setting
+    const maxSets = $settings.maxWarmupSets ?? 4;
+    const warmupScheme = fullScheme.slice(-maxSets);
 
     const warmupSets: typeof ex.sets = [];
     for (const w of warmupScheme) {
@@ -1208,8 +1248,28 @@
         return true;
       });
 
+      // When swapping, sort by relevance to the exercise being replaced
+      if (swapTargetUiId) {
+        const swapEx = uiExercises.find(e => e.uiId === swapTargetUiId);
+        const origExercise = swapEx ? getEx(swapEx.exerciseId) : null;
+        if (origExercise) {
+          const origMuscles = new Set(origExercise.primary_muscles);
+          const origType = origExercise.movement_type;
+          pool.sort((a, b) => {
+            const aMusc = a.primary_muscles.some(m => origMuscles.has(m)) ? 1 : 0;
+            const bMusc = b.primary_muscles.some(m => origMuscles.has(m)) ? 1 : 0;
+            const aType = a.movement_type === origType ? 1 : 0;
+            const bType = b.movement_type === origType ? 1 : 0;
+            const aScore = aMusc * 2 + aType;
+            const bScore = bMusc * 2 + bType;
+            return bScore - aScore;
+          });
+        }
+      }
+
       if (!q) {
-        // Show recents (matching filters) first
+        // Show recents (matching filters) first, or full sorted list for swaps
+        if (swapTargetUiId) return pool.slice(0, 50);
         const recentIds = new Set(recentExercises.map(e => e.id));
         const poolIds = new Set(pool.map(e => e.id));
         const recent = recentExercises.filter(e => poolIds.has(e.id)).slice(0, 10);

@@ -552,6 +552,25 @@
     </div>
   </div>
 
+  <!-- ── Warmup Settings ────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Warmups</h3>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Max warmup sets</p>
+        <p class="text-xs text-zinc-500">Limit auto-generated warmup sets per exercise</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [1, 2, 3, 4] as n}
+          <button onclick={() => settings.update(s => ({ ...s, maxWarmupSets: n }))}
+                  class="w-8 h-8 rounded-lg text-sm font-medium transition-colors {$settings.maxWarmupSets === n ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {n}
+          </button>
+        {/each}
+      </div>
+    </div>
+  </div>
+
   <!-- ── Rest Timer ──────────────────────────────────────────────────── -->
   <div class="card space-y-5">
     <div>

@@ -60,8 +60,10 @@
 </script>
 
 {#if plates.length > 0}
-  <!-- Desktop: horizontal barbell view -->
-  <div class="hidden md:flex items-center gap-0.5 justify-center mt-0.5">
+  <!-- Horizontal barbell view -->
+  <div class="flex items-center gap-0.5 justify-center mt-0.5">
+    <!-- Left bar end -->
+    <div style="width: 10px; height: 4px; background: #52525b; border-radius: 1px 0 0 1px;"></div>
     <!-- Left side: smallest outside, biggest near bar -->
     {#each [...plates].reverse() as plate}
       {#each Array(plate.count) as _}
@@ -86,20 +88,9 @@
         ></div>
       {/each}
     {/each}
+    <!-- Right bar end -->
+    <div style="width: 10px; height: 4px; background: #52525b; border-radius: 0 1px 1px 0;"></div>
   </div>
-
-  <!-- Mobile: plate stack (shown above keyboard when weight input focused) -->
-  <div class="flex flex-col items-center mt-0.5 gap-px md:hidden">
-    {#each [...plates].reverse() as plate}
-      {#each Array(plate.count) as _}
-        <div
-          style="width: {plate.height}; height: 3px; background: {plate.color}; border-radius: 1px;"
-          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-        ></div>
-      {/each}
-    {/each}
-  </div>
-
   <p class="text-[9px] text-zinc-500 text-center">
     {plates.map(p => `${p.count}×${p.weight}`).join(' + ')} /side
   </p>
