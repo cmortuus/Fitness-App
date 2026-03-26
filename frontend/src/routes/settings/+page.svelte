@@ -571,6 +571,23 @@
     </div>
   </div>
 
+  <!-- ── Plate Math ────────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Plate Math</h3>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Show plate breakdown</p>
+        <p class="text-xs text-zinc-500">Display plate visualization when entering weight for barbell/plate-loaded exercises</p>
+      </div>
+      <button
+        onclick={() => settings.update(s => ({ ...s, showPlateMath: !s.showPlateMath }))}
+        class="w-12 h-7 rounded-full transition-colors relative {$settings.showPlateMath ? 'bg-primary-600' : 'bg-zinc-700'}"
+      >
+        <span class="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white transition-transform {$settings.showPlateMath ? 'translate-x-5' : ''}"></span>
+      </button>
+    </div>
+  </div>
+
   <!-- ── Progression / Autoregulation ───────────────────────────────── -->
   <div class="card space-y-5">
     <div>
