@@ -105,6 +105,7 @@ struct WorkoutSession: Codable, Identifiable {
     let started_at: String?
     let completed_at: String?
     let day_number: Int?
+    let notes: String?
     let sets: [ExerciseSet]?
 }
 

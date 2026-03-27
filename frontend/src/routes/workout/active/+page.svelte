@@ -8,7 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback, syncSessionToPlan,
+    saveExerciseFeedback, syncSessionToPlan, patchSession,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -1638,6 +1638,17 @@
     finishing = true;
     try {
       await completeSession(sessionId);
+      // Persist any notes the user entered
+      const noteKey = `hgt_session_note_${sessionId}`;
+      const savedNote = localStorage.getItem(noteKey)?.trim();
+      if (savedNote) {
+        try {
+          await patchSession(sessionId, { notes: savedNote });
+          localStorage.removeItem(noteKey);
+        } catch (e) {
+          console.error('Failed to save session notes:', e);
+        }
+      }
       if (syncToPlan) {
         try {
           const data = await syncSessionToPlan(sessionId);

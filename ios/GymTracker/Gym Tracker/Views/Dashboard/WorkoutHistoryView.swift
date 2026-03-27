@@ -236,6 +236,24 @@ struct SessionDetailView: View {
 
     private func sessionDetailContent(_ s: WorkoutSession, sets: [ExerciseSet]) -> some View {
         VStack(spacing: 16) {
+            // Session notes (if any)
+            if let notes = s.notes, !notes.isEmpty {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "note.text")
+                        .foregroundStyle(.orange)
+                        .font(.subheadline)
+                    Text(notes)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+                .background(.orange.opacity(0.08))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .padding(.horizontal)
+            }
+
             // Summary stats
             let completed = sets.filter { $0.completed_at != nil }
             LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {

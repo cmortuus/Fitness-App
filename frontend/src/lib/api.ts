@@ -215,6 +215,7 @@ export interface WorkoutSession {
   total_reps: number;
   started_at: string | null;
   completed_at: string | null;
+  notes: string | null;
   sets: Set[];
 }
 
@@ -312,6 +313,11 @@ export async function startSession(sessionId: number): Promise<WorkoutSession> {
 
 export async function completeSession(sessionId: number): Promise<WorkoutSession> {
   const response = await api.post(`/sessions/${sessionId}/complete`);
+  return response.data;
+}
+
+export async function patchSession(sessionId: number, data: { notes?: string; name?: string }): Promise<WorkoutSession> {
+  const response = await api.patch(`/sessions/${sessionId}`, data);
   return response.data;
 }
 

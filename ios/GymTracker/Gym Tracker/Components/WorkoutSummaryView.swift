@@ -169,8 +169,25 @@ struct WorkoutSummaryView: View {
     // MARK: - Actions
 
     private func syncAndDismiss() async {
-        if updatePlan, let sid = sessionId, planId != nil, !syncDone {
-            syncingPlan = true
+        guard let sid = sessionId else { onDismiss(); return }
+        syncingPlan = true
+
+        // Save notes if non-empty
+        let trimmedNotes = sessionNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedNotes.isEmpty {
+            struct NotesBody: Encodable { let notes: String }
+            do {
+                let _: WorkoutSession = try await APIClient.shared.patch(
+                    "/sessions/\(sid)",
+                    body: NotesBody(notes: trimmedNotes)
+                )
+            } catch {
+                print("[Summary] Notes save error: \(error)")
+            }
+        }
+
+        // Sync to plan if enabled
+        if updatePlan, planId != nil, !syncDone {
             do {
                 struct SyncResponse: Decodable { let updated: Int }
                 let resp: SyncResponse = try await APIClient.shared.post(
@@ -183,8 +200,9 @@ struct WorkoutSummaryView: View {
             } catch {
                 print("[Summary] Sync-to-plan error: \(error)")
             }
-            syncingPlan = false
         }
+
+        syncingPlan = false
         onDismiss()
     }
 

@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -82,6 +82,7 @@ def serialize_session(workout_session: WorkoutSession) -> dict:
         "total_reps": workout_session.total_reps,
         "started_at": workout_session.started_at,
         "completed_at": workout_session.completed_at,
+        "notes": workout_session.notes,
         "sets": sets_data,
     }
 
@@ -216,6 +217,32 @@ async def complete_session(
 
     workout_session.status = WorkoutStatus.COMPLETED
     workout_session.completed_at = datetime.utcnow()
+    await db.flush()
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
+    return serialize_session(workout_session)
+
+
+@router.patch("/{session_id}", response_model=WorkoutSessionResponse)
+async def update_session(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    notes: str | None = Body(default=None, embed=True),
+    name: str | None = Body(default=None, embed=True),
+) -> dict:
+    """Patch mutable fields (notes, name) on a session."""
+    result = await db.execute(
+        select(WorkoutSession)
+        .where(WorkoutSession.id == session_id)
+        .where(WorkoutSession.user_id == user.id)
+    )
+    workout_session = result.scalar_one_or_none()
+    if not workout_session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if notes is not None:
+        workout_session.notes = notes
+    if name is not None:
+        workout_session.name = name
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)

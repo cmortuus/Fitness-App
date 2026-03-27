@@ -165,6 +165,7 @@ class WorkoutSessionResponse(BaseModel):
     total_reps: int
     started_at: datetime | None
     completed_at: datetime | None
+    notes: str | None = None
     sets: list[SetResponse] = []
 
     model_config = {"from_attributes": True}
