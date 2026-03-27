@@ -1,6 +1,6 @@
 """Recipe builder API endpoints — create, manage, and log multi-ingredient recipes."""
 
-from datetime import date, datetime
+from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
