@@ -118,9 +118,8 @@ struct NutritionView: View {
             .navigationTitle("Nutrition")
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
-            .task { await loadAll() }
+            .task { await loadAll(); await loadPhase() }
             .refreshable { await loadAll() }
-            .onChange(of: selectedDate) { _, _ in Task { await loadAll() } }
             .sheet(isPresented: $showAddFood) {
                 AddFoodView(date: dateString, onSave: { Task { await loadAll() } })
             }
@@ -202,8 +201,9 @@ struct NutritionView: View {
 
     private func shiftDate(_ days: Int) {
         if let new = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) {
-            loading = true
             selectedDate = new
+            loading = true
+            Task { await loadAll() }
         }
     }
 
@@ -703,29 +703,27 @@ struct NutritionView: View {
 
     // MARK: - Data Loading
 
+    @MainActor
     private func loadAll() async {
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask { await self.loadDay() }
-            group.addTask { await self.loadWater() }
-        }
+        // Fetch data concurrently but assign @State on MainActor
+        async let summaryReq: DailySummary? = {
+            try? await APIClient.shared.get("/nutrition/summary",
+                query: [.init(name: "date", value: dateString)])
+        }()
+        async let entriesReq: EntriesResponse? = {
+            try? await APIClient.shared.get("/nutrition/entries",
+                query: [.init(name: "date", value: dateString)])
+        }()
+        async let waterReq: WaterSummary? = {
+            try? await APIClient.shared.get("/nutrition/water",
+                query: [.init(name: "date", value: dateString)])
+        }()
+
+        let (s, e, w) = await (summaryReq, entriesReq, waterReq)
+        summary = s
+        mealEntries = e?.meals ?? [:]
+        waterSummary = w
         loading = false
-    }
-
-    private func loadDay() async {
-        do {
-            summary = try await APIClient.shared.get("/nutrition/summary",
-                query: [.init(name: "date", value: dateString)])
-        } catch { print("[Nutrition] Summary: \(error)") }
-        do {
-            let response: EntriesResponse = try await APIClient.shared.get("/nutrition/entries",
-                query: [.init(name: "date", value: dateString)])
-            mealEntries = response.meals
-        } catch { print("[Nutrition] Entries: \(error)") }
-    }
-
-    private func loadWater() async {
-        waterSummary = try? await APIClient.shared.get("/nutrition/water",
-            query: [.init(name: "date", value: dateString)])
     }
 
     private func loadPhase() async {
