@@ -107,10 +107,32 @@ def download_dump():
     print(f"Downloaded: {size_mb:.0f} MB")
 
 
+GENERIC_KEYWORDS = {
+    "chicken", "beef", "pork", "turkey", "salmon", "tuna", "shrimp", "cod", "tilapia",
+    "rice", "pasta", "oats", "flour", "sugar", "salt", "oil", "butter", "milk", "cream",
+    "egg", "banana", "apple", "orange", "potato", "tomato", "onion", "garlic", "carrot",
+    "broccoli", "spinach", "lettuce", "avocado", "lemon", "lime",
+}
+
+
+def _is_generic(name: str) -> bool:
+    """Check if a food name looks like a generic/raw ingredient rather than a branded product."""
+    words = set(name.lower().split())
+    return bool(words & GENERIC_KEYWORDS) and len(name.split()) <= 4
+
+
 def stream_foods(limit: int = 0, verbose: bool = False):
-    """Stream-parse the gzipped TSV and yield normalized food dicts."""
+    """Stream-parse the gzipped TSV and yield normalized food dicts.
+
+    Deduplicates by barcode within the stream. For generic/raw foods
+    (e.g., chicken breast, rice), keeps only the first entry per
+    normalized name to avoid dozens of near-identical entries.
+    """
     count = 0
     skipped = 0
+    seen_barcodes: set[str] = set()
+    seen_generic_names: set[str] = set()
+
     with gzip.open(LOCAL_FILE, "rt", encoding="utf-8", errors="replace") as f:
         reader = csv.DictReader(f, delimiter="\t")
         for row in reader:
@@ -121,6 +143,22 @@ def stream_foods(limit: int = 0, verbose: bool = False):
             if not validate_food(food, verbose):
                 skipped += 1
                 continue
+
+            bc = food.get("barcode")
+            if bc:
+                if bc in seen_barcodes:
+                    skipped += 1
+                    continue
+                seen_barcodes.add(bc)
+
+            name = food.get("name", "")
+            if _is_generic(name):
+                norm_name = name.lower().strip()
+                if norm_name in seen_generic_names:
+                    skipped += 1
+                    continue
+                seen_generic_names.add(norm_name)
+
             yield food
             count += 1
             if limit and count >= limit:
@@ -129,6 +167,7 @@ def stream_foods(limit: int = 0, verbose: bool = False):
                 print(f"  Parsed {count:,} foods ({skipped:,} skipped)...")
 
     print(f"Parsed {count:,} valid foods, {skipped:,} skipped")
+    print(f"  Dedup: {len(seen_barcodes):,} unique barcodes, {len(seen_generic_names):,} generic names kept")
 
 
 def main():
