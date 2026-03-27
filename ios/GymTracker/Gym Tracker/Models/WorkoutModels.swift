@@ -315,6 +315,22 @@ struct PersonalRecord: Codable, Identifiable {
     var exerciseName: String { display_name ?? name ?? "Exercise #\(exercise_id)" }
 }
 
+struct VolumeLandmark: Codable, Identifiable {
+    var id: String { muscle }
+    let muscle: String
+    let sets: Int
+    let mev: Int
+    let mav: Int
+    let mrv: Int
+    let status: String // none, below_mev, in_range, above_mav, above_mrv
+}
+
+struct VolumeLandmarksResponse: Codable {
+    let days: Int
+    let muscles: [VolumeLandmark]
+    let total_sets: Int
+}
+
 // MARK: - Recipe Models
 
 struct RecipeIngredientModel: Codable, Identifiable {

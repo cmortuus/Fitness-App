@@ -9,6 +9,7 @@ struct ProgressView_: View {
     @State private var recommendations: [ProgressRecommendation] = []
     @State private var bodyWeights: [BodyWeightEntry] = []
     @State private var personalRecords: [PersonalRecord] = []
+    @State private var volumeLandmarks: [VolumeLandmark] = []
     @State private var allExerciseNames: [String] = []
     @State private var loading = true
     @State private var showAllRecords = false
@@ -347,19 +348,30 @@ struct ProgressView_: View {
         .padding(.vertical, 2)
     }
 
-    // MARK: - Muscle Group Section
+    // MARK: - Muscle Group / Volume Section
 
     @ViewBuilder
     private var muscleGroupSection: some View {
-        let trends = muscleGroupTrends()
-        if !trends.isEmpty {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Strength by Muscle Group")
-                    .font(.headline)
-                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
-                    ForEach(trends, id: \.0) { group, change, count in
-                        muscleGroupCard(group: group, change: change, count: count)
-                    }
+        let active = volumeLandmarks.filter { $0.sets > 0 }
+        if !active.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Weekly Volume")
+                        .font(.headline)
+                    Spacer()
+                    Text("MEV/MAV/MRV")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+
+                ForEach(active) { landmark in
+                    volumeLandmarkRow(landmark)
+                }
+
+                if active.count < volumeLandmarks.count {
+                    Text("\(volumeLandmarks.count - active.count) muscles with 0 sets this period")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
             .padding()
@@ -368,29 +380,57 @@ struct ProgressView_: View {
         }
     }
 
-    private func muscleGroupCard(group: String, change: Double, count: Int) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(group.capitalized)
-                .font(.subheadline.bold())
-                .lineLimit(1)
-            HStack {
-                Image(systemName: change > 1 ? "arrow.up.circle.fill" : change < -1 ? "arrow.down.circle.fill" : "minus.circle.fill")
-                    .foregroundStyle(change > 1 ? .green : change < -1 ? .red : .secondary)
-                Text(String(format: "%+.1f%%", change))
-                    .font(.subheadline)
-                    .foregroundStyle(change > 1 ? .green : change < -1 ? .red : .secondary)
+    private func volumeLandmarkRow(_ lm: VolumeLandmark) -> some View {
+        let barFraction = min(1.0, Double(lm.sets) / Double(max(lm.mrv, 1)))
+        let color: Color = {
+            switch lm.status {
+            case "in_range": return .green
+            case "above_mav": return .orange
+            case "above_mrv": return .red
+            case "below_mev": return .red.opacity(0.7)
+            default: return .secondary
             }
-            Text("\(count) exercise\(count == 1 ? "" : "s")")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
+        }()
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(lm.muscle.replacingOccurrences(of: "_", with: " ").capitalized)
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+                Spacer()
+                Text("\(lm.sets) sets")
+                    .font(.caption)
+                    .foregroundStyle(color)
+                    .bold()
+            }
+            // Progress bar with MEV/MAV markers
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.secondary.opacity(0.15))
+                        .frame(height: 6)
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(color.opacity(0.7))
+                        .frame(width: geo.size.width * barFraction, height: 6)
+                    // MEV marker
+                    let mevX = geo.size.width * Double(lm.mev) / Double(max(lm.mrv, 1))
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.5))
+                        .frame(width: 1, height: 10)
+                        .offset(x: mevX, y: -2)
+                    // MAV marker
+                    let mavX = geo.size.width * Double(lm.mav) / Double(max(lm.mrv, 1))
+                    Rectangle()
+                        .fill(Color.secondary.opacity(0.5))
+                        .frame(width: 1, height: 10)
+                        .offset(x: mavX, y: -2)
+                }
+            }
+            .frame(height: 8)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(10)
-        .background(.secondary.opacity(0.12))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
-    // Compute % change per muscle group by averaging 1RM changes across exercises
+    // Kept for backward compat — no longer used (replaced by volumeLandmarks)
     private func muscleGroupTrends() -> [(String, Double, Int)] {
         // Group points by exercise, compute % change from first to last
         var byExercise: [String: [ProgressDataPoint]] = [:]
@@ -541,14 +581,17 @@ struct ProgressView_: View {
             async let bw: [BodyWeightEntry] = APIClient.shared.get("/body-weight/",
                 query: [.init(name: "limit", value: "90")])
             async let prs: [PersonalRecord] = APIClient.shared.get("/progress/records")
+            async let volResponse: VolumeLandmarksResponse = APIClient.shared.get("/progress/volume-landmarks",
+                query: [.init(name: "days", value: "\(timeRange)")])
 
-            let (pts2, recs2, bw2, prs2) = try await (pts, recs, bw, prs)
+            let (pts2, recs2, bw2, prs2, vol2) = try await (pts, recs, bw, prs, volResponse)
 
             await MainActor.run {
                 dataPoints     = pts2
                 recommendations = recs2
                 bodyWeights    = bw2
                 personalRecords = prs2
+                volumeLandmarks = vol2.muscles
 
                 // Build exercise name list for filter menu
                 let names = Set(pts2.map { $0.exercise_name }).sorted()
