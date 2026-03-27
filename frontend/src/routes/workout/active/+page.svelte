@@ -8,11 +8,13 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback,
+    saveExerciseFeedback, syncSessionToPlan, patchSession,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
+  import html2canvas from 'html2canvas';
+  import { writeWorkout } from '$lib/healthkit';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -126,8 +128,6 @@
     return groups;
   }
 
-  let exerciseGroups = $derived(computeGroups(uiExercises));
-
   // ─── State ────────────────────────────────────────────────────────────────
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -140,12 +140,49 @@
   let workoutName = $state('Workout');
   let allExercises = $state<Exercise[]>([]);
   let uiExercises = $state<UIExercise[]>([]);
+
+  let exerciseGroups = $derived(computeGroups(uiExercises));
   let exerciseNotes = $state<Record<number, string>>({});
   let editingNoteId = $state<number | null>(null);
   let editingNoteText = $state('');
   let focusedWeightSetId = $state<string | null>(null);
+  let focusedExerciseId = $state<number | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
+  let syncToPlan = $state(true);
+  let hasLinkedPlan = $state(false);
+  let syncCount = $state<number | null>(null);
+  let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
+  let sharing = $state(false);
+
+  async function shareWorkout() {
+    if (!summaryCardEl) return;
+    sharing = true;
+    try {
+      const canvas = await html2canvas(summaryCardEl, {
+        backgroundColor: '#18181b',
+        scale: 2,
+      });
+      canvas.toBlob(async (blob) => {
+        if (!blob) { sharing = false; return; }
+        const file = new File([blob], 'workout-summary.png', { type: 'image/png' });
+        if (navigator.canShare?.({ files: [file] })) {
+          await navigator.share({ files: [file], title: 'Workout Summary' });
+        } else {
+          // Fallback: download
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'workout-summary.png';
+          a.click();
+          URL.revokeObjectURL(url);
+        }
+        sharing = false;
+      }, 'image/png');
+    } catch {
+      sharing = false;
+    }
+  }
   let showCancelConfirm = $state(false);
   let cancelling = $state(false);
   // (showFinishWarning removed — finish button is disabled until all sets done)
@@ -174,6 +211,7 @@
     if (prType) {
       prCelebration = { exercise: exercise.display_name, type: prType, value: prValue };
       if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+      fireConfetti();
       if (prTimeout) clearTimeout(prTimeout);
       prTimeout = setTimeout(() => { prCelebration = null; }, 4000);
     }
@@ -215,7 +253,7 @@
     return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
   }
 
-  async function submitRecovery(ex: UIExercise, rating: string) {
+  async function submitRecovery(ex: UIExercise, rating: 'poor' | 'ok' | 'good' | 'fresh') {
     const muscle = getMuscleGroup(ex.exerciseId);
     recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
@@ -233,7 +271,7 @@
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
   }
 
-  async function submitEffort(ex: UIExercise, rir: number, pump: string) {
+  async function submitEffort(ex: UIExercise, rir: number, pump: 'none' | 'mild' | 'good' | 'great') {
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
     const progression = $settings.progression;
 
@@ -293,6 +331,7 @@
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
+    if (!$settings.showPlateMath) return false;
     if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
     // Fallback: check name prefix for exercises that haven't been re-seeded yet
     const n = exercise.name?.toLowerCase() ?? '';
@@ -309,6 +348,34 @@
     const n = exercise.name?.toLowerCase() ?? '';
     return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
   }
+
+  // Derived: plate banner data for the currently focused weight input
+  let plateBanner = $derived.by(() => {
+    if (!focusedWeightSetId || !focusedExerciseId) return null;
+    for (const ex of uiExercises) {
+      if (ex.exerciseId !== focusedExerciseId) continue;
+      const exercise = allExercises.find((e: Exercise) => e.id === ex.exerciseId);
+      if (!exercise || !shouldShowPlates(exercise)) return null;
+      for (let i = 0; i < ex.sets.length; i++) {
+        const set = ex.sets[i];
+        if (set.localId === focusedWeightSetId) {
+          const bw = getBarWeight(exercise);
+          const weight = set.weightLbs ?? 0;
+          if (weight <= bw) return null;
+          // Previous set weight for delta display
+          const prevWeight = i > 0 ? (ex.sets[i - 1].weightLbs ?? null) : null;
+          return {
+            totalWeight: weight,
+            barWeight: bw,
+            isLbs: $settings.weightUnit === 'lbs',
+            oneSided: isOneSidedPlateExercise(exercise),
+            prevWeight: prevWeight && prevWeight > bw ? prevWeight : null,
+          };
+        }
+      }
+    }
+    return null;
+  });
 
   /** Get bar/sled weight for plate math. Uses display base if set, else actual weight. */
   function getBarWeight(exercise: Exercise | undefined): number {
@@ -398,23 +465,24 @@
       if (planId) {
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
-        // Apply deload reductions: ~70% weight, drop last set(s)
+        // Apply deload reductions using settings
         if (isDeload && uiExercises.length > 0) {
+          const dl = $settings.deload;
+          const weightMult = (dl.weightPercent ?? 70) / 100;
+          const volumeMult = (dl.volumePercent ?? 60) / 100;
           workoutName = '🔄 Deload — ' + workoutName;
           for (const ex of uiExercises) {
-            // Reduce weight to ~70%
             for (const set of ex.sets) {
               if (set.weightLbs != null) {
-                set.weightLbs = Math.round(set.weightLbs * 0.7 / 2.5) * 2.5; // round to nearest 2.5
+                set.weightLbs = Math.round(set.weightLbs * weightMult / 2.5) * 2.5;
               }
             }
-            // Drop ~40% of sets (keep at least 2)
-            const targetSets = Math.max(2, Math.round(ex.sets.length * 0.6));
+            const targetSets = Math.max(2, Math.round(ex.sets.length * volumeMult));
             while (ex.sets.length > targetSets) {
               ex.sets.pop();
             }
           }
-          uiExercises = [...uiExercises]; // trigger reactivity
+          uiExercises = [...uiExercises];
         }
       } else if ($currentSession) {
         // ── Resume in-progress session (store still set) ────────────────
@@ -511,6 +579,7 @@
       const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
+      hasLinkedPlan = true;
       currentSession.set(sess);
 
       const plan = await getPlan(planId);
@@ -638,6 +707,7 @@
       const sess = await getSession($currentSession!.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
+      hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
 
       // Restore elapsed time from when the session started.
@@ -1548,6 +1618,7 @@
         saving: false,
         oneRM: null, initWeight: null, initReps: null,
         setType: 'standard' as string,
+        partialReps: null,
         drops: [] as { weightLbs: number | null; reps: number | null }[],
       }));
       uiExercises = [...uiExercises, {
@@ -1571,6 +1642,25 @@
     finishing = true;
     try {
       await completeSession(sessionId);
+      // Persist any notes the user entered
+      const noteKey = `hgt_session_note_${sessionId}`;
+      const savedNote = localStorage.getItem(noteKey)?.trim();
+      if (savedNote) {
+        try {
+          await patchSession(sessionId, { notes: savedNote });
+          localStorage.removeItem(noteKey);
+        } catch (e) {
+          console.error('Failed to save session notes:', e);
+        }
+      }
+      if (syncToPlan) {
+        try {
+          const data = await syncSessionToPlan(sessionId);
+          syncCount = data.updated;
+        } catch (e) {
+          console.error('Failed to sync session to plan:', e);
+        }
+      }
     } catch (e) {
       console.error('Failed to complete session:', e);
     }
@@ -1579,6 +1669,12 @@
     currentSession.set(null);
     // Compute PRs before clearing UI state
     prs = detectPRs();
+    // Write workout to HealthKit (no-op on web/PWA)
+    writeWorkout({
+      startDate: new Date(Date.now() - elapsed * 1000),
+      endDate: new Date(),
+      workoutName: workoutName,
+    }).catch(() => {}); // fire and forget
     finished = true;
     finishing = false;
   }
@@ -1631,6 +1727,50 @@
     return results;
   }
 
+
+  // ─── Confetti animation for PR celebrations ─────────────────────────────
+  function fireConfetti() {
+    const colors = ['#ffd700', '#ff6b6b', '#4ecdc4', '#45b7d1', '#f9ca24', '#6c5ce7'];
+    const container = document.createElement('div');
+    container.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:9999;overflow:hidden';
+    document.body.appendChild(container);
+
+    for (let i = 0; i < 50; i++) {
+      const piece = document.createElement('div');
+      const color = colors[Math.floor(Math.random() * colors.length)];
+      const left = Math.random() * 100;
+      const delay = Math.random() * 0.5;
+      const size = 6 + Math.random() * 6;
+      const rotation = Math.random() * 360;
+      piece.style.cssText = `
+        position:absolute;
+        left:${left}%;
+        top:-10px;
+        width:${size}px;
+        height:${size}px;
+        background:${color};
+        border-radius:${Math.random() > 0.5 ? '50%' : '2px'};
+        transform:rotate(${rotation}deg);
+        animation:confettiFall ${1.5 + Math.random()}s ease-in ${delay}s forwards;
+      `;
+      container.appendChild(piece);
+    }
+
+    // Add keyframes if not already present
+    if (!document.getElementById('confetti-style')) {
+      const style = document.createElement('style');
+      style.id = 'confetti-style';
+      style.textContent = `
+        @keyframes confettiFall {
+          0% { transform: translateY(0) rotate(0deg); opacity: 1; }
+          100% { transform: translateY(100vh) rotate(720deg); opacity: 0; }
+        }
+      `;
+      document.head.appendChild(style);
+    }
+
+    setTimeout(() => container.remove(), 3000);
+  }
 
   // ─── Cancel workout ───────────────────────────────────────────────────────
   async function cancelWorkout() {
@@ -1926,7 +2066,7 @@
 <!-- ─── Finished screen ────────────────────────────────────────────────── -->
 {:else if finished}
   <div class="flex items-center justify-center flex-1 p-4">
-    <div class="card max-w-lg w-full">
+    <div class="card max-w-lg w-full" bind:this={summaryCardEl}>
       <div class="text-center mb-6">
         <div class="text-6xl mb-3">🎉</div>
         <h2 class="text-3xl font-bold">Workout done!</h2>
@@ -1964,6 +2104,13 @@
         </div>
       {/if}
 
+      <!-- Sync result -->
+      {#if syncCount !== null}
+        <div class="mb-4 flex items-center gap-2 text-sm text-green-400 bg-green-900/20 border border-green-700/40 rounded-lg px-3 py-2">
+          <span>✓ {syncCount} exercise{syncCount !== 1 ? 's' : ''} updated in plan</span>
+        </div>
+      {/if}
+
       <!-- Exercise summary -->
       <div class="space-y-1 mb-6 max-h-48 overflow-y-auto">
         {#each uiExercises as ex}
@@ -1994,7 +2141,15 @@
         ></textarea>
       </div>
 
-      <a href="/" class="btn-primary w-full text-center block">Back to Dashboard</a>
+      <div class="flex gap-3">
+        <button onclick={shareWorkout} disabled={sharing}
+                class="flex-1 py-3 bg-zinc-800 hover:bg-zinc-700 text-white font-medium rounded-xl transition-colors disabled:opacity-50">
+          {sharing ? 'Generating...' : '📤 Share'}
+        </button>
+        <a href="/" class="flex-1 py-3 bg-primary-600 hover:bg-primary-500 text-white font-medium rounded-xl text-center transition-colors">
+          Dashboard
+        </a>
+      </div>
     </div>
   </div>
 
@@ -2278,18 +2433,12 @@
                             disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                             placeholder={isAssistedEx ? `-assist` : unit}
                             class="set-input"
-                            onfocus={() => { focusedWeightSetId = set.localId; }}
-                            onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
+                            onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
+                            onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
                           />
                           {#if side === 'left'}
                             {#if isAssistedEx && set.weightLbs !== null}
                               <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                            {/if}
-                            {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
-                              {@const bw = getBarWeight(exercise)}
-                              {#if set.weightLbs > bw}
-                                <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                              {/if}
                             {/if}
                             {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
@@ -2336,14 +2485,14 @@
                           {#if set.saving}
                             <span class="text-zinc-400 text-xs">…</span>
                           {:else if sideDone}
-                            <button onclick={() => undoSide(ex.uiId, set.localId, side)}
+                            <button onclick={() => undoSide(ex.uiId, set.localId, side as 'left' | 'right')}
                                     title="Undo — mark as incomplete"
                                     class="h-10 w-10 rounded-xl bg-green-700/30 text-green-400 font-bold text-lg">✓</button>
                           {:else if set.skipped}
                             <button onclick={() => unskipSet(ex.uiId, set.localId)}
                                     class="h-10 px-2 rounded-xl bg-amber-600/20 text-amber-400 text-xs font-semibold">Undo</button>
                           {:else}
-                            <button onclick={() => completeSide(ex.uiId, set.localId, side)}
+                            <button onclick={() => completeSide(ex.uiId, set.localId, side as 'left' | 'right')}
                                     disabled={(sideReps ?? 0) <= 0}
                                     title="Log this set"
                                     class="h-10 w-10 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold transition-colors disabled:opacity-30">✓</button>
@@ -2463,17 +2612,11 @@
                         disabled={set.done || isMyoMatchLocked(ex, set)} min={isAssistedEx ? undefined : 0}
                         placeholder={isAssistedEx ? `-assist` : unit}
                         class="set-input"
-                        onfocus={() => { focusedWeightSetId = set.localId; }}
-                        onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) focusedWeightSetId = null; }, 200); }}
+                        onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
+                        onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
-                      {/if}
-                      {#if focusedWeightSetId === set.localId && shouldShowPlates(exercise) && set.weightLbs != null && !set.done}
-                        {@const bw = getBarWeight(exercise)}
-                        {#if set.weightLbs > bw}
-                          <PlateVisual totalWeight={set.weightLbs} barWeight={bw} isLbs={unit === 'lbs'} oneSided={isOneSidedPlateExercise(exercise)} />
-                        {/if}
                       {/if}
                       {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
@@ -2626,7 +2769,7 @@
               <div class="flex gap-2">
                 {#each [['😩', 'poor', 'Poor'], ['😐', 'ok', 'OK'], ['💪', 'good', 'Good'], ['🔥', 'fresh', 'Fresh']] as [emoji, value, label]}
                   <button
-                    onclick={() => submitRecovery(ex, value)}
+                    onclick={() => submitRecovery(ex, value as 'poor' | 'ok' | 'good' | 'fresh')}
                     class="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-center transition-colors">
                     <span class="text-base">{emoji}</span><br/>{label}
                   </button>
@@ -2670,7 +2813,7 @@
               {#if feedbackData[ex.exerciseId]?.rir != null && feedbackData[ex.exerciseId]?.pump_rating}
                 <div class="flex gap-2">
                   <button
-                    onclick={() => submitEffort(ex, feedbackData[ex.exerciseId]!.rir!, feedbackData[ex.exerciseId]!.pump_rating!)}
+                    onclick={() => submitEffort(ex, feedbackData[ex.exerciseId]!.rir!, feedbackData[ex.exerciseId]!.pump_rating! as 'none' | 'mild' | 'good' | 'great')}
                     class="flex-1 btn-primary text-sm !py-2">Submit</button>
                   <button onclick={() => dismissEffort(ex)}
                           class="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">Skip</button>
@@ -2730,12 +2873,20 @@
               {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
             </button>
           {:else}
-            <button onclick={doFinish} disabled={finishing}
-                    class="flex-1 py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
-                           text-white font-bold text-lg rounded-2xl transition-colors
-                           disabled:opacity-50 shadow-sm">
-              {finishing ? 'Saving…' : '✓ Finish Workout'}
-            </button>
+            <div class="flex-1 flex flex-col gap-2">
+              {#if hasLinkedPlan}
+                <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
+                  <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
+                  Update plan with today's weights & reps
+                </label>
+              {/if}
+              <button onclick={doFinish} disabled={finishing}
+                      class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
+                             text-white font-bold text-lg rounded-2xl transition-colors
+                             disabled:opacity-50 shadow-sm">
+                {finishing ? 'Saving…' : '✓ Finish Workout'}
+              </button>
+            </div>
           {/if}
         </div>
 
@@ -2974,6 +3125,30 @@
       <p class="text-lg font-bold text-white">{prCelebration.type}!</p>
       <p class="text-sm text-white/90">{prCelebration.exercise}</p>
       <p class="text-xl font-bold text-white mt-1">{prCelebration.value}</p>
+    </div>
+  </div>
+{/if}
+
+<!-- Fixed plate math banner — sits above the on-screen keyboard -->
+{#if plateBanner}
+  <div class="fixed bottom-0 left-0 right-0 z-40 bg-zinc-900/95 border-t border-zinc-700 px-4 py-2 backdrop-blur-sm">
+    <PlateVisual
+      totalWeight={plateBanner.totalWeight}
+      barWeight={plateBanner.barWeight}
+      isLbs={plateBanner.isLbs}
+      oneSided={plateBanner.oneSided}
+      prevWeight={plateBanner.prevWeight}
+    />
+  </div>
+{/if}
+
+<!-- PR celebration overlay -->
+{#if prCelebration}
+  <div class="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
+    <div class="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 text-white px-6 py-3 rounded-2xl shadow-2xl shadow-yellow-500/30 text-center backdrop-blur-sm">
+      <div class="text-2xl font-black">🏆 NEW PR!</div>
+      <div class="text-sm font-semibold opacity-90">{prCelebration.exercise}</div>
+      <div class="text-lg font-bold">{prCelebration.type}: {prCelebration.value}</div>
     </div>
   </div>
 {/if}

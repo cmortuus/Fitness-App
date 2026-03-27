@@ -102,33 +102,36 @@
     return Math.round(kg * KG_TO_LBS * 10) / 10;
   }
 
-  onMount(async () => {
-    try {
-      const [exercisesData, recentData, groupedData] = await Promise.all([
-        getExercises(),
-        getRecentExercises(15),
-        getExercisesGrouped(),
-      ]);
+  onMount(() => {
+    let autosaveInterval: ReturnType<typeof setInterval> | null = null;
+    (async () => {
+      try {
+        const [exercisesData, recentData, groupedData] = await Promise.all([
+          getExercises(),
+          getRecentExercises(15),
+          getExercisesGrouped(),
+        ]);
 
-      exercises.set(exercisesData);
-      allExercises = exercisesData;
-      recentExercises = recentData;
-      groupedExercises = groupedData;
+        exercises.set(exercisesData);
+        allExercises = exercisesData;
+        recentExercises = recentData;
+        groupedExercises = groupedData;
 
-      // Check for saved draft in localStorage
-      const restored = restoreDraftFromStorage();
-      if (!restored) {
-        initializeDays();
+        // Check for saved draft in localStorage
+        const restored = restoreDraftFromStorage();
+        if (!restored) {
+          initializeDays();
+        }
+        initialized = true;
+
+        // Auto-save to localStorage every 30s
+        autosaveInterval = setInterval(saveDraftToStorage, 30000);
+      } catch (error) {
+        console.error('Failed to load data:', error);
+        alert('Failed to load exercises: ' + (error instanceof Error ? error.message : String(error)));
       }
-      initialized = true;
-
-      // Auto-save to localStorage every 30s
-      const autosaveInterval = setInterval(saveDraftToStorage, 30000);
-      return () => clearInterval(autosaveInterval);
-    } catch (error) {
-      console.error('Failed to load data:', error);
-      alert('Failed to load exercises: ' + (error instanceof Error ? error.message : String(error)));
-    }
+    })();
+    return () => { if (autosaveInterval) clearInterval(autosaveInterval); };
   });
 
   // Initialize days when numberOfDays changes

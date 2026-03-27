@@ -1,9 +1,10 @@
 """Nutrition tracking models — food items, daily entries, and macro goals."""
 
+import os
 from datetime import date as date_type, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -98,3 +99,73 @@ class DietPhase(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
+
+
+class FoodSubmission(Base):
+    """Tracks which users have submitted a pending community food, enabling vote-based promotion."""
+
+    __tablename__ = "food_submissions"
+    __table_args__ = (UniqueConstraint("food_item_id", "user_id", name="uq_food_submission"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    food_item_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("food_items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    # Snapshot of the submitter's values — averaged when promoting to community
+    calories_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    protein_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    carbs_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fat_per_100g: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+
+# Number of distinct user submissions required to promote a pending food to community.
+# Configurable via COMMUNITY_FOOD_THRESHOLD env var (default 1 — single user promotes immediately).
+COMMUNITY_THRESHOLD: int = int(os.environ.get("COMMUNITY_FOOD_THRESHOLD", "1"))
+
+
+class Recipe(Base):
+    """A user-defined recipe composed of individual ingredients."""
+
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    servings: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+    # Denormalized totals — recomputed whenever ingredients change
+    total_calories: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_protein: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_carbs: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_fat: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    ingredients: Mapped[list["RecipeIngredient"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan"
+    )
+
+
+class RecipeIngredient(Base):
+    """A single ingredient line within a recipe."""
+
+    __tablename__ = "recipe_ingredients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recipe_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recipes.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    unit: Mapped[str] = mapped_column(String(50), nullable=False, default="serving")
+    calories: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    protein: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    carbs: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    fat: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    recipe: Mapped["Recipe"] = relationship(back_populates="ingredients")

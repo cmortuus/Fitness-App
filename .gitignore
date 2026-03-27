@@ -62,6 +62,10 @@ recordings/
 *.onnx
 *.pth
 
+# iOS / Xcode
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+
 # Claude
 .claude/
 

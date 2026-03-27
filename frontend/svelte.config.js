@@ -1,15 +1,11 @@
-import adapter from '@sveltejs/adapter-node';
+import adapterNode from '@sveltejs/adapter-node';
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
   preprocess: vitePreprocess(),
   kit: {
-    adapter: adapter({
-      out: 'build',
-      precompress: false,
-      polyfillNode: true,
-    }),
+    adapter: adapterNode({ out: 'build', precompress: false, polyfillNode: true }),
     alias: {
       $lib: './src/lib',
       $components: './src/components',

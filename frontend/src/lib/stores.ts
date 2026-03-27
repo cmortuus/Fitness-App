@@ -40,6 +40,12 @@ export interface DashboardWidget {
   enabled: boolean;
 }
 
+export interface DeloadSettings {
+  sessions: number;         // how many deload sessions (1-7, 0 = match plan days)
+  weightPercent: number;    // % of working weight (50-90, default 70)
+  volumePercent: number;    // % of working sets (40-80, default 60)
+}
+
 export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
@@ -48,6 +54,9 @@ export interface AppSettings {
   profile: UserProfile;
   machineWeights: MachineWeights;
   maxWarmupSets: number;
+  showPlateMath: boolean;
+  largerTouchTargets: boolean;
+  deload: DeloadSettings;
   progression: ProgressionSettings;
   dashboardWidgets: DashboardWidget[];
 }
@@ -94,6 +103,13 @@ const defaultSettings: AppSettings = {
     legCurl: 0,
   },
   maxWarmupSets: 4,
+  showPlateMath: true,
+  largerTouchTargets: false,
+  deload: {
+    sessions: 0,        // 0 = match plan days
+    weightPercent: 70,
+    volumePercent: 60,
+  },
   dashboardWidgets: [
     { id: 'stats', enabled: true },
     { id: 'nextWorkout', enabled: true },
@@ -134,6 +150,7 @@ function deepMergeSettings(stored: any): AppSettings {
     restDurations: { ...defaultSettings.restDurations, ...(stored.restDurations ?? {}) },
     profile: { ...defaultSettings.profile, ...(stored.profile ?? {}) },
     machineWeights: { ...defaultSettings.machineWeights, ...(stored.machineWeights ?? {}) },
+    deload: { ...defaultSettings.deload, ...(stored.deload ?? {}) },
     progression: { ...defaultSettings.progression, ...(stored.progression ?? {}) },
     dashboardWidgets: mergedWidgets,
   };

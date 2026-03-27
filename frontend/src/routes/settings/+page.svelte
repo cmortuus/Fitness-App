@@ -3,6 +3,15 @@
   import { settings, latestBodyWeight } from '$lib/stores';
   import type { RestDurations } from '$lib/stores';
   import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser, recalculateWeights } from '$lib/api';
+  import { writeBodyWeight, isHealthKitAvailable, requestHealthKitPermissions } from '$lib/healthkit';
+  import { locale, setLocale, SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '$lib/i18n';
+
+  let healthKitAvailable = $state(false);
+  let healthKitConnected = $state(false);
+
+  async function connectHealthKit() {
+    healthKitConnected = await requestHealthKitPermissions();
+  }
   import type { BodyWeightEntry } from '$lib/api';
 
   const currentUser = getStoredUser();
@@ -116,6 +125,7 @@
 
   onMount(async () => {
     weighIns = await getBodyWeights(30);
+    healthKitAvailable = await isHealthKitAvailable();
   });
 
   async function logWeighIn() {
@@ -132,6 +142,7 @@
       });
       weighIns = [entry, ...weighIns];
       latestBodyWeight.set(entry);
+      writeBodyWeight(kg).catch(() => {}); // sync to HealthKit (no-op on web)
       newWeight = null;
       newBodyFat = null;
       newNotes = '';
@@ -571,6 +582,76 @@
     </div>
   </div>
 
+  <!-- ── Plate Math ────────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Plate Math</h3>
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Show plate breakdown</p>
+        <p class="text-xs text-zinc-500">Display plate visualization when entering weight for barbell/plate-loaded exercises</p>
+      </div>
+      <button
+        onclick={() => settings.update(s => ({ ...s, showPlateMath: !s.showPlateMath }))}
+        class="w-12 h-7 rounded-full transition-colors relative {$settings.showPlateMath ? 'bg-primary-600' : 'bg-zinc-700'}"
+      >
+        <span class="absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white transition-transform {$settings.showPlateMath ? 'translate-x-5' : ''}"></span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ── Deload ───────────────────────────────────────────────────── -->
+  <div class="card space-y-4">
+    <div>
+      <h3 class="text-lg font-semibold">Deload</h3>
+      <p class="text-sm text-zinc-400 mt-1">Configure how deload weeks reduce intensity and volume.</p>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Sessions per deload</p>
+        <p class="text-xs text-zinc-500">0 = match your plan's days</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [0, 1, 2, 3, 4, 5] as n}
+          <button onclick={() => settings.update(s => ({ ...s, deload: { ...s.deload, sessions: n } }))}
+                  class="w-8 h-8 rounded-lg text-sm font-medium transition-colors {($settings.deload?.sessions ?? 0) === n ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {n === 0 ? 'Auto' : n}
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Weight reduction</p>
+        <p class="text-xs text-zinc-500">% of working weight to use</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [50, 60, 70, 80] as pct}
+          <button onclick={() => settings.update(s => ({ ...s, deload: { ...s.deload, weightPercent: pct } }))}
+                  class="w-10 h-8 rounded-lg text-sm font-medium transition-colors {($settings.deload?.weightPercent ?? 70) === pct ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {pct}%
+          </button>
+        {/each}
+      </div>
+    </div>
+
+    <div class="flex items-center justify-between gap-4">
+      <div>
+        <p class="text-sm text-zinc-300">Volume reduction</p>
+        <p class="text-xs text-zinc-500">% of working sets to keep</p>
+      </div>
+      <div class="flex items-center gap-2">
+        {#each [40, 50, 60, 80] as pct}
+          <button onclick={() => settings.update(s => ({ ...s, deload: { ...s.deload, volumePercent: pct } }))}
+                  class="w-10 h-8 rounded-lg text-sm font-medium transition-colors {($settings.deload?.volumePercent ?? 60) === pct ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+            {pct}%
+          </button>
+        {/each}
+      </div>
+    </div>
+  </div>
+
   <!-- ── Progression / Autoregulation ───────────────────────────────── -->
   <div class="card space-y-5">
     <div>
@@ -725,6 +806,53 @@
     {/each}
   </div>
 
+  <!-- ── Language ─────────────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Language</h3>
+    <select
+      class="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2.5 text-sm"
+      value={$locale}
+      onchange={(e) => setLocale((e.target as HTMLSelectElement).value as Locale)}
+    >
+      {#each SUPPORTED_LOCALES as loc}
+        <option value={loc}>{LOCALE_NAMES[loc]}</option>
+      {/each}
+    </select>
+  </div>
+
+  <!-- ── Accessibility ───────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Accessibility</h3>
+    <label class="flex items-center justify-between cursor-pointer">
+      <div>
+        <span class="text-sm font-medium">Larger Touch Targets</span>
+        <p class="text-xs text-zinc-500">Increase button and input sizes for easier tapping</p>
+      </div>
+      <input type="checkbox" class="toggle"
+             checked={$settings.largerTouchTargets}
+             onchange={(e) => $settings = { ...$settings, largerTouchTargets: (e.target as HTMLInputElement).checked }} />
+    </label>
+  </div>
+
+  <!-- ── Apple Health ──────────────────────────────────────────────── -->
+  {#if healthKitAvailable}
+    <div class="card space-y-3">
+      <h3 class="text-lg font-semibold">Apple Health</h3>
+      <p class="text-sm text-zinc-400">Sync workouts, body weight, and nutrition to Apple Health.</p>
+      {#if healthKitConnected}
+        <div class="flex items-center gap-2">
+          <span class="w-2 h-2 rounded-full bg-green-500"></span>
+          <span class="text-sm text-green-400">Connected</span>
+        </div>
+      {:else}
+        <button onclick={connectHealthKit}
+                class="w-full py-2.5 rounded-lg text-sm font-medium bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500/20 transition-colors">
+          Connect Apple Health
+        </button>
+      {/if}
+    </div>
+  {/if}
+
   <!-- ── Developer ────────────────────────────────────────────────────── -->
   {#if typeof document !== 'undefined'}
     {@const onDev = document.cookie.includes('gymtracker_branch=dev')}
@@ -764,17 +892,17 @@
           onclick={async () => {
             // Set flag to suppress the "new version" banner after reload
             sessionStorage.setItem('gymtracker_force_updated', '1');
-            // Clear caches but DON'T unregister SW — that causes a re-registration
-            // cycle that triggers the update banner again (#263) and can lose auth (#269)
+            // Nuclear option: clear ALL caches AND unregister SW
             if ('caches' in window) {
               const keys = await caches.keys();
               await Promise.all(keys.map(k => caches.delete(k)));
             }
-            // Tell the SW to skip waiting if there's a new version queued
-            if (navigator.serviceWorker?.controller) {
-              navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+            if ('serviceWorker' in navigator) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(r => r.unregister()));
             }
-            window.location.reload();
+            // Hard reload — bypass any remaining cache
+            window.location.href = window.location.pathname + '?t=' + Date.now();
           }}
           class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-primary-600/20 text-primary-400 hover:bg-primary-600/30"
         >

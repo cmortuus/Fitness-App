@@ -11,7 +11,7 @@
 
   interface SessionSummary {
     id: number;
-    name: string;
+    name: string | null;
     date: string;
     total_sets: number;
     total_reps: number;
@@ -26,12 +26,12 @@
     actual_weight_kg: number | null;
     actual_reps: number | null;
     completed_at: string | null;
-    set_type: string;
+    set_type: string | null;
   }
 
   interface SessionDetail {
     id: number;
-    name: string;
+    name: string | null;
     date: string;
     total_sets: number;
     total_reps: number;
