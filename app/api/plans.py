@@ -37,7 +37,7 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
     else:
         # New format
         days = planned_data.get("days", [])
-        number_of_days = planned_data.get("number_of_days", len(days))
+        number_of_days = planned_data.get("number_of_days") or len(days)
 
     return {
         "id": plan.id,
