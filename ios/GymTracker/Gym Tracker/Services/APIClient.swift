@@ -13,6 +13,14 @@ final class APIClient: Sendable {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 15
         config.timeoutIntervalForResource = 30
+        // Route to the dev container via nginx cookie
+        let cookie = HTTPCookie(properties: [
+            .domain: "lethal.dev",
+            .path: "/",
+            .name: "gymtracker_branch",
+            .value: "dev",
+        ])!
+        config.httpCookieStorage?.setCookie(cookie)
         session = URLSession(configuration: config)
 
         decoder = JSONDecoder()
