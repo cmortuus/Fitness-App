@@ -99,9 +99,14 @@ struct DashboardView: View {
                                 quickLink(icon: "chart.line.uptrend.xyaxis", label: "Progress")
                             }
                             NavigationLink {
-                                ProgressView_()
+                                WorkoutHistoryView()
                             } label: {
-                                quickLink(icon: "trophy.fill", label: "Records")
+                                quickLink(icon: "clock.arrow.circlepath", label: "History")
+                            }
+                            NavigationLink {
+                                WorkoutCalendarView()
+                            } label: {
+                                quickLink(icon: "calendar", label: "Calendar")
                             }
                         }
                     }
