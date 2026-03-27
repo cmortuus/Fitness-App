@@ -55,6 +55,7 @@ export interface AppSettings {
   machineWeights: MachineWeights;
   maxWarmupSets: number;
   showPlateMath: boolean;
+  largerTouchTargets: boolean;
   deload: DeloadSettings;
   progression: ProgressionSettings;
   dashboardWidgets: DashboardWidget[];
@@ -103,6 +104,7 @@ const defaultSettings: AppSettings = {
   },
   maxWarmupSets: 4,
   showPlateMath: true,
+  largerTouchTargets: false,
   deload: {
     sessions: 0,        // 0 = match plan days
     weightPercent: 70,

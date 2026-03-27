@@ -820,6 +820,20 @@
     </select>
   </div>
 
+  <!-- ── Accessibility ───────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Accessibility</h3>
+    <label class="flex items-center justify-between cursor-pointer">
+      <div>
+        <span class="text-sm font-medium">Larger Touch Targets</span>
+        <p class="text-xs text-zinc-500">Increase button and input sizes for easier tapping</p>
+      </div>
+      <input type="checkbox" class="toggle"
+             checked={$settings.largerTouchTargets}
+             onchange={(e) => $settings = { ...$settings, largerTouchTargets: (e.target as HTMLInputElement).checked }} />
+    </label>
+  </div>
+
   <!-- ── Apple Health ──────────────────────────────────────────────── -->
   {#if healthKitAvailable}
     <div class="card space-y-3">
