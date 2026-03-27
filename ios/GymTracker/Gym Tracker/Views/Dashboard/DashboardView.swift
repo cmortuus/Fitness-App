@@ -68,14 +68,28 @@ struct DashboardView: View {
                             recentWorkoutsSection
                         }
 
-                        // Plans
-                        NavigationLink {
-                            PlansView()
-                        } label: {
-                            Label("Manage Plans", systemImage: "list.bullet")
-                                .frame(maxWidth: .infinity)
+                        // Quick workout + Plans row
+                        HStack(spacing: 12) {
+                            NavigationLink {
+                                ActiveWorkoutView(
+                                    planId: nil,
+                                    planName: "Quick Workout",
+                                    dayNumber: 1
+                                )
+                            } label: {
+                                Label("Quick Workout", systemImage: "bolt.fill")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            NavigationLink {
+                                PlansView()
+                            } label: {
+                                Label("Plans", systemImage: "list.bullet")
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .buttonStyle(.bordered)
                         }
-                        .buttonStyle(.bordered)
 
                         // Quick links
                         HStack(spacing: 12) {

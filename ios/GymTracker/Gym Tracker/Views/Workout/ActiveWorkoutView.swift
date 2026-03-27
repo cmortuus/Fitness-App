@@ -5,7 +5,7 @@ import UserNotifications
 // MARK: - Active Workout View
 
 struct ActiveWorkoutView: View {
-    let planId: Int
+    let planId: Int?
     let planName: String
     var dayNumber: Int = 1
 
@@ -756,10 +756,10 @@ struct ActiveWorkoutView: View {
             let response: WorkoutSession
             if let existing = inProgress {
                 response = try await APIClient.shared.get("/sessions/\(existing.id)")
-            } else {
+            } else if let pid = planId {
                 do {
                     response = try await APIClient.shared.post(
-                        "/sessions/from-plan/\(planId)",
+                        "/sessions/from-plan/\(pid)",
                         body: nil as String?,
                         queryItems: [
                             .init(name: "day_number", value: "\(dayNumber)"),
@@ -776,6 +776,22 @@ struct ActiveWorkoutView: View {
                         throw APIError.httpError(409, body)
                     }
                 }
+            } else {
+                // Free session — no plan
+                let df = DateFormatter()
+                df.dateFormat = "yyyy-MM-dd"
+                struct CreateBody: Encodable {
+                    let date: String
+                    let name: String
+                }
+                let draft: WorkoutSession = try await APIClient.shared.post(
+                    "/sessions/",
+                    body: CreateBody(
+                        date: df.string(from: Date()),
+                        name: planName
+                    )
+                )
+                response = try await APIClient.shared.post("/sessions/\(draft.id)/start")
             }
 
             sessionId = response.id
