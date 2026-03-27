@@ -2,33 +2,44 @@ import SwiftUI
 import Charts
 
 struct ProgressView_: View {
-    @State private var records: [PersonalRecord] = []
-    @State private var insights: [ProgressInsight] = []
+    @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
+
+    // Data
+    @State private var dataPoints: [ProgressDataPoint] = []
+    @State private var recommendations: [ProgressRecommendation] = []
     @State private var bodyWeights: [BodyWeightEntry] = []
+    @State private var allExerciseNames: [String] = []
     @State private var loading = true
-    @State private var selectedTab = 0
+
+    // Filters
+    @State private var timeRange: Int = 30           // days
+    @State private var selectedExercise: String = "All"
+    @State private var chartMode: ChartMode = .oneRM
+
+    enum ChartMode: String, CaseIterable {
+        case oneRM   = "1RM"
+        case volume  = "Volume"
+        case bodyWeight = "Weight"
+    }
+
+    // MARK: - Body
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                Picker("", selection: $selectedTab) {
-                    Text("1RM").tag(0)
-                    Text("Records").tag(1)
-                    Text("Weight").tag(2)
-                }
-                .pickerStyle(.segmented)
-                .padding()
-
+                filterBar
                 ScrollView {
                     if loading {
-                        ProgressView().padding(.top, 40)
+                        ProgressView().padding(.top, 60)
                     } else {
-                        switch selectedTab {
-                        case 0: oneRMChart
-                        case 1: recordsList
-                        case 2: bodyWeightChart
-                        default: EmptyView()
+                        VStack(spacing: 20) {
+                            mainChart
+                            recommendationsSection
+                            muscleGroupSection
+                            sessionLogSection
                         }
+                        .padding(.horizontal)
+                        .padding(.bottom, 40)
                     }
                 }
             }
@@ -38,94 +49,442 @@ struct ProgressView_: View {
         }
     }
 
-    private var oneRMChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if insights.isEmpty {
-                emptyState("Complete some workouts to see 1RM trends")
-            } else {
-                Chart(insights.filter { $0.estimated_1rm != nil }, id: \.exercise_id) { insight in
-                    BarMark(
-                        x: .value("1RM", insight.estimated_1rm ?? 0),
-                        y: .value("Exercise", insight.exercise_name)
-                    )
-                    .foregroundStyle(trendColor(insight.trend))
-                }
-                .chartXAxisLabel("Estimated 1RM (lbs)")
-                .frame(height: CGFloat(max(insights.count * 40, 200)))
-                .padding()
-            }
-        }
-    }
+    // MARK: - Filter Bar
 
-    private var recordsList: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if records.isEmpty {
-                emptyState("No records yet — complete some workouts!")
-            } else {
-                ForEach(records, id: \.exercise_id) { record in
-                    HStack {
-                        Text(record.exercise_name)
-                            .font(.subheadline)
-                            .lineLimit(1)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                        if let rm = record.best_1rm {
-                            Text("\(Int(rm * 2.20462)) lbs")
-                                .font(.subheadline.bold())
-                                .foregroundStyle(.blue)
-                                .frame(width: 80)
-                        }
+    private var filterBar: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 8) {
+                // Time range
+                Picker("Time", selection: $timeRange) {
+                    Text("7d").tag(7)
+                    Text("30d").tag(30)
+                    Text("90d").tag(90)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: timeRange) { _, _ in Task { await loadData() } }
+
+                // Exercise filter
+                Menu {
+                    Button("All Exercises") { selectedExercise = "All" }
+                    ForEach(allExerciseNames, id: \.self) { name in
+                        Button(name) { selectedExercise = name }
                     }
-                    .padding(.horizontal)
-                    .padding(.vertical, 4)
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(selectedExercise == "All" ? "All Exercises" : selectedExercise)
+                            .lineLimit(1)
+                            .font(.subheadline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(.secondary.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                 }
             }
+            .padding(.horizontal)
+
+            // Chart mode tabs
+            Picker("Chart Mode", selection: $chartMode) {
+                ForEach(ChartMode.allCases, id: \.self) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
         }
-        .padding(.vertical)
+        .padding(.vertical, 8)
+        .background(.bar)
     }
 
-    private var bodyWeightChart: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if bodyWeights.isEmpty {
-                emptyState("Log body weight in Settings to see trends")
+    // MARK: - Filtered Data
+
+    private var filteredPoints: [ProgressDataPoint] {
+        if selectedExercise == "All" { return dataPoints }
+        return dataPoints.filter { $0.exercise_name == selectedExercise }
+    }
+
+    /// Group points by exercise name → [(name, [points])]
+    private var groupedByExercise: [(String, [ProgressDataPoint])] {
+        var dict: [String: [ProgressDataPoint]] = [:]
+        for p in filteredPoints {
+            dict[p.exercise_name, default: []].append(p)
+        }
+        return dict.map { ($0.key, $0.value.sorted { $0.date < $1.date }) }
+            .sorted { $0.0 < $1.0 }
+    }
+
+    // MARK: - Main Chart
+
+    @ViewBuilder
+    private var mainChart: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(chartMode.rawValue + " Trend")
+                .font(.headline)
+
+            if filteredPoints.isEmpty {
+                emptyState("No data for this period. Complete some workouts!")
             } else {
-                Chart(bodyWeights.reversed()) { entry in
-                    LineMark(
-                        x: .value("Date", String(entry.recorded_at?.prefix(10) ?? "")),
-                        y: .value("Weight", entry.weight_kg * 2.20462)
-                    )
-                    .interpolationMethod(.catmullRom)
-                    PointMark(
-                        x: .value("Date", String(entry.recorded_at?.prefix(10) ?? "")),
-                        y: .value("Weight", entry.weight_kg * 2.20462)
-                    )
-                    .foregroundStyle(.blue)
+                switch chartMode {
+                case .oneRM:    oneRMLineChart
+                case .volume:   volumeBarChart
+                case .bodyWeight: bodyWeightLineChart
                 }
-                .chartYAxisLabel("lbs")
-                .frame(height: 250)
-                .padding()
             }
         }
+        .padding()
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private var oneRMLineChart: some View {
+        let groups = groupedByExercise
+        return Chart {
+            ForEach(groups, id: \.0) { name, points in
+                ForEach(points) { p in
+                    if let rm = p.estimated_1rm {
+                        LineMark(
+                            x: .value("Date", p.date),
+                            y: .value("1RM", displayWeight(rm))
+                        )
+                        .foregroundStyle(by: .value("Exercise", name))
+                        .interpolationMethod(.catmullRom)
+                        PointMark(
+                            x: .value("Date", p.date),
+                            y: .value("1RM", displayWeight(rm))
+                        )
+                        .foregroundStyle(by: .value("Exercise", name))
+                        .symbolSize(30)
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                AxisGridLine()
+                AxisTick()
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day(), centered: false)
+            }
+        }
+        .chartYAxisLabel("Est. 1RM (\(weightUnit))")
+        .frame(height: 220)
+        .chartLegend(groups.count <= 6 ? .automatic : .hidden)
+    }
+
+    private var volumeBarChart: some View {
+        let groups = groupedByExercise
+        return Chart {
+            ForEach(groups, id: \.0) { name, points in
+                ForEach(points) { p in
+                    if let vol = p.volume_load {
+                        BarMark(
+                            x: .value("Date", p.date),
+                            y: .value("Volume", displayWeight(vol))
+                        )
+                        .foregroundStyle(by: .value("Exercise", name))
+                    }
+                }
+            }
+        }
+        .chartXAxis {
+            AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                AxisGridLine()
+                AxisTick()
+                AxisValueLabel(format: .dateTime.month(.abbreviated).day(), centered: false)
+            }
+        }
+        .chartYAxisLabel("Volume (\(weightUnit))")
+        .frame(height: 220)
+        .chartLegend(groups.count <= 6 ? .automatic : .hidden)
+    }
+
+    private var bodyWeightLineChart: some View {
+        Chart(bodyWeights.reversed()) { entry in
+            LineMark(
+                x: .value("Date", String(entry.recorded_at?.prefix(10) ?? "")),
+                y: .value("Weight", displayWeight(entry.weight_kg))
+            )
+            .interpolationMethod(.catmullRom)
+            .foregroundStyle(.blue)
+            PointMark(
+                x: .value("Date", String(entry.recorded_at?.prefix(10) ?? "")),
+                y: .value("Weight", displayWeight(entry.weight_kg))
+            )
+            .foregroundStyle(.blue)
+            .symbolSize(30)
+        }
+        .chartYAxisLabel(weightUnit)
+        .frame(height: 220)
+    }
+
+    // MARK: - Recommendations Section
+
+    @ViewBuilder
+    private var recommendationsSection: some View {
+        let recs = selectedExercise == "All"
+            ? recommendations
+            : recommendations.filter { $0.exercise_name == selectedExercise }
+
+        if !recs.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Progression Recommendations")
+                    .font(.headline)
+                ForEach(recs) { rec in
+                    recommendationRow(rec)
+                }
+            }
+            .padding()
+            .background(.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func recommendationRow(_ rec: ProgressRecommendation) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(rec.exercise_name)
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+                if let reason = rec.reason {
+                    Text(reason)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                if let cur = rec.current_weight {
+                    Text(String(format: "%.0f %@", displayWeight(cur), weightUnit))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let rec_w = rec.recommended_weight {
+                    let delta = (rec.current_weight.map { rec_w - $0 } ?? 0)
+                    HStack(spacing: 2) {
+                        Image(systemName: delta > 0.5 ? "arrow.up" : delta < -0.5 ? "arrow.down" : "arrow.right")
+                            .font(.caption)
+                        Text(String(format: "%.0f %@", displayWeight(rec_w), weightUnit))
+                            .font(.subheadline.bold())
+                    }
+                    .foregroundStyle(delta > 0.5 ? .green : delta < -0.5 ? .red : .primary)
+                }
+            }
+        }
+        .padding(.vertical, 4)
+    }
+
+    // MARK: - Muscle Group Section
+
+    @ViewBuilder
+    private var muscleGroupSection: some View {
+        let trends = muscleGroupTrends()
+        if !trends.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Strength by Muscle Group")
+                    .font(.headline)
+                LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                    ForEach(trends, id: \.0) { group, change, count in
+                        muscleGroupCard(group: group, change: change, count: count)
+                    }
+                }
+            }
+            .padding()
+            .background(.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+    }
+
+    private func muscleGroupCard(group: String, change: Double, count: Int) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(group.capitalized)
+                .font(.subheadline.bold())
+                .lineLimit(1)
+            HStack {
+                Image(systemName: change > 1 ? "arrow.up.circle.fill" : change < -1 ? "arrow.down.circle.fill" : "minus.circle.fill")
+                    .foregroundStyle(change > 1 ? .green : change < -1 ? .red : .secondary)
+                Text(String(format: "%+.1f%%", change))
+                    .font(.subheadline)
+                    .foregroundStyle(change > 1 ? .green : change < -1 ? .red : .secondary)
+            }
+            Text("\(count) exercise\(count == 1 ? "" : "s")")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(10)
+        .background(.secondary.opacity(0.12))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+
+    // Compute % change per muscle group by averaging 1RM changes across exercises
+    private func muscleGroupTrends() -> [(String, Double, Int)] {
+        // Group points by exercise, compute % change from first to last
+        var byExercise: [String: [ProgressDataPoint]] = [:]
+        for p in filteredPoints {
+            byExercise[p.exercise_name, default: []].append(p)
+        }
+
+        // We don't have muscle group data here — derive from exercise name heuristics
+        // (proper solution would join with exercise metadata)
+        var groupChanges: [String: [Double]] = [:]
+        for (_, points) in byExercise {
+            let sorted = points.sorted { $0.date < $1.date }
+            guard let first = sorted.first?.estimated_1rm,
+                  let last  = sorted.last?.estimated_1rm,
+                  first > 0, sorted.count >= 2 else { continue }
+            let pctChange = (last - first) / first * 100
+
+            // Muscle group from exercise name heuristics
+            let name = (sorted.first?.exercise_name ?? "").lowercased()
+            let group: String
+            if name.contains("squat") || name.contains("leg press") || name.contains("lunge") || name.contains("hip thrust") {
+                group = "Legs"
+            } else if name.contains("bench") || name.contains("chest") || name.contains("fly") || name.contains("push") {
+                group = "Chest"
+            } else if name.contains("row") || name.contains("pull") || name.contains("lat") || name.contains("back") {
+                group = "Back"
+            } else if name.contains("shoulder") || name.contains("press") || name.contains("lateral") || name.contains("delt") {
+                group = "Shoulders"
+            } else if name.contains("curl") || name.contains("bicep") || name.contains("hammer") {
+                group = "Biceps"
+            } else if name.contains("tricep") || name.contains("dip") || name.contains("extension") {
+                group = "Triceps"
+            } else if name.contains("calf") || name.contains("deadlift") || name.contains("rdl") {
+                group = "Posterior Chain"
+            } else {
+                group = "Other"
+            }
+            groupChanges[group, default: []].append(pctChange)
+        }
+
+        return groupChanges.map { group, changes in
+            let avg = changes.reduce(0, +) / Double(changes.count)
+            return (group, avg, changes.count)
+        }
+        .sorted { $0.0 < $1.0 }
+    }
+
+    // MARK: - Session Log Section
+
+    private var sessionLogSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Session Log")
+                .font(.headline)
+
+            let points = filteredPoints.sorted { $0.date > $1.date }
+            if points.isEmpty {
+                emptyState("No sessions in this period.")
+                    .padding(.vertical, 8)
+            } else {
+                ForEach(points.prefix(50)) { p in
+                    sessionLogRow(p)
+                    Divider()
+                }
+            }
+        }
+        .padding()
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func sessionLogRow(_ p: ProgressDataPoint) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(p.exercise_name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                Text(formatDate(p.date))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            VStack(alignment: .trailing, spacing: 2) {
+                if let rm = p.estimated_1rm {
+                    Text(String(format: "%.0f %@ 1RM", displayWeight(rm), weightUnit))
+                        .font(.subheadline.bold())
+                }
+                if let vol = p.volume_load {
+                    Text(String(format: "%.0f %@ vol", displayWeight(vol), weightUnit))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    // MARK: - Helpers
+
+    private func displayWeight(_ kg: Double) -> Double {
+        weightUnit == "lbs" ? kg * 2.20462 : kg
+    }
+
+    private func formatDate(_ str: String) -> String {
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        if let d = df.date(from: str) {
+            let out = DateFormatter()
+            out.dateStyle = .medium
+            return out.string(from: d)
+        }
+        return str
     }
 
     private func emptyState(_ text: String) -> some View {
         VStack(spacing: 8) {
-            Image(systemName: "chart.line.uptrend.xyaxis").font(.system(size: 40)).foregroundStyle(.secondary)
-            Text(text).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            Image(systemName: "chart.line.uptrend.xyaxis")
+                .font(.system(size: 36))
+                .foregroundStyle(.secondary)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
-        .padding(.top, 40).frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
     }
 
-    private func trendColor(_ trend: String?) -> Color {
-        switch trend { case "up": return .green; case "down": return .red; default: return .blue }
-    }
+    // MARK: - Data Loading
 
     private func loadData() async {
+        loading = true
+
+        let endDate = Date()
+        let startDate = Calendar.current.date(byAdding: .day, value: -timeRange, to: endDate)!
+        let fmt = DateFormatter()
+        fmt.dateFormat = "yyyy-MM-dd"
+        let startStr = fmt.string(from: startDate)
+        let endStr   = fmt.string(from: endDate)
+
         do {
-            async let i: [ProgressInsight] = APIClient.shared.get("/progress/insights")
-            async let r: [PersonalRecord] = APIClient.shared.get("/progress/records")
-            async let bw: [BodyWeightEntry] = APIClient.shared.get("/body-weight/", query: [.init(name: "limit", value: "90")])
-            insights = try await i; records = try await r; bodyWeights = try await bw
-        } catch { print("[Progress] Load: \(error)") }
+            async let pts: [ProgressDataPoint] = APIClient.shared.get("/progress/",
+                query: [
+                    .init(name: "start_date", value: startStr),
+                    .init(name: "end_date",   value: endStr),
+                ])
+            async let recs: [ProgressRecommendation] = APIClient.shared.get("/progress/recommendations",
+                query: [.init(name: "days_back", value: "\(timeRange)")])
+            async let bw: [BodyWeightEntry] = APIClient.shared.get("/body-weight/",
+                query: [.init(name: "limit", value: "90")])
+
+            let (pts2, recs2, bw2) = try await (pts, recs, bw)
+
+            await MainActor.run {
+                dataPoints     = pts2
+                recommendations = recs2
+                bodyWeights    = bw2
+
+                // Build exercise name list for filter menu
+                let names = Set(pts2.map { $0.exercise_name }).sorted()
+                allExerciseNames = names
+                if selectedExercise != "All" && !names.contains(selectedExercise) {
+                    selectedExercise = "All"
+                }
+            }
+        } catch {
+            print("[Progress] Load error: \(error)")
+        }
         loading = false
     }
 }

@@ -221,6 +221,103 @@ async def complete_session(
     return serialize_session(workout_session)
 
 
+@router.post("/{session_id}/sync-to-plan")
+async def sync_session_to_plan(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Sync actual weights/reps from a completed session back to its linked plan template."""
+    # Load session and verify ownership + completion
+    result = await db.execute(
+        select(WorkoutSession).where(
+            WorkoutSession.id == session_id,
+            WorkoutSession.user_id == user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+    if session.status != WorkoutStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session must be completed before syncing to plan",
+        )
+
+    # If there's no linked plan, nothing to do
+    if not session.workout_plan_id:
+        return {"updated": 0}
+
+    # Load all sets for this session that have actual weight data
+    sets_result = await db.execute(
+        select(ExerciseSet).where(
+            ExerciseSet.workout_session_id == session_id,
+            ExerciseSet.actual_weight_kg.is_not(None),
+        )
+    )
+    sets = sets_result.scalars().all()
+
+    if not sets:
+        return {"updated": 0}
+
+    # Compute per-exercise: max actual_weight_kg and most common actual_reps
+    exercise_data: dict[int, dict] = {}
+    for s in sets:
+        eid = s.exercise_id
+        if eid not in exercise_data:
+            exercise_data[eid] = {"max_weight": 0.0, "reps_counts": {}}
+        if (s.actual_weight_kg or 0.0) > exercise_data[eid]["max_weight"]:
+            exercise_data[eid]["max_weight"] = s.actual_weight_kg
+        if s.actual_reps is not None:
+            reps_counts = exercise_data[eid]["reps_counts"]
+            reps_counts[s.actual_reps] = reps_counts.get(s.actual_reps, 0) + 1
+
+    # Resolve most common reps per exercise
+    exercise_updates: dict[int, dict] = {}
+    for eid, data in exercise_data.items():
+        most_common_reps = None
+        if data["reps_counts"]:
+            most_common_reps = max(data["reps_counts"], key=lambda r: data["reps_counts"][r])
+        exercise_updates[eid] = {
+            "starting_weight_kg": data["max_weight"],
+            "reps": most_common_reps,
+        }
+
+    # Load the linked plan (verify ownership)
+    plan_result = await db.execute(
+        select(WorkoutPlan).where(
+            WorkoutPlan.id == session.workout_plan_id,
+            WorkoutPlan.user_id == user.id,
+        )
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan:
+        return {"updated": 0}
+
+    # Parse and mutate the planned_exercises JSON
+    planned = json.loads(plan.planned_exercises) if isinstance(plan.planned_exercises, str) else plan.planned_exercises
+    updated_count = 0
+
+    days = planned.get("days", [])
+    for day in days:
+        for exercise in day.get("exercises", []):
+            eid = exercise.get("exercise_id")
+            if eid in exercise_updates:
+                exercise["starting_weight_kg"] = exercise_updates[eid]["starting_weight_kg"]
+                if exercise_updates[eid]["reps"] is not None:
+                    exercise["reps"] = exercise_updates[eid]["reps"]
+                updated_count += 1
+
+    # Save updated plan
+    plan.planned_exercises = json.dumps(planned)
+    await db.flush()
+
+    return {"updated": updated_count}
+
+
 @router.post("/{session_id}/sets", response_model=SetResponse, status_code=status.HTTP_201_CREATED)
 async def add_set(
     session_id: int,

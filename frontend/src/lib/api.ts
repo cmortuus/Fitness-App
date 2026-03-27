@@ -309,6 +309,11 @@ export async function completeSession(sessionId: number): Promise<WorkoutSession
   return response.data;
 }
 
+export async function syncSessionToPlan(sessionId: number): Promise<{ updated: number }> {
+  const response = await api.post(`/sessions/${sessionId}/sync-to-plan`);
+  return response.data;
+}
+
 export async function addSet(
   sessionId: number,
   data: {

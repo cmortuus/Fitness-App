@@ -8,7 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback,
+    saveExerciseFeedback, syncSessionToPlan,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -149,6 +149,8 @@
   let focusedExerciseId = $state<number | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
+  let syncToPlan = $state(true);
+  let syncCount = $state<number | null>(null);
   let summaryCardEl: HTMLDivElement;
   let sharing = $state(false);
 
@@ -1635,6 +1637,14 @@
     finishing = true;
     try {
       await completeSession(sessionId);
+      if (syncToPlan) {
+        try {
+          const data = await syncSessionToPlan(sessionId);
+          syncCount = data.updated;
+        } catch (e) {
+          console.error('Failed to sync session to plan:', e);
+        }
+      }
     } catch (e) {
       console.error('Failed to complete session:', e);
     }
@@ -2031,6 +2041,13 @@
               </div>
             {/each}
           </div>
+        </div>
+      {/if}
+
+      <!-- Sync result -->
+      {#if syncCount !== null}
+        <div class="mb-4 flex items-center gap-2 text-sm text-green-400 bg-green-900/20 border border-green-700/40 rounded-lg px-3 py-2">
+          <span>✓ {syncCount} exercise{syncCount !== 1 ? 's' : ''} updated in plan</span>
         </div>
       {/if}
 
@@ -2796,12 +2813,18 @@
               {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
             </button>
           {:else}
-            <button onclick={doFinish} disabled={finishing}
-                    class="flex-1 py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
-                           text-white font-bold text-lg rounded-2xl transition-colors
-                           disabled:opacity-50 shadow-sm">
-              {finishing ? 'Saving…' : '✓ Finish Workout'}
-            </button>
+            <div class="flex-1 flex flex-col gap-2">
+              <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
+                <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
+                Update plan with today's weights & reps
+              </label>
+              <button onclick={doFinish} disabled={finishing}
+                      class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
+                             text-white font-bold text-lg rounded-2xl transition-colors
+                             disabled:opacity-50 shadow-sm">
+                {finishing ? 'Saving…' : '✓ Finish Workout'}
+              </button>
+            </div>
           {/if}
         </div>
 

@@ -24,7 +24,7 @@ struct ActiveWorkoutView: View {
     @State private var restSecs = 0
     @State private var restTimer: Timer?
     @State private var restEndTime: Date?
-    private let restDurations = RestDurations()
+    // restDurations is now a computed property (currentRestDurations) using @AppStorage values
 
     // Finish state
     @State private var allDone = false
@@ -52,10 +52,58 @@ struct ActiveWorkoutView: View {
     @State private var focusedExercise: UIExercise? = nil
     @State private var focusedWeight: Double? = nil
 
-    // Weight unit
-    private let weightUnit = "lbs"
+    // Settings (synced with SettingsView via shared UserDefaults keys)
+    @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
+    @AppStorage(SettingsKey.showPlateMath) private var showPlateMath: Bool = true
+
+    // Bar weights (lbs) — used for plate math
+    @AppStorage(SettingsKey.barbellWeight) private var barbellWeightSetting: Double = 45
+    @AppStorage(SettingsKey.ezBarWeight) private var ezBarWeightSetting: Double = 25
+    @AppStorage(SettingsKey.rackableEZBarWeight) private var rackableEZBarWeightSetting: Double = 25
+    @AppStorage(SettingsKey.ssbWeight) private var ssbWeightSetting: Double = 65
+    @AppStorage(SettingsKey.trapBarWeight) private var trapBarWeightSetting: Double = 55
+    @AppStorage(SettingsKey.smithWeight) private var smithWeightSetting: Double = 35
+    @AppStorage(SettingsKey.legPressWeight) private var legPressWeightSetting: Double = 0
+    @AppStorage(SettingsKey.hackSquatWeight) private var hackSquatWeightSetting: Double = 0
+    @AppStorage(SettingsKey.tBarWeight) private var tBarWeightSetting: Double = 0
+    @AppStorage(SettingsKey.beltSquatWeight) private var beltSquatWeightSetting: Double = 0
+
+    // Rest timers
+    @AppStorage(SettingsKey.upperCompound) private var upperCompoundRest: Int = 180
+    @AppStorage(SettingsKey.upperIsolation) private var upperIsolationRest: Int = 90
+    @AppStorage(SettingsKey.lowerCompound) private var lowerCompoundRest: Int = 240
+    @AppStorage(SettingsKey.lowerIsolation) private var lowerIsolationRest: Int = 120
+
     private let kgToLbs = 2.20462
     private let lbsToKg = 0.453592
+
+    private var currentRestDurations: RestDurations {
+        RestDurations(
+            upperCompound: upperCompoundRest,
+            upperIsolation: upperIsolationRest,
+            lowerCompound: lowerCompoundRest,
+            lowerIsolation: lowerIsolationRest
+        )
+    }
+
+    /// Bar/sled weight for a given exercise, respecting user settings
+    private func settingsBarWeight(for exercise: UIExercise) -> Double {
+        let lbs: Double
+        switch exercise.equipmentType {
+        case "barbell":           lbs = barbellWeightSetting
+        case "ez_bar":            lbs = ezBarWeightSetting
+        case "rackable_ez_bar":   lbs = rackableEZBarWeightSetting
+        case "safety_squat_bar":  lbs = ssbWeightSetting
+        case "trap_hex_bar":      lbs = trapBarWeightSetting
+        case "smith_machine":     lbs = smithWeightSetting
+        case "leg_press":         lbs = legPressWeightSetting
+        case "hack_squat":        lbs = hackSquatWeightSetting
+        case "t_bar_row":         lbs = tBarWeightSetting
+        case "belt_squat":        lbs = beltSquatWeightSetting
+        default:                  lbs = barWeight(for: exercise) // fallback to UIModels defaults
+        }
+        return weightUnit == "kg" ? lbs * lbsToKg : lbs
+    }
 
     // MARK: - Body
 
@@ -70,6 +118,8 @@ struct ActiveWorkoutView: View {
                         duration: elapsed,
                         exercises: exercises,
                         prs: endOfWorkoutPRs,
+                        sessionId: sessionId,
+                        planId: planId,
                         onDismiss: { dismiss() }
                     )
                 } else if let error {
@@ -97,6 +147,7 @@ struct ActiveWorkoutView: View {
             }
             .navigationTitle(planName)
             .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
         }
         .task { await startWorkout() }
         .onDisappear { stopTimers() }
@@ -175,6 +226,7 @@ struct ActiveWorkoutView: View {
                 }
                 .padding()
             }
+            .scrollDismissesKeyboard(.interactively)
 
             // Bottom bar — finish or plate math
             bottomBar
@@ -264,12 +316,13 @@ struct ActiveWorkoutView: View {
 
     private var bottomBar: some View {
         VStack(spacing: 0) {
-            // Plate math (when weight input focused)
-            if let ex = focusedExercise, let w = focusedWeight,
-               shouldShowPlates(for: ex), w > barWeight(for: ex) {
+            // Plate math (when weight input focused and setting is on)
+            if showPlateMath,
+               let ex = focusedExercise, let w = focusedWeight,
+               shouldShowPlates(for: ex), w > settingsBarWeight(for: ex) {
                 PlateVisualView(
                     totalWeight: w,
-                    barWeight: barWeight(for: ex),
+                    barWeight: settingsBarWeight(for: ex),
                     isLbs: weightUnit == "lbs",
                     oneSided: isOneSided(ex)
                 )
@@ -479,8 +532,8 @@ struct ActiveWorkoutView: View {
                     focusedExercise = exercise
                     focusedWeight = newVal
                 }
-            ), format: .number.precision(.fractionLength(0)))
-            .keyboardType(.numberPad)
+            ), format: .number.precision(.fractionLength(1)))
+            .keyboardType(.decimalPad)
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: .infinity)
             .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
@@ -833,7 +886,7 @@ struct ActiveWorkoutView: View {
             checkForPR(exercise: exercise, set: set, effectiveReps: effectiveReps)
 
             // Start rest timer
-            let duration = restDurations.duration(for: exercise)
+            let duration = currentRestDurations.duration(for: exercise)
             startRest(seconds: duration)
 
             // Autoregulation: recovery prompt (first set of new muscle group)
@@ -1009,7 +1062,7 @@ struct ActiveWorkoutView: View {
         guard let workingWeight = exercises[exIdx].sets.first(where: { $0.setType != .warmup })?.weight,
               workingWeight > 0 else { return }
 
-        let bar = barWeight(for: exercises[exIdx])
+        let bar = settingsBarWeight(for: exercises[exIdx])
         let warmups: [(Double, Int)] = [
             (bar, 10),                                    // empty bar
             (roundWeight(workingWeight * 0.5), 8),        // 50%
@@ -1045,7 +1098,7 @@ struct ActiveWorkoutView: View {
         finishing = true
         Task {
             do {
-                let _: WorkoutSession = try await APIClient.shared.patch(
+                let _: WorkoutSession = try await APIClient.shared.post(
                     "/sessions/\(sessionId)/complete"
                 )
 

@@ -1,6 +1,8 @@
 import SwiftUI
 
 struct DashboardView: View {
+    @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
+
     @State private var plans: [WorkoutPlan] = []
     @State private var recentSessions: [WorkoutSession] = []
     @State private var loading = true
@@ -10,6 +12,14 @@ struct DashboardView: View {
     @State private var latestBodyWeight: BodyWeightEntry?
     @State private var nutritionSummary: DailySummary?
     @State private var nextDay = 1
+    @State private var insights: [DashboardInsight] = []
+
+    struct DashboardInsight: Codable, Identifiable {
+        var id: String { text }
+        let type: String  // "success" | "warning" | "info"
+        let icon: String
+        let text: String
+    }
 
     private var todayString: String {
         let df = DateFormatter()
@@ -34,6 +44,14 @@ struct DashboardView: View {
                     VStack(spacing: 16) {
                         // Quick stats strip
                         statsStrip
+
+                        // 7-day mini calendar
+                        weekCalendar
+
+                        // Insights
+                        if !insights.isEmpty {
+                            insightsSection
+                        }
 
                         // Next workout
                         if let plan = plans.first {
@@ -67,7 +85,6 @@ struct DashboardView: View {
                                 quickLink(icon: "chart.line.uptrend.xyaxis", label: "Progress")
                             }
                             NavigationLink {
-                                // Records page
                                 ProgressView_()
                             } label: {
                                 quickLink(icon: "trophy.fill", label: "Records")
@@ -92,14 +109,76 @@ struct DashboardView: View {
             statItem(value: "\(weekCount)", label: "This Week", icon: "calendar", color: .blue)
             Divider().frame(height: 30)
             if let bw = latestBodyWeight {
-                statItem(value: String(format: "%.0f", bw.weight_kg * 2.20462),
-                         label: "lbs", icon: "scalemass.fill", color: .green)
+                let w = weightUnit == "lbs" ? bw.weight_kg * 2.20462 : bw.weight_kg
+                statItem(value: String(format: "%.1f", w),
+                         label: weightUnit, icon: "scalemass.fill", color: .green)
             } else {
                 statItem(value: "—", label: "Weight", icon: "scalemass.fill", color: .green)
             }
         }
         .padding(.vertical, 8)
         .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - 7-Day Mini Calendar
+
+    private var weekCalendar: some View {
+        let cal = Calendar.current
+        let today = Date()
+        let days = (0..<7).map { cal.date(byAdding: .day, value: -6 + $0, to: today)! }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let completedDates = Set(recentSessions.compactMap { $0.date.map { String($0.prefix(10)) } })
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("This Week").font(.caption).foregroundStyle(.secondary)
+            HStack(spacing: 4) {
+                ForEach(days, id: \.self) { day in
+                    let dateStr = df.string(from: day)
+                    let isToday = cal.isDateInToday(day)
+                    let worked  = completedDates.contains(dateStr)
+                    VStack(spacing: 2) {
+                        Text(day.formatted(.dateTime.weekday(.narrow)))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                        Circle()
+                            .fill(worked ? Color.blue : isToday ? Color.blue.opacity(0.2) : Color.secondary.opacity(0.15))
+                            .frame(width: 28, height: 28)
+                            .overlay(
+                                Text("\(cal.component(.day, from: day))")
+                                    .font(.caption2.bold())
+                                    .foregroundStyle(worked ? .white : isToday ? .blue : .secondary)
+                            )
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+        .padding()
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    // MARK: - Insights Section
+
+    private var insightsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Insights")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            ForEach(insights.prefix(4)) { insight in
+                HStack(spacing: 10) {
+                    Text(insight.icon).font(.title3)
+                    Text(insight.text)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 4)
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.05))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -122,10 +201,10 @@ struct DashboardView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
             HStack(spacing: 16) {
-                macroItem(label: "Cal", value: Int(summary.calories), color: .orange)
-                macroItem(label: "P", value: Int(summary.protein), color: .red)
-                macroItem(label: "C", value: Int(summary.carbs), color: .blue)
-                macroItem(label: "F", value: Int(summary.fat), color: .yellow)
+                macroItem(label: "Cal", value: Int(summary.totals.calories), color: .orange)
+                macroItem(label: "P", value: Int(summary.totals.protein), color: .red)
+                macroItem(label: "C", value: Int(summary.totals.carbs), color: .blue)
+                macroItem(label: "F", value: Int(summary.totals.fat), color: .yellow)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -165,7 +244,8 @@ struct DashboardView: View {
                             Text("\(sets) sets").font(.caption).foregroundStyle(.secondary)
                         }
                         if let vol = session.total_volume_kg, vol > 0 {
-                            Text("\(Int(vol * 2.20462)) lbs")
+                            let disp = weightUnit == "lbs" ? vol * 2.20462 : vol
+                            Text("\(Int(disp)) \(weightUnit)")
                                 .font(.caption).foregroundStyle(.blue)
                         }
                     }
@@ -257,10 +337,12 @@ struct DashboardView: View {
                 return try? await APIClient.shared.get("/nutrition/summary",
                     query: [.init(name: "date", value: df.string(from: Date()))])
             }()
+            async let ins: [DashboardInsight] = APIClient.shared.get("/progress/insights")
 
             plans = try await p
             let allSessions = try await s
             recentSessions = allSessions.filter { $0.status == "completed" }
+            insights = (try? await ins) ?? []
 
             // Calculate next day number
             if let plan = plans.first {

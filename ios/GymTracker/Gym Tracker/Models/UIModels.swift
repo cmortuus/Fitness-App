@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - UI State Models for Workout
 
@@ -226,4 +227,27 @@ func barWeight(for exercise: UIExercise) -> Double {
 
 func isOneSided(_ exercise: UIExercise) -> Bool {
     exercise.equipmentType == "t_bar_row" || exercise.name.lowercased().contains("landmine")
+}
+
+// MARK: - Keyboard Utilities
+
+/// Dismiss the software keyboard from anywhere
+func hideKeyboard() {
+    UIApplication.shared.sendAction(
+        #selector(UIResponder.resignFirstResponder),
+        to: nil, from: nil, for: nil
+    )
+}
+
+extension View {
+    /// Adds a "Done" button in a toolbar above number/decimal pads
+    func keyboardDoneButton() -> some View {
+        toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { hideKeyboard() }
+                    .fontWeight(.semibold)
+            }
+        }
+    }
 }

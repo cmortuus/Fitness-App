@@ -5,9 +5,18 @@ struct WorkoutSummaryView: View {
     let duration: Int // seconds
     let exercises: [UIExercise]
     let prs: [PR]
+    let sessionId: Int?
+    let planId: Int?
     let onDismiss: () -> Void
 
+    @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
+    @AppStorage(SettingsKey.lastBodyWeightKg) private var bodyWeightKg: Double = 70
+
     @State private var sessionNotes = ""
+    @State private var updatePlan = true
+    @State private var syncingPlan = false
+    @State private var syncDone = false
+    @State private var syncCount = 0
 
     private var totalSets: Int {
         exercises.flatMap(\.sets).filter(\.done).count
@@ -21,6 +30,13 @@ struct WorkoutSummaryView: View {
         exercises.flatMap(\.sets).filter(\.done).reduce(0.0) { sum, set in
             sum + (set.weight ?? 0) * Double(set.reps ?? 0)
         }
+    }
+
+    /// MET-based calorie estimate. MET ≈ 5.0 for moderate-intensity strength training.
+    private var estimatedCalories: Int {
+        let hours = Double(duration) / 3600
+        let kcal = 5.0 * bodyWeightKg * hours
+        return max(1, Int(kcal.rounded()))
     }
 
     var body: some View {
@@ -40,10 +56,12 @@ struct WorkoutSummaryView: View {
                     GridItem(.flexible()),
                     GridItem(.flexible()),
                     GridItem(.flexible()),
-                ], spacing: 16) {
+                    GridItem(.flexible()),
+                ], spacing: 12) {
                     StatBox(label: "Sets", value: "\(totalSets)")
                     StatBox(label: "Duration", value: formatDuration(duration))
                     StatBox(label: "Volume", value: formatVolume(totalVolume))
+                    StatBox(label: "~kcal", value: "\(estimatedCalories)")
                 }
 
                 // PRs
@@ -99,6 +117,29 @@ struct WorkoutSummaryView: View {
                 .background(.ultraThinMaterial)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
+                // Update plan toggle (only shown when session is linked to a plan)
+                if planId != nil {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Toggle(isOn: $updatePlan) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Update plan with today's weights")
+                                    .font(.subheadline.bold())
+                                Text("Saves your actual weights & reps back to the plan template.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if syncDone {
+                            Label("\(syncCount) exercise\(syncCount == 1 ? "" : "s") updated", systemImage: "checkmark.circle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.green)
+                        }
+                    }
+                    .padding()
+                    .background(.ultraThinMaterial)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                }
+
                 // Share + Home buttons
                 HStack(spacing: 16) {
                     ShareLink(item: summaryText) {
@@ -107,9 +148,15 @@ struct WorkoutSummaryView: View {
                     }
                     .buttonStyle(.bordered)
 
-                    Button(action: onDismiss) {
-                        Label("Home", systemImage: "house.fill")
-                            .frame(maxWidth: .infinity)
+                    Button {
+                        Task { await syncAndDismiss() }
+                    } label: {
+                        if syncingPlan {
+                            ProgressView().frame(maxWidth: .infinity)
+                        } else {
+                            Label("Home", systemImage: "house.fill")
+                                .frame(maxWidth: .infinity)
+                        }
                     }
                     .buttonStyle(.borderedProminent)
                 }
@@ -119,11 +166,34 @@ struct WorkoutSummaryView: View {
         .navigationBarBackButtonHidden()
     }
 
+    // MARK: - Actions
+
+    private func syncAndDismiss() async {
+        if updatePlan, let sid = sessionId, planId != nil, !syncDone {
+            syncingPlan = true
+            do {
+                struct SyncResponse: Decodable { let updated: Int }
+                let resp: SyncResponse = try await APIClient.shared.post(
+                    "/sessions/\(sid)/sync-to-plan"
+                )
+                await MainActor.run {
+                    syncCount = resp.updated
+                    syncDone = true
+                }
+            } catch {
+                print("[Summary] Sync-to-plan error: \(error)")
+            }
+            syncingPlan = false
+        }
+        onDismiss()
+    }
+
     private var summaryText: String {
         """
         💪 \(workoutName)
         ⏱ \(formatDuration(duration))
-        📊 \(totalSets) sets · \(totalReps) reps · \(formatVolume(totalVolume))
+        📊 \(totalSets) sets · \(totalReps) reps · \(formatVolume(totalVolume)) \(weightUnit)
+        🔥 ~\(estimatedCalories) kcal
         \(prs.isEmpty ? "" : "🏆 \(prs.count) PR\(prs.count > 1 ? "s" : "")!")
         """
     }
@@ -136,6 +206,7 @@ struct WorkoutSummaryView: View {
     }
 
     private func formatVolume(_ v: Double) -> String {
+        // v is in display units already (lbs or kg depending on how sets are stored)
         if v >= 1000 { return String(format: "%.1fk", v / 1000) }
         return "\(Int(v))"
     }

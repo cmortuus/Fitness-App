@@ -3,7 +3,7 @@
 from datetime import date as date_type, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
@@ -98,3 +98,47 @@ class DietPhase(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
+
+
+class Recipe(Base):
+    """A user-defined recipe composed of individual ingredients."""
+
+    __tablename__ = "recipes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    servings: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+    # Denormalized totals — recomputed whenever ingredients change
+    total_calories: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_protein: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_carbs: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    total_fat: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    ingredients: Mapped[list["RecipeIngredient"]] = relationship(
+        back_populates="recipe", cascade="all, delete-orphan"
+    )
+
+
+class RecipeIngredient(Base):
+    """A single ingredient line within a recipe."""
+
+    __tablename__ = "recipe_ingredients"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    recipe_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("recipes.id"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[float] = mapped_column(Float, nullable=False, default=1.0)
+    unit: Mapped[str] = mapped_column(String(50), nullable=False, default="serving")
+    calories: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    protein: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    carbs: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    fat: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+
+    recipe: Mapped["Recipe"] = relationship(back_populates="ingredients")

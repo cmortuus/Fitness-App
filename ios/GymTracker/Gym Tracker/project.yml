@@ -8,7 +8,7 @@ options:
 settings:
   base:
     SWIFT_VERSION: "6.0"
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: "35GARX3Y35"
     SWIFT_STRICT_CONCURRENCY: minimal
 
 targets:
@@ -28,3 +28,5 @@ targets:
         CODE_SIGN_STYLE: Automatic
     entitlements:
       path: "Gym Tracker/Gym Tracker.entitlements"
+    capabilities:
+      - HealthKit

@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		026366952F7610AB0092265B /* NutritionLabelScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 026366942F7610AB0092265B /* NutritionLabelScanner.swift */; };
 		0310119E197C683A56C62573 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77EA5B5BA3244D790478885B /* LoginView.swift */; };
 		10148A1DB56FC543DCC6CA25 /* GymTrackerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B65EFA2AAB3C21CF508C63A6 /* GymTrackerApp.swift */; };
 		2F5828744938EE27CC292544 /* WorkoutSummaryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7B4AB917F38FCBA4B921C35 /* WorkoutSummaryView.swift */; };
@@ -26,16 +27,19 @@
 		C295F669BB39D378B73C51A7 /* BarcodeScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A609786AAD7B80F0E083B0E3 /* BarcodeScannerView.swift */; };
 		CCAD91919D69FF7501DC1311 /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B1C5CC04AB943F0EE1999C9 /* MainTabView.swift */; };
 		CE7C35033D93647AF1CCE475 /* DietPhaseSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47BF401DF821DC3D295EA308 /* DietPhaseSheet.swift */; };
+		D4E9A2B3F8C1047E2A951B3C /* RecipesView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */; };
 		ED0743D7120761BE71E43BC9 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3B68C9796226457EB5FFBB /* User.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		026366942F7610AB0092265B /* NutritionLabelScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionLabelScanner.swift; sourceTree = "<group>"; };
 		0959F00ADEF6DBE1B1F72EE7 /* ConfettiView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConfettiView.swift; sourceTree = "<group>"; };
 		1C868B8A713DFBDC587C100F /* ActiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveWorkoutView.swift; sourceTree = "<group>"; };
 		1F7B5CBD20BDA26AE67C7205 /* ExercisePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExercisePickerView.swift; sourceTree = "<group>"; };
 		259375109D899D8E36B7F946 /* ProgressView_.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView_.swift; sourceTree = "<group>"; };
 		2B1C5CC04AB943F0EE1999C9 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		47BF401DF821DC3D295EA308 /* DietPhaseSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DietPhaseSheet.swift; sourceTree = "<group>"; };
+		F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
 		52BA5A3BFCC68A135D7DE31B /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		65CF36C83CDBCAB1CCEE9172 /* NutritionView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NutritionView.swift; sourceTree = "<group>"; };
 		6CC10BDD71FDEA1E6C7F6203 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -57,6 +61,7 @@
 		0D0451F80BCCEB4FC0688DE6 /* Components */ = {
 			isa = PBXGroup;
 			children = (
+				026366942F7610AB0092265B /* NutritionLabelScanner.swift */,
 				A609786AAD7B80F0E083B0E3 /* BarcodeScannerView.swift */,
 				0959F00ADEF6DBE1B1F72EE7 /* ConfettiView.swift */,
 				8B1AAB7690CAD0D298D9B5A4 /* ExerciseHistoryView.swift */,
@@ -72,6 +77,7 @@
 			children = (
 				47BF401DF821DC3D295EA308 /* DietPhaseSheet.swift */,
 				65CF36C83CDBCAB1CCEE9172 /* NutritionView.swift */,
+				F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */,
 			);
 			path = Nutrition;
 			sourceTree = "<group>";
@@ -207,7 +213,7 @@
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
 					D6CCB04381BCE9CD8CEC30B3 = {
-						DevelopmentTeam = "";
+						DevelopmentTeam = 35GARX3Y35;
 						ProvisioningStyle = Automatic;
 					};
 				};
@@ -245,11 +251,13 @@
 				CE7C35033D93647AF1CCE475 /* DietPhaseSheet.swift in Sources */,
 				9C5933DDE9D227FF14A93B70 /* ExerciseHistoryView.swift in Sources */,
 				BF3B93880DF40A4ABA3A6EC9 /* ExercisePickerView.swift in Sources */,
+				026366952F7610AB0092265B /* NutritionLabelScanner.swift in Sources */,
 				10148A1DB56FC543DCC6CA25 /* GymTrackerApp.swift in Sources */,
 				0310119E197C683A56C62573 /* LoginView.swift in Sources */,
 				CCAD91919D69FF7501DC1311 /* MainTabView.swift in Sources */,
 				9CF002A4DCB6CECC1A7829B2 /* NutritionView.swift in Sources */,
 				B7805E7E725E10D5F2DD1908 /* PlateVisualView.swift in Sources */,
+				D4E9A2B3F8C1047E2A951B3C /* RecipesView.swift in Sources */,
 				4FA33C85E53B43ABC3DFFB90 /* ProgressView_.swift in Sources */,
 				7B88AE038D21520944833F96 /* SettingsView.swift in Sources */,
 				733CF46C5B9A6F616619997F /* UIModels.swift in Sources */,
@@ -315,7 +323,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 35GARX3Y35;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
@@ -373,7 +381,7 @@
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = "";
+				DEVELOPMENT_TEAM = 35GARX3Y35;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;

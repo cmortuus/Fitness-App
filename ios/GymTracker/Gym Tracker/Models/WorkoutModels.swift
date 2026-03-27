@@ -193,28 +193,113 @@ struct NutritionEntry: Codable, Identifiable {
     let quantity_g: Double?
 }
 
-struct DailySummary: Codable {
+struct MacroTotals: Codable {
     let calories: Double
     let protein: Double
     let carbs: Double
     let fat: Double
-    let entries: [NutritionEntry]
+}
+
+struct MacroGoals: Codable {
+    let calories: Double?
+    let protein: Double?
+    let carbs: Double?
+    let fat: Double?
+    // API returns extra fields we can ignore
+    let id: Int?
+    let effective_from: String?
+    let micronutrient_goals: [String: Double]?
+
+    // Manual init for creating from phase goals
+    init(calories: Double?, protein: Double?, carbs: Double?, fat: Double?) {
+        self.calories = calories
+        self.protein = protein
+        self.carbs = carbs
+        self.fat = fat
+        self.id = nil
+        self.effective_from = nil
+        self.micronutrient_goals = nil
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        calories = try c.decodeIfPresent(Double.self, forKey: .calories)
+        protein = try c.decodeIfPresent(Double.self, forKey: .protein)
+        carbs = try c.decodeIfPresent(Double.self, forKey: .carbs)
+        fat = try c.decodeIfPresent(Double.self, forKey: .fat)
+        id = try c.decodeIfPresent(Int.self, forKey: .id)
+        effective_from = try c.decodeIfPresent(String.self, forKey: .effective_from)
+        micronutrient_goals = try c.decodeIfPresent([String: Double].self, forKey: .micronutrient_goals)
+    }
+}
+
+struct DailySummary: Codable {
+    let date: String
+    let totals: MacroTotals
+    let goals: MacroGoals?
+    let remaining: MacroGoals?
+    let micronutrient_totals: [String: Double]?
 }
 
 struct DietPhase: Codable, Identifiable {
     let id: Int
     let phase_type: String // cut, bulk, maintenance
-    let start_date: String
-    let end_date: String?
-    let is_active: Bool
-    let target_calories: Double?
-    let target_protein: Double?
-    let target_carbs: Double?
-    let target_fat: Double?
+    let started_on: String
+    let ended_on: String?
+    let is_active: Bool?
+    let duration_weeks: Int?
+    let starting_weight_kg: Double?
+    let target_rate_pct: Double?
+    let activity_multiplier: Double?
+    let tdee_override: Double?
+    let carb_preset: String?
+    let body_fat_pct: Double?
+    let protein_per_lb: Double?
+    // Computed by _build_phase_status
+    let current_week: Int?
+    let weeks_remaining: Int?
+    let current_weight_kg: Double?
+    let target_weight_kg: Double?
+    let weight_change_kg: Double?
+    let actual_rate_pct: Double?
+    let status: String?
+    let suggestion: String?
+    let current_goals: PhaseGoals?
+    let tdee_estimate: Double?
+}
+
+struct PhaseGoals: Codable {
+    let calories: Double?
+    let protein: Double?
+    let carbs: Double?
+    let fat: Double?
 }
 
 // MARK: - Progress
 
+/// One row from GET /progress/ — one entry per session × exercise
+struct ProgressDataPoint: Codable, Identifiable {
+    var id: String { "\(exercise_id)_\(date)" }
+    let exercise_id: Int
+    let exercise_name: String
+    let date: String          // "YYYY-MM-DD"
+    let estimated_1rm: Double?
+    let volume_load: Double?
+    let recommended_weight: Double?
+}
+
+/// GET /progress/recommendations
+struct ProgressRecommendation: Codable, Identifiable {
+    var id: Int { exercise_id }
+    let exercise_id: Int
+    let exercise_name: String
+    let current_weight: Double?
+    let recommended_weight: Double?
+    let reason: String?
+    let confidence: Double?
+}
+
+/// GET /progress/insights (7-day lifestyle insights)
 struct ProgressInsight: Codable {
     let exercise_id: Int
     let exercise_name: String
@@ -230,4 +315,53 @@ struct PersonalRecord: Codable {
     let best_reps: Int?
     let best_1rm: Double?
     let date: String?
+}
+
+// MARK: - Recipe Models
+
+struct RecipeIngredientModel: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let quantity: Double
+    let unit: String
+    let calories: Double
+    let protein: Double
+    let carbs: Double
+    let fat: Double
+}
+
+struct RecipeModel: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let description: String?
+    let servings: Double
+    let total_calories: Double
+    let total_protein: Double
+    let total_carbs: Double
+    let total_fat: Double
+    let created_at: String
+    let ingredients: [RecipeIngredientModel]?
+}
+
+struct RecipeCreateBody: Codable {
+    let name: String
+    let description: String?
+    let servings: Double
+    let ingredients: [RecipeIngredientBody]
+}
+
+struct RecipeIngredientBody: Codable {
+    let name: String
+    let quantity: Double
+    let unit: String
+    let calories: Double
+    let protein: Double
+    let carbs: Double
+    let fat: Double
+}
+
+struct RecipeLogBody: Codable {
+    let date: String
+    let servings: Double
+    let meal_type: String
 }

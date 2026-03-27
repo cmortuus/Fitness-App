@@ -97,11 +97,29 @@ final class APIClient: Sendable {
             request.httpBody = try JSONSerialization.data(withJSONObject: encodeToDictionary(body))
         }
 
-        let (_, response) = try await session.data(for: request)
+        let (data, response) = try await session.data(for: request)
         let httpResponse = response as! HTTPURLResponse
 
+        // Handle 401 — try refresh
+        if httpResponse.statusCode == 401 {
+            if await AuthService.shared.refreshTokens() {
+                if let newToken = await AuthService.shared.accessToken {
+                    request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
+                }
+                let (_, retryResponse) = try await session.data(for: request)
+                let retryHttp = retryResponse as! HTTPURLResponse
+                guard (200...299).contains(retryHttp.statusCode) else {
+                    throw APIError.httpError(retryHttp.statusCode, nil)
+                }
+                return
+            }
+            await AuthService.shared.logout()
+            throw APIError.unauthorized
+        }
+
         guard (200...299).contains(httpResponse.statusCode) else {
-            throw APIError.httpError(httpResponse.statusCode, nil)
+            let body = String(data: data, encoding: .utf8)
+            throw APIError.httpError(httpResponse.statusCode, body)
         }
     }
 
@@ -113,6 +131,10 @@ final class APIClient: Sendable {
 
     func post<T: Decodable>(_ path: String, body: (any Encodable)? = nil, queryItems: [URLQueryItem]? = nil) async throws -> T {
         try await request("POST", path: path, body: body, queryItems: queryItems)
+    }
+
+    func put<T: Decodable>(_ path: String, body: (any Encodable)? = nil) async throws -> T {
+        try await request("PUT", path: path, body: body)
     }
 
     func patch<T: Decodable>(_ path: String, body: (any Encodable)? = nil) async throws -> T {

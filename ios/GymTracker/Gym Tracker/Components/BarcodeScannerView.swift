@@ -17,7 +17,7 @@ struct BarcodeScannerView: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: BarcodeScannerViewController, context: Context) {}
 }
 
-class BarcodeScannerViewController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
+class BarcodeScannerViewController: UIViewController, @preconcurrency AVCaptureMetadataOutputObjectsDelegate {
     var onBarcodeFound: ((String) -> Void)?
     private var captureSession: AVCaptureSession?
     private var previewLayer: AVCaptureVideoPreviewLayer?
