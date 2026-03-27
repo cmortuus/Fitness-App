@@ -301,13 +301,18 @@ struct ProgressInsight: Codable {
     let trend: String? // up, down, stable
 }
 
-struct PersonalRecord: Codable {
+struct PersonalRecord: Codable, Identifiable {
+    var id: Int { exercise_id }
     let exercise_id: Int
-    let exercise_name: String
-    let best_weight_kg: Double?
-    let best_reps: Int?
-    let best_1rm: Double?
-    let date: String?
+    let display_name: String?
+    let name: String?
+    let max_weight_kg: Double?
+    let max_reps: Int?
+    let best_1rm_kg: Double?
+    let best_set_weight_kg: Double?
+    let best_set_reps: Int?
+
+    var exerciseName: String { display_name ?? name ?? "Exercise #\(exercise_id)" }
 }
 
 // MARK: - Recipe Models

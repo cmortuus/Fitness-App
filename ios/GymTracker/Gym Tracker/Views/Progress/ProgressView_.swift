@@ -8,8 +8,10 @@ struct ProgressView_: View {
     @State private var dataPoints: [ProgressDataPoint] = []
     @State private var recommendations: [ProgressRecommendation] = []
     @State private var bodyWeights: [BodyWeightEntry] = []
+    @State private var personalRecords: [PersonalRecord] = []
     @State private var allExerciseNames: [String] = []
     @State private var loading = true
+    @State private var showAllRecords = false
 
     // Filters
     @State private var timeRange: Int = 30           // days
@@ -35,6 +37,9 @@ struct ProgressView_: View {
                         VStack(spacing: 20) {
                             mainChart
                             recommendationsSection
+                            if !personalRecords.isEmpty {
+                                personalRecordsSection
+                            }
                             muscleGroupSection
                             sessionLogSection
                         }
@@ -274,6 +279,74 @@ struct ProgressView_: View {
         .padding(.vertical, 4)
     }
 
+    // MARK: - Personal Records Section
+
+    private var personalRecordsSection: some View {
+        let filtered = selectedExercise == "All"
+            ? personalRecords
+            : personalRecords.filter { $0.exerciseName == selectedExercise }
+        let shown = showAllRecords ? filtered : Array(filtered.prefix(5))
+
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Personal Records")
+                    .font(.headline)
+                Spacer()
+                Image(systemName: "trophy.fill")
+                    .foregroundStyle(.yellow)
+            }
+
+            ForEach(shown) { pr in
+                prRow(pr)
+                if pr.id != shown.last?.id {
+                    Divider()
+                }
+            }
+
+            if filtered.count > 5 {
+                Button {
+                    withAnimation { showAllRecords.toggle() }
+                } label: {
+                    Text(showAllRecords ? "Show Less" : "Show All \(filtered.count) Records")
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                        .frame(maxWidth: .infinity)
+                        .padding(.top, 4)
+                }
+            }
+        }
+        .padding()
+        .background(.secondary.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func prRow(_ pr: PersonalRecord) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(pr.exerciseName)
+                    .font(.subheadline.bold())
+                    .lineLimit(1)
+                if let reps = pr.best_set_reps, let w = pr.best_set_weight_kg, w > 0 {
+                    Text("\(Int(displayWeight(w))) \(weightUnit) × \(reps) reps")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if let rm = pr.best_1rm_kg {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.0f %@", displayWeight(rm), weightUnit))
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.yellow)
+                    Text("est. 1RM")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     // MARK: - Muscle Group Section
 
     @ViewBuilder
@@ -467,13 +540,15 @@ struct ProgressView_: View {
                 query: [.init(name: "days_back", value: "\(timeRange)")])
             async let bw: [BodyWeightEntry] = APIClient.shared.get("/body-weight/",
                 query: [.init(name: "limit", value: "90")])
+            async let prs: [PersonalRecord] = APIClient.shared.get("/progress/records")
 
-            let (pts2, recs2, bw2) = try await (pts, recs, bw)
+            let (pts2, recs2, bw2, prs2) = try await (pts, recs, bw, prs)
 
             await MainActor.run {
                 dataPoints     = pts2
                 recommendations = recs2
                 bodyWeights    = bw2
+                personalRecords = prs2
 
                 // Build exercise name list for filter menu
                 let names = Set(pts2.map { $0.exercise_name }).sorted()
