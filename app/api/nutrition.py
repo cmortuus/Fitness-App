@@ -11,9 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
-from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, WaterEntry
 from app.models.user import User
-from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate
+from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
 
 router = APIRouter()
 
@@ -66,6 +66,7 @@ def serialize_goal(goal: MacroGoal) -> dict:
         "protein": goal.protein,
         "carbs": goal.carbs,
         "fat": goal.fat,
+        "water_goal_ml": getattr(goal, "water_goal_ml", 2500.0),
         "effective_from": goal.effective_from.isoformat(),
         "micronutrient_goals": json.loads(goal.micronutrient_goals) if goal.micronutrient_goals else None,
     }
@@ -367,6 +368,35 @@ async def add_entry(
     return serialize_entry(entry)
 
 
+@router.patch("/entries/{entry_id}")
+async def update_entry(
+    entry_id: int,
+    data: NutritionEntryUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Update a nutrition entry (quantity, macros, or meal)."""
+    result = await db.execute(select(NutritionEntry).where(NutritionEntry.id == entry_id, NutritionEntry.user_id == user.id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+    if data.quantity_g is not None:
+        entry.quantity_g = data.quantity_g
+    if data.calories is not None:
+        entry.calories = data.calories
+    if data.protein is not None:
+        entry.protein = data.protein
+    if data.carbs is not None:
+        entry.carbs = data.carbs
+    if data.fat is not None:
+        entry.fat = data.fat
+    if data.meal is not None:
+        entry.meal = data.meal.value
+    await db.flush()
+    await db.refresh(entry)
+    return serialize_entry(entry)
+
+
 @router.delete("/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entry(
     entry_id: int,
@@ -380,6 +410,102 @@ async def delete_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
     await db.delete(entry)
     await db.flush()
+
+
+@router.get("/entries/recent")
+async def recent_foods(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 20,
+) -> list[dict]:
+    """Return the user's most recently logged distinct foods."""
+    result = await db.execute(
+        select(NutritionEntry)
+        .where(NutritionEntry.user_id == user.id)
+        .order_by(desc(NutritionEntry.logged_at))
+        .limit(limit * 3)  # fetch extra to deduplicate by name
+    )
+    entries = result.scalars().all()
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for e in entries:
+        key = e.name.lower().strip()
+        if key not in seen:
+            seen.add(key)
+            unique.append(serialize_entry(e))
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+@router.get("/entries/frequent")
+async def frequent_foods(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 20,
+) -> list[dict]:
+    """Return the user's most frequently logged foods."""
+    count_result = await db.execute(
+        select(NutritionEntry.name, func.count().label("times"), func.max(NutritionEntry.logged_at).label("last_logged"))
+        .where(NutritionEntry.user_id == user.id)
+        .group_by(NutritionEntry.name)
+        .order_by(desc("times"))
+        .limit(limit)
+    )
+    rows = count_result.all()
+    if not rows:
+        return []
+
+    names = [r.name for r in rows]
+    entry_result = await db.execute(
+        select(NutritionEntry)
+        .where(NutritionEntry.user_id == user.id, NutritionEntry.name.in_(names))
+        .order_by(desc(NutritionEntry.logged_at))
+    )
+    all_entries = entry_result.scalars().all()
+    latest: dict[str, NutritionEntry] = {}
+    for e in all_entries:
+        if e.name not in latest:
+            latest[e.name] = e
+
+    return [serialize_entry(latest[r.name]) for r in rows if r.name in latest]
+
+
+@router.post("/entries/copy-day")
+async def copy_day(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: date = Query(),
+    to_date: date = Query(),
+) -> dict:
+    """Copy all entries from from_date to to_date."""
+    result = await db.execute(
+        select(NutritionEntry)
+        .where(NutritionEntry.date == from_date, NutritionEntry.user_id == user.id)
+    )
+    source_entries = result.scalars().all()
+    if not source_entries:
+        return {"copied": 0}
+
+    now = datetime.utcnow()
+    for e in source_entries:
+        new_entry = NutritionEntry(
+            user_id=user.id,
+            food_item_id=e.food_item_id,
+            name=e.name,
+            date=to_date,
+            meal=e.meal,
+            quantity_g=e.quantity_g,
+            calories=e.calories,
+            protein=e.protein,
+            carbs=e.carbs,
+            fat=e.fat,
+            micronutrients=e.micronutrients,
+            logged_at=now,
+        )
+        db.add(new_entry)
+    await db.flush()
+    return {"copied": len(source_entries)}
 
 
 # ── Daily summary ─────────────────────────────────────────────────────────────
@@ -574,12 +700,15 @@ async def set_goals(
         goal.carbs = data.carbs
         goal.fat = data.fat
         goal.micronutrient_goals = micro_goals_json
+        if data.water_goal_ml is not None:
+            goal.water_goal_ml = data.water_goal_ml
     else:
         goal = MacroGoal(
             calories=data.calories,
             protein=data.protein,
             carbs=data.carbs,
             fat=data.fat,
+            water_goal_ml=data.water_goal_ml or 2500.0,
             effective_from=effective,
             user_id=user.id,
             micronutrient_goals=micro_goals_json,
@@ -589,3 +718,67 @@ async def set_goals(
     await db.flush()
     await db.refresh(goal)
     return serialize_goal(goal)
+
+
+# ── Water tracking ────────────────────────────────────────────────────────────
+
+@router.get("/water")
+async def get_water(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    date: date = Query(default=None),
+) -> dict:
+    """Get water entries and total for a date."""
+    target_date = date or datetime.utcnow().date()
+    result = await db.execute(
+        select(WaterEntry)
+        .where(WaterEntry.date == target_date, WaterEntry.user_id == user.id)
+        .order_by(WaterEntry.logged_at)
+    )
+    entries = result.scalars().all()
+    total_ml = sum(e.amount_ml for e in entries)
+
+    goal_result = await db.execute(
+        select(MacroGoal)
+        .where(MacroGoal.effective_from <= target_date, MacroGoal.user_id == user.id)
+        .order_by(desc(MacroGoal.effective_from))
+        .limit(1)
+    )
+    goal = goal_result.scalar_one_or_none()
+    water_goal_ml = getattr(goal, "water_goal_ml", 2500.0) if goal else 2500.0
+
+    return {
+        "date": target_date.isoformat(),
+        "total_ml": total_ml,
+        "goal_ml": water_goal_ml,
+        "entries": [{"id": e.id, "amount_ml": e.amount_ml, "logged_at": e.logged_at.isoformat()} for e in entries],
+    }
+
+
+@router.post("/water", status_code=status.HTTP_201_CREATED)
+async def add_water(
+    data: WaterEntryCreate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Log a water entry."""
+    entry = WaterEntry(user_id=user.id, date=data.date, amount_ml=data.amount_ml)
+    db.add(entry)
+    await db.flush()
+    await db.refresh(entry)
+    return {"id": entry.id, "amount_ml": entry.amount_ml, "logged_at": entry.logged_at.isoformat()}
+
+
+@router.delete("/water/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_water(
+    entry_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete a water entry."""
+    result = await db.execute(select(WaterEntry).where(WaterEntry.id == entry_id, WaterEntry.user_id == user.id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Water entry not found")
+    await db.delete(entry)
+    await db.flush()
