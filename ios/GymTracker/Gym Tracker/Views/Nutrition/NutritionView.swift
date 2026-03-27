@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NutritionView: View {
+    @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
     @State private var summary: DailySummary?
     @State private var mealEntries: [String: [NutritionEntry]] = [:]
     @State private var loading = true
@@ -44,6 +45,9 @@ struct NutritionView: View {
 
                             // Macro rings
                             macroRings
+
+                            // Micronutrients (when data available)
+                            micronutrients
 
                             // Food log
                             foodLog
@@ -211,16 +215,19 @@ struct NutritionView: View {
 
                     // Weight range
                     if let start = phase.starting_weight_kg, let target = phase.target_weight_kg {
+                        let dispStart  = weightUnit == "lbs" ? start  * 2.20462 : start
+                        let dispTarget = weightUnit == "lbs" ? target * 2.20462 : target
                         HStack {
-                            Text(String(format: "%.1f lbs", start * 2.20462))
+                            Text(String(format: "%.1f %@", dispStart, weightUnit))
                                 .font(.caption2).foregroundStyle(.secondary)
                             Spacer()
                             if let current = phase.current_weight_kg {
-                                Text(String(format: "%.1f lbs", current * 2.20462))
+                                let dispCurrent = weightUnit == "lbs" ? current * 2.20462 : current
+                                Text(String(format: "%.1f %@", dispCurrent, weightUnit))
                                     .font(.caption2.weight(.semibold))
                             }
                             Spacer()
-                            Text(String(format: "%.1f lbs", target * 2.20462))
+                            Text(String(format: "%.1f %@", dispTarget, weightUnit))
                                 .font(.caption2).foregroundStyle(.secondary)
                         }
                     }
@@ -377,6 +384,79 @@ struct NutritionView: View {
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Micronutrients
+
+    private struct MicroItem {
+        let key: String
+        let name: String
+        let unit: String
+        let color: Color
+    }
+
+    private let microItems: [MicroItem] = [
+        MicroItem(key: "fiber_g",        name: "Fiber",       unit: "g",   color: .green),
+        MicroItem(key: "sugar_g",        name: "Sugar",       unit: "g",   color: .orange),
+        MicroItem(key: "sodium_mg",      name: "Sodium",      unit: "mg",  color: .red),
+        MicroItem(key: "cholesterol_mg", name: "Cholesterol", unit: "mg",  color: .yellow),
+        MicroItem(key: "calcium_mg",     name: "Calcium",     unit: "mg",  color: .blue),
+        MicroItem(key: "iron_mg",        name: "Iron",        unit: "mg",  color: Color.brown),
+        MicroItem(key: "potassium_mg",   name: "Potassium",   unit: "mg",  color: .purple),
+        MicroItem(key: "magnesium_mg",   name: "Magnesium",   unit: "mg",  color: .teal),
+        MicroItem(key: "vitamin_c_mg",   name: "Vitamin C",   unit: "mg",  color: .orange),
+        MicroItem(key: "vitamin_d_mcg",  name: "Vitamin D",   unit: "mcg", color: .yellow),
+        MicroItem(key: "vitamin_b12_mcg",name: "B12",         unit: "mcg", color: .cyan),
+        MicroItem(key: "omega3_g",       name: "Omega-3",     unit: "g",   color: .blue),
+    ]
+
+    @ViewBuilder
+    private var micronutrients: some View {
+        if let micros = summary?.micronutrient_totals, !micros.isEmpty {
+            let present = microItems.filter { micros[$0.key] != nil }
+            if !present.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Micronutrients")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 4)
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 8) {
+                        ForEach(present, id: \.key) { item in
+                            if let val = micros[item.key] {
+                                HStack(spacing: 8) {
+                                    Circle()
+                                        .fill(item.color.opacity(0.25))
+                                        .frame(width: 8, height: 8)
+                                    VStack(alignment: .leading, spacing: 1) {
+                                        Text(item.name)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                        Text("\(formatMicro(val)) \(item.unit)")
+                                            .font(.caption.weight(.semibold).monospacedDigit())
+                                    }
+                                    Spacer(minLength: 0)
+                                }
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .background(Color(.tertiarySystemGroupedBackground))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(.secondarySystemGroupedBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .padding(.horizontal)
+            }
+        }
+    }
+
+    private func formatMicro(_ val: Double) -> String {
+        if val >= 100 { return String(format: "%.0f", val) }
+        if val >= 10  { return String(format: "%.1f", val) }
+        return String(format: "%.2f", val)
     }
 
     // MARK: - Food Log

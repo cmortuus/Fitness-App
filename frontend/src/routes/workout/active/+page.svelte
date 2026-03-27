@@ -150,6 +150,7 @@
   let finished = $state(false);
   let finishing = $state(false);
   let syncToPlan = $state(true);
+  let hasLinkedPlan = $state(false);
   let syncCount = $state<number | null>(null);
   let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
   let sharing = $state(false);
@@ -577,6 +578,7 @@
       const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
+      hasLinkedPlan = true;
       currentSession.set(sess);
 
       const plan = await getPlan(planId);
@@ -704,6 +706,7 @@
       const sess = await getSession($currentSession!.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
+      hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
 
       // Restore elapsed time from when the session started.
@@ -2826,10 +2829,12 @@
             </button>
           {:else}
             <div class="flex-1 flex flex-col gap-2">
-              <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
-                <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
-                Update plan with today's weights & reps
-              </label>
+              {#if hasLinkedPlan}
+                <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
+                  <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
+                  Update plan with today's weights & reps
+                </label>
+              {/if}
               <button onclick={doFinish} disabled={finishing}
                       class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
                              text-white font-bold text-lg rounded-2xl transition-colors

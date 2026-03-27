@@ -422,13 +422,8 @@ struct ActiveWorkoutView: View {
                 Text("").frame(width: 30)
                 Text("Type").frame(width: 60)
                 Text(weightUnit).frame(maxWidth: .infinity)
-                if exercise.isUnilateral {
-                    Text("L").frame(maxWidth: .infinity)
-                    Text("R").frame(maxWidth: .infinity)
-                } else {
-                    Text("Reps").frame(maxWidth: .infinity)
-                }
-                Text("").frame(width: 70)
+                Text("Reps").frame(maxWidth: .infinity)
+                Text("").frame(width: exercise.isUnilateral ? 90 : 70)
             }
             .font(.caption2)
             .foregroundStyle(.secondary)
@@ -490,7 +485,17 @@ struct ActiveWorkoutView: View {
 
     // MARK: - Set Row
 
+    @ViewBuilder
     private func setRow(exIdx: Int, sIdx: Int) -> some View {
+        if exercises[exIdx].isUnilateral {
+            unilateralSetRows(exIdx: exIdx, sIdx: sIdx)
+        } else {
+            bilateralSetRow(exIdx: exIdx, sIdx: sIdx)
+        }
+    }
+
+    /// Standard bilateral set row
+    private func bilateralSetRow(exIdx: Int, sIdx: Int) -> some View {
         let set = exercises[exIdx].sets[sIdx]
         let exercise = exercises[exIdx]
 
@@ -522,7 +527,6 @@ struct ActiveWorkoutView: View {
                 get: { exercises[exIdx].sets[sIdx].weight },
                 set: { newVal in
                     exercises[exIdx].sets[sIdx].weight = newVal
-                    // Auto-fill reps via Epley if 1RM known
                     if let w = newVal, let rm = exercises[exIdx].sets[sIdx].oneRM, w > 0, rm > 0 {
                         let estReps = Int((rm / w - 1) * 30)
                         if estReps >= 1 && estReps <= 50 {
@@ -537,54 +541,27 @@ struct ActiveWorkoutView: View {
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: .infinity)
             .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
-            .onTapGesture {
-                focusedExercise = exercise
-                focusedWeight = set.weight
-            }
+            .onTapGesture { focusedExercise = exercise; focusedWeight = set.weight }
 
-            // Reps (or L/R for unilateral)
-            if exercise.isUnilateral {
-                TextField("L", value: Binding(
-                    get: { exercises[exIdx].sets[sIdx].repsLeft },
-                    set: { exercises[exIdx].sets[sIdx].repsLeft = $0 }
-                ), format: .number)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: .infinity)
-                .disabled(set.done || set.skipped)
-
-                TextField("R", value: Binding(
-                    get: { exercises[exIdx].sets[sIdx].repsRight },
-                    set: { exercises[exIdx].sets[sIdx].repsRight = $0 }
-                ), format: .number)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: .infinity)
-                .disabled(set.done || set.skipped)
-            } else {
-                TextField("reps", value: Binding(
-                    get: { exercises[exIdx].sets[sIdx].reps },
-                    set: { exercises[exIdx].sets[sIdx].reps = $0 }
-                ), format: .number)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: .infinity)
-                .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
-            }
+            // Reps
+            TextField("reps", value: Binding(
+                get: { exercises[exIdx].sets[sIdx].reps },
+                set: { exercises[exIdx].sets[sIdx].reps = $0 }
+            ), format: .number)
+            .keyboardType(.numberPad)
+            .textFieldStyle(.roundedBorder)
+            .frame(maxWidth: .infinity)
+            .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
 
             // Action buttons
             if set.done {
                 Button(action: { undoSet(exIdx: exIdx, sIdx: sIdx) }) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(.green)
+                    Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
                 }
                 .frame(width: 70)
             } else if set.skipped {
                 Button(action: { unskipSet(exIdx: exIdx, sIdx: sIdx) }) {
-                    Text("Skip")
-                        .font(.caption)
-                        .strikethrough()
-                        .foregroundStyle(.orange)
+                    Text("Skip").font(.caption).strikethrough().foregroundStyle(.orange)
                 }
                 .frame(width: 70)
             } else if set.saving {
@@ -594,23 +571,156 @@ struct ActiveWorkoutView: View {
                     Button(action: { Task { await completeSet(exIdx: exIdx, sIdx: sIdx) } }) {
                         Image(systemName: "checkmark").font(.body.bold())
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                    .controlSize(.small)
+                    .buttonStyle(.borderedProminent).tint(.green).controlSize(.small)
                     .disabled(!canComplete(set: set, exercise: exercise))
 
                     Button(action: { skipSet(exIdx: exIdx, sIdx: sIdx) }) {
                         Image(systemName: "forward.fill").font(.caption2)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.mini)
-                    .tint(.gray)
+                    .buttonStyle(.bordered).controlSize(.mini).tint(.gray)
                 }
                 .frame(width: 70)
             }
         }
         .padding(.vertical, 2)
         .opacity(set.skipped ? 0.5 : 1)
+    }
+
+    /// Unilateral set: two rows (L + R) per set, each acting independently
+    private func unilateralSetRows(exIdx: Int, sIdx: Int) -> some View {
+        let set = exercises[exIdx].sets[sIdx]
+        let exercise = exercises[exIdx]
+
+        return VStack(spacing: 1) {
+            ForEach([true, false], id: \.self) { isLeft in
+                let sideDone   = isLeft ? set.doneLeft  : set.doneRight
+                let sideReps   = isLeft ? set.repsLeft  : set.repsRight
+                let placeholder = isLeft ? "L" : "R"
+
+                HStack(spacing: 4) {
+                    // Set number (only on L row)
+                    Group {
+                        if isLeft {
+                            Text("\(set.setNumber)")
+                                .foregroundStyle(set.done ? .green : set.skipped ? .orange : set.setType.color)
+                        } else {
+                            Text("")
+                        }
+                    }
+                    .font(.caption.bold())
+                    .frame(width: 30)
+
+                    // Type picker (L row: interactive; R row: label only)
+                    if isLeft {
+                        Menu {
+                            ForEach(SetType.available(forSetNumber: set.setNumber), id: \.self) { type in
+                                Button(type.label) { exercises[exIdx].sets[sIdx].setType = type }
+                            }
+                        } label: {
+                            Text(set.setType.label).font(.caption2).lineLimit(1).frame(width: 60)
+                                .foregroundStyle(set.setType.color)
+                        }
+                        .disabled(set.done || set.skipped)
+                    } else {
+                        Text(set.setType.label).font(.caption2).lineLimit(1).frame(width: 60)
+                            .foregroundStyle(set.setType.color.opacity(0.5))
+                    }
+
+                    // Weight (shared between L/R)
+                    TextField(weightUnit, value: Binding(
+                        get: { exercises[exIdx].sets[sIdx].weight },
+                        set: { newVal in
+                            exercises[exIdx].sets[sIdx].weight = newVal
+                            if let w = newVal, let rm = exercises[exIdx].sets[sIdx].oneRM, w > 0, rm > 0 {
+                                let estReps = Int((rm / w - 1) * 30)
+                                if estReps >= 1 && estReps <= 50 {
+                                    exercises[exIdx].sets[sIdx].repsLeft  = estReps
+                                    exercises[exIdx].sets[sIdx].repsRight = estReps
+                                }
+                            }
+                            focusedExercise = exercise
+                            focusedWeight = newVal
+                        }
+                    ), format: .number.precision(.fractionLength(1)))
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: .infinity)
+                    .disabled(set.done || sideDone || set.skipped)
+
+                    // Per-side reps
+                    TextField(placeholder, value: Binding(
+                        get: { isLeft ? exercises[exIdx].sets[sIdx].repsLeft
+                                      : exercises[exIdx].sets[sIdx].repsRight },
+                        set: { v in
+                            if isLeft { exercises[exIdx].sets[sIdx].repsLeft  = v }
+                            else      { exercises[exIdx].sets[sIdx].repsRight = v }
+                        }
+                    ), format: .number)
+                    .keyboardType(.numberPad)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: .infinity)
+                    .disabled(set.done || sideDone || set.skipped)
+
+                    // Per-side action buttons
+                    if set.done {
+                        // Both done — undo whole set only on L row, blank on R
+                        if isLeft {
+                            Button(action: { undoSet(exIdx: exIdx, sIdx: sIdx) }) {
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            }
+                            .frame(width: 70)
+                        } else {
+                            Text("").frame(width: 70)
+                        }
+                    } else if set.skipped {
+                        if isLeft {
+                            Button(action: { unskipSet(exIdx: exIdx, sIdx: sIdx) }) {
+                                Text("Skip").font(.caption).strikethrough().foregroundStyle(.orange)
+                            }
+                            .frame(width: 70)
+                        } else {
+                            Text("").frame(width: 70)
+                        }
+                    } else if sideDone {
+                        Button(action: {
+                            if isLeft { exercises[exIdx].sets[sIdx].doneLeft  = false }
+                            else      { exercises[exIdx].sets[sIdx].doneRight = false }
+                        }) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green.opacity(0.6))
+                        }
+                        .frame(width: 70)
+                    } else if set.saving {
+                        ProgressView().frame(width: 70)
+                    } else {
+                        HStack(spacing: 4) {
+                            Button(action: { Task { await completeSide(exIdx: exIdx, sIdx: sIdx, isLeft: isLeft) } }) {
+                                Image(systemName: "checkmark").font(.body.bold())
+                            }
+                            .buttonStyle(.borderedProminent).tint(.green).controlSize(.small)
+                            .disabled((sideReps ?? 0) < 1)
+
+                            Button(action: { skipSet(exIdx: exIdx, sIdx: sIdx) }) {
+                                Image(systemName: "forward.fill").font(.caption2)
+                            }
+                            .buttonStyle(.bordered).controlSize(.mini).tint(.gray)
+                        }
+                        .frame(width: 70)
+                    }
+
+                    // Side label
+                    Text(isLeft ? "L" : "R")
+                        .font(.caption.bold())
+                        .foregroundStyle(sideDone ? .green : .secondary)
+                        .frame(width: 20)
+                }
+                .padding(.vertical, 2)
+                .opacity((set.skipped || (set.done && !isLeft)) ? 0.4 : 1)
+            }
+        }
+        .padding(.bottom, 4)
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.3)
+        }
     }
 
     // MARK: - Autoregulation Views
@@ -708,9 +818,7 @@ struct ActiveWorkoutView: View {
     // MARK: - Helpers
 
     private func canComplete(set: UISet, exercise: UIExercise) -> Bool {
-        if exercise.isUnilateral {
-            return (set.repsLeft ?? 0) > 0 || (set.repsRight ?? 0) > 0
-        }
+        // Bilateral: need at least 1 rep
         return (set.reps ?? 0) > 0
     }
 
@@ -930,6 +1038,28 @@ struct ActiveWorkoutView: View {
         }
     }
 
+    /// Per-side completion for unilateral exercises.
+    /// When both sides are done, automatically calls completeSet().
+    private func completeSide(exIdx: Int, sIdx: Int, isLeft: Bool) async {
+        guard exIdx < exercises.count, sIdx < exercises[exIdx].sets.count else { return }
+        guard !exercises[exIdx].sets[sIdx].done else { return }
+
+        if isLeft { exercises[exIdx].sets[sIdx].doneLeft  = true }
+        else      { exercises[exIdx].sets[sIdx].doneRight = true }
+
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+
+        // Start rest timer after first side
+        let exercise = exercises[exIdx]
+        let duration = currentRestDurations.duration(for: exercise)
+        startRest(seconds: duration)
+
+        // When both sides are done, persist the set
+        if exercises[exIdx].sets[sIdx].doneLeft && exercises[exIdx].sets[sIdx].doneRight {
+            await completeSet(exIdx: exIdx, sIdx: sIdx)
+        }
+    }
+
     private func skipSet(exIdx: Int, sIdx: Int) {
         exercises[exIdx].sets[sIdx].skipped = true
         checkAllDone()
@@ -942,6 +1072,8 @@ struct ActiveWorkoutView: View {
 
     private func undoSet(exIdx: Int, sIdx: Int) {
         exercises[exIdx].sets[sIdx].done = false
+        exercises[exIdx].sets[sIdx].doneLeft = false
+        exercises[exIdx].sets[sIdx].doneRight = false
         checkAllDone()
     }
 

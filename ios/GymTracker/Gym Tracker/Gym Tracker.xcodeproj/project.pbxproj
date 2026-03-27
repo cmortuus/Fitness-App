@@ -14,6 +14,7 @@
 		379EB09C27EDEABF47D9B8BA /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CC10BDD71FDEA1E6C7F6203 /* DashboardView.swift */; };
 		407986835626EBF88FD82435 /* ActiveWorkoutView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C868B8A713DFBDC587C100F /* ActiveWorkoutView.swift */; };
 		4FA33C85E53B43ABC3DFFB90 /* ProgressView_.swift in Sources */ = {isa = PBXBuildFile; fileRef = 259375109D899D8E36B7F946 /* ProgressView_.swift */; };
+		D1C7A3F2B908E54A61D3298E /* CalculatorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8A2F5C31B74D906A5382B10 /* CalculatorView.swift */; };
 		5D1D72B7552E19E7A16559D6 /* ConfettiView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0959F00ADEF6DBE1B1F72EE7 /* ConfettiView.swift */; };
 		7209A20264874F13ECC4F26E /* AuthService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A910EA63C2883868E6403D36 /* AuthService.swift */; };
 		733CF46C5B9A6F616619997F /* UIModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7F4783261DC7AAAB340EF20F /* UIModels.swift */; };
@@ -41,6 +42,7 @@
 		1C868B8A713DFBDC587C100F /* ActiveWorkoutView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActiveWorkoutView.swift; sourceTree = "<group>"; };
 		1F7B5CBD20BDA26AE67C7205 /* ExercisePickerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExercisePickerView.swift; sourceTree = "<group>"; };
 		259375109D899D8E36B7F946 /* ProgressView_.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressView_.swift; sourceTree = "<group>"; };
+		E8A2F5C31B74D906A5382B10 /* CalculatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorView.swift; sourceTree = "<group>"; };
 		2B1C5CC04AB943F0EE1999C9 /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		47BF401DF821DC3D295EA308 /* DietPhaseSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DietPhaseSheet.swift; sourceTree = "<group>"; };
 		F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
@@ -143,6 +145,7 @@
 		ABD7DC76BE66E3B089DE94B5 /* Progress */ = {
 			isa = PBXGroup;
 			children = (
+				E8A2F5C31B74D906A5382B10 /* CalculatorView.swift */,
 				259375109D899D8E36B7F946 /* ProgressView_.swift */,
 			);
 			path = Progress;
@@ -279,6 +282,7 @@
 				B7805E7E725E10D5F2DD1908 /* PlateVisualView.swift in Sources */,
 				E3A1D7C5F092B4816A234D9E /* PlansView.swift in Sources */,
 				D4E9A2B3F8C1047E2A951B3C /* RecipesView.swift in Sources */,
+				D1C7A3F2B908E54A61D3298E /* CalculatorView.swift in Sources */,
 				4FA33C85E53B43ABC3DFFB90 /* ProgressView_.swift in Sources */,
 				7B88AE038D21520944833F96 /* SettingsView.swift in Sources */,
 				733CF46C5B9A6F616619997F /* UIModels.swift in Sources */,

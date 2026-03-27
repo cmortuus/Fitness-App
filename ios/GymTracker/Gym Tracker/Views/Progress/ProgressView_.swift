@@ -13,6 +13,7 @@ struct ProgressView_: View {
     @State private var allExerciseNames: [String] = []
     @State private var loading = true
     @State private var showAllRecords = false
+    @State private var showCalculator = false
 
     // Filters
     @State private var timeRange: Int = 30           // days
@@ -50,6 +51,18 @@ struct ProgressView_: View {
                 }
             }
             .navigationTitle("Progress")
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        showCalculator = true
+                    } label: {
+                        Image(systemName: "function")
+                    }
+                }
+            }
+            .sheet(isPresented: $showCalculator) {
+                CalculatorView()
+            }
             .task { await loadData() }
             .refreshable { await loadData() }
         }
