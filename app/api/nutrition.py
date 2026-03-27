@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
-from app.models.nutrition import FoodItem, MacroGoal, NutritionEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry
 from app.models.user import User
 from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate
 
@@ -81,15 +81,23 @@ async def search(q: str = "", page: int = 1) -> list[dict]:
 @router.get("/barcode/{code}")
 async def barcode_lookup(
     code: str,
+    user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Look up a food by barcode — checks community library first, then external APIs."""
-    # Check local community library first
+    """Look up a food by barcode — checks local DB first (community > pending by this user), then external APIs."""
     local_result = await db.execute(
-        select(FoodItem).where(FoodItem.barcode == code).order_by(
-            # Prefer community entries over custom
-            desc(FoodItem.source == "community")
-        ).limit(1)
+        select(FoodItem)
+        .where(
+            FoodItem.barcode == code,
+            (FoodItem.source == "community")
+            | (FoodItem.source == "custom")
+            | ((FoodItem.source == "pending") & (FoodItem.user_id == user.id)),
+        )
+        .order_by(
+            desc(FoodItem.source == "community"),
+            desc(FoodItem.source == "custom"),
+        )
+        .limit(1)
     )
     local_food = local_result.scalar_one_or_none()
     if local_food:
@@ -153,38 +161,105 @@ async def create_community_food(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Save a food to the shared community library (global, no user_id)."""
-    # If barcode provided, check for existing community entry
-    if data.barcode:
-        existing = await db.execute(
-            select(FoodItem).where(
-                FoodItem.barcode == data.barcode,
-                FoodItem.source == "community",
-            )
-        )
-        found = existing.scalar_one_or_none()
-        if found:
-            return serialize_food_item(found)
+    """Submit a food to the shared community library.
 
-    food = FoodItem(
-        name=data.name,
-        brand=data.brand,
-        barcode=data.barcode,
-        source="community",
-        calories_per_100g=data.calories_per_100g,
-        protein_per_100g=data.protein_per_100g,
-        carbs_per_100g=data.carbs_per_100g,
-        fat_per_100g=data.fat_per_100g,
-        serving_size_g=data.serving_size_g,
-        serving_label=data.serving_label,
-        is_custom=False,
-        user_id=None,  # Global — shared across all users
-        micronutrients=json.dumps(data.micronutrients) if data.micronutrients else None,
+    Foods enter a pending state and are promoted to community once
+    COMMUNITY_THRESHOLD distinct users have submitted the same item
+    (matched by barcode, or name+brand when no barcode). Macros are
+    averaged across all submissions on promotion.
+    """
+    # 1. Already promoted to community?
+    if data.barcode:
+        result = await db.execute(
+            select(FoodItem).where(FoodItem.barcode == data.barcode, FoodItem.source == "community")
+        )
+        promoted = result.scalar_one_or_none()
+        if promoted:
+            return serialize_food_item(promoted)
+
+    # 2. Find existing pending food for same item
+    pending: FoodItem | None = None
+    if data.barcode:
+        result = await db.execute(
+            select(FoodItem).where(FoodItem.barcode == data.barcode, FoodItem.source == "pending")
+        )
+        pending = result.scalar_one_or_none()
+    if pending is None:
+        # Fallback: match by name + brand
+        q = select(FoodItem).where(
+            FoodItem.name == data.name,
+            FoodItem.source == "pending",
+        )
+        if data.brand:
+            q = q.where(FoodItem.brand == data.brand)
+        result = await db.execute(q)
+        pending = result.scalar_one_or_none()
+
+    # 3. Create pending entry if none exists
+    if pending is None:
+        pending = FoodItem(
+            name=data.name,
+            brand=data.brand,
+            barcode=data.barcode,
+            source="pending",
+            calories_per_100g=data.calories_per_100g,
+            protein_per_100g=data.protein_per_100g,
+            carbs_per_100g=data.carbs_per_100g,
+            fat_per_100g=data.fat_per_100g,
+            serving_size_g=data.serving_size_g,
+            serving_label=data.serving_label,
+            is_custom=False,
+            user_id=user.id,
+            micronutrients=json.dumps(data.micronutrients) if data.micronutrients else None,
+        )
+        db.add(pending)
+        await db.flush()
+
+    # 4. Record this user's submission (ignore duplicate)
+    existing_sub = await db.execute(
+        select(FoodSubmission).where(
+            FoodSubmission.food_item_id == pending.id,
+            FoodSubmission.user_id == user.id,
+        )
     )
-    db.add(food)
+    if existing_sub.scalar_one_or_none() is None:
+        db.add(FoodSubmission(
+            food_item_id=pending.id,
+            user_id=user.id,
+            calories_per_100g=data.calories_per_100g,
+            protein_per_100g=data.protein_per_100g,
+            carbs_per_100g=data.carbs_per_100g,
+            fat_per_100g=data.fat_per_100g,
+        ))
+        await db.flush()
+
+    # 5. Count distinct submissions — promote if threshold reached
+    count_result = await db.execute(
+        select(func.count()).select_from(FoodSubmission).where(FoodSubmission.food_item_id == pending.id)
+    )
+    submission_count = count_result.scalar_one()
+
+    if submission_count >= COMMUNITY_THRESHOLD:
+        # Average macros across all submissions
+        subs_result = await db.execute(
+            select(FoodSubmission).where(FoodSubmission.food_item_id == pending.id)
+        )
+        subs = subs_result.scalars().all()
+
+        def _avg(vals: list[float | None]) -> float | None:
+            clean = [v for v in vals if v is not None]
+            return sum(clean) / len(clean) if clean else None
+
+        pending.source = "community"
+        pending.user_id = None
+        pending.calories_per_100g = _avg([s.calories_per_100g for s in subs])
+        pending.protein_per_100g = _avg([s.protein_per_100g for s in subs])
+        pending.carbs_per_100g = _avg([s.carbs_per_100g for s in subs])
+        pending.fat_per_100g = _avg([s.fat_per_100g for s in subs])
+
     await db.flush()
-    await db.refresh(food)
-    return serialize_food_item(food)
+    await db.refresh(pending)
+    return serialize_food_item(pending)
 
 
 @router.delete("/foods/{food_id}", status_code=status.HTTP_204_NO_CONTENT)
