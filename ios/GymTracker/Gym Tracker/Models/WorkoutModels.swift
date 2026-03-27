@@ -17,50 +17,43 @@ struct Exercise: Codable, Identifiable {
 
 // MARK: - Workout Plan
 
+struct PlanExerciseEntry: Codable {
+    let exercise_id: Int
+    let exercise_name: String?
+    let sets: Int?
+    let reps: Int?
+    let starting_weight_kg: Double?
+    let set_type: String?
+    let rest_seconds: Int?
+    let notes: String?
+
+    var displayName: String { exercise_name ?? "Exercise #\(exercise_id)" }
+}
+
+struct PlanDay: Codable, Identifiable {
+    var id: Int { day_number }
+    let day_number: Int
+    let day_name: String
+    let exercises: [PlanExerciseEntry]
+}
+
 struct WorkoutPlan: Codable, Identifiable {
     let id: Int
     let name: String
-    let days: AnyCodable? // Can be Int or Array depending on endpoint
+    let days: [PlanDay]?
+    let number_of_days: Int?
     let description: String?
-    let plan_data: String? // JSON string
+    let plan_data: String?
     let duration_weeks: Int?
     let current_week: Int?
     let block_type: String?
     let auto_progression: Bool?
+    let is_draft: Bool?
+    let is_archived: Bool?
 
-    var dayCount: Int {
-        switch days {
-        case .int(let n): return n
-        case .array(let arr): return arr.count
-        case .none: return 0
-        }
-    }
+    var dayCount: Int { days?.count ?? number_of_days ?? 0 }
 }
 
-/// Handles fields that can be either Int or Array in JSON
-enum AnyCodable: Codable {
-    case int(Int)
-    case array([[String: AnyCodableValue]])
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let intVal = try? container.decode(Int.self) {
-            self = .int(intVal)
-        } else if let arrVal = try? container.decode([[String: AnyCodableValue]].self) {
-            self = .array(arrVal)
-        } else {
-            self = .int(0)
-        }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .int(let n): try container.encode(n)
-        case .array(let arr): try container.encode(arr)
-        }
-    }
-}
 
 /// Generic JSON value for flexible decoding
 enum AnyCodableValue: Codable {

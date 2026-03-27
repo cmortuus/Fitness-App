@@ -70,7 +70,7 @@ struct DashboardView: View {
 
                         // Plans
                         NavigationLink {
-                            PlansListView(plans: plans)
+                            PlansView()
                         } label: {
                             Label("Manage Plans", systemImage: "list.bullet")
                                 .frame(maxWidth: .infinity)
