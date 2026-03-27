@@ -4,7 +4,7 @@
   import {
     getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
     getDailySummary, setMacroGoals,
-    searchFoods, lookupBarcode, getCustomFoods, createCustomFood, createCommunityFood,
+    searchFoods, lookupBarcode, getCustomFoods, createCustomFood, deleteCustomFood, createCommunityFood,
     getActivePhase, createPhase, endPhase, recalculatePhase,
     getRecipes, logRecipe, createRecipe, deleteRecipe,
   } from '$lib/api';
@@ -1368,19 +1368,30 @@
             </div>
             <div class="px-2">
               {#each customFoods as food}
-                <button onclick={() => { selectedFood = food; selectedQty = food.serving_size_g || 100; }}
-                        class="w-full text-left px-3 py-2.5 hover:bg-zinc-800 rounded-lg transition-colors">
-                  <p class="text-sm text-white truncate">{food.name}</p>
-                  <p class="text-xs text-zinc-500">
-                    {food.brand ?? 'Custom'}
-                    {#if food.calories_per_100g != null}
-                      · {Math.round(food.calories_per_100g)} cal/100g
-                    {/if}
-                  </p>
-                </button>
+                <div class="flex items-center gap-1 rounded-lg hover:bg-zinc-800 transition-colors group">
+                  <button onclick={() => { selectedFood = food; selectedQty = food.serving_size_g || 100; }}
+                          class="flex-1 text-left px-3 py-2.5">
+                    <p class="text-sm text-white truncate">{food.name}</p>
+                    <p class="text-xs text-zinc-500">
+                      {food.brand ?? 'Custom'}
+                      {#if food.calories_per_100g != null}
+                        · {Math.round(food.calories_per_100g)} cal/100g
+                      {/if}
+                    </p>
+                  </button>
+                  <button onclick={async () => {
+                            if (!confirm(`Delete "${food.name}"?`)) return;
+                            await deleteCustomFood(food.id);
+                            customFoods = customFoods.filter(f => f.id !== food.id);
+                          }}
+                          class="px-2 py-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Delete saved food">
+                    🗑
+                  </button>
+                </div>
               {/each}
               {#if customFoods.length === 0}
-                <p class="text-center text-zinc-500 text-sm py-8">No saved foods yet</p>
+                <p class="text-center text-zinc-500 text-sm py-8">No saved foods yet.<br><span class="text-zinc-600 text-xs">Log a food manually and check "Save as custom food".</span></p>
               {/if}
             </div>
 

@@ -151,7 +151,7 @@
   let finishing = $state(false);
   let syncToPlan = $state(true);
   let syncCount = $state<number | null>(null);
-  let summaryCardEl: HTMLDivElement;
+  let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
   let sharing = $state(false);
 
   async function shareWorkout() {
