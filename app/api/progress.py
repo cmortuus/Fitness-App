@@ -561,3 +561,98 @@ async def get_volume_landmarks(
         "muscles": muscle_data,
         "total_sets": sum(muscle_sets.values()),
     }
+
+
+# ── Progressive Overload ───────────────────────────────────────────────────
+
+from pydantic import BaseModel as _PydanticBase
+from app.services.overload import calculate_overload, OverloadInput, epley_1rm
+
+
+class OverloadRequest(_PydanticBase):
+    exercise_id: int
+    current_weight: float
+    current_reps: int
+    target_reps: int | None = None
+    weight_unit: str = "lbs"  # "lbs" or "kg"
+
+
+@router.post("/overload")
+async def get_overload_suggestion(
+    body: OverloadRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Calculate progressive overload suggestion for an exercise."""
+
+    # Get exercise info
+    ex_result = await db.execute(
+        select(Exercise).where(Exercise.id == body.exercise_id)
+    )
+    exercise = ex_result.scalar_one_or_none()
+    exercise_type = exercise.category if exercise else "compound"
+
+    # Get recent completed sets for this exercise (last 5 sessions)
+    recent_sets_q = await db.execute(
+        select(ExerciseSet)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.status == "completed",
+            ExerciseSet.exercise_id == body.exercise_id,
+            ExerciseSet.completed_at.isnot(None),
+        )
+        .order_by(desc(ExerciseSet.completed_at))
+        .limit(20)
+    )
+    recent_sets = recent_sets_q.scalars().all()
+
+    # Conversion
+    kg_to_unit = 2.20462 if body.weight_unit == "lbs" else 1.0
+    unit_to_kg = 1 / kg_to_unit
+    weight_increment = 5.0 if body.weight_unit == "lbs" else 2.5
+
+    # Determine baseline (oldest of recent sets)
+    if recent_sets:
+        oldest = recent_sets[-1]
+        baseline_weight = (oldest.actual_weight_kg or 0) * kg_to_unit
+        baseline_reps = oldest.actual_reps or 0
+    else:
+        baseline_weight = body.current_weight
+        baseline_reps = body.current_reps
+
+    # Calculate rolling e1RM trend
+    e1rms = []
+    for s in recent_sets:
+        w = (s.actual_weight_kg or 0) * kg_to_unit
+        r = s.actual_reps or 0
+        if w > 0 and r > 0:
+            e1rms.append(epley_1rm(w, r))
+
+    rolling_trend = 0.0
+    if len(e1rms) >= 3:
+        # Average change between consecutive sessions
+        changes = [e1rms[i] - e1rms[i + 1] for i in range(min(len(e1rms) - 1, 4))]
+        rolling_trend = sum(changes) / len(changes) if changes else 0
+
+    result = calculate_overload(OverloadInput(
+        current_weight=body.current_weight,
+        current_reps=body.current_reps,
+        baseline_weight=baseline_weight,
+        baseline_reps=baseline_reps,
+        target_reps=body.target_reps,
+        exercise_type=exercise_type,
+        training_level="intermediate",  # TODO: get from user settings
+        rolling_e1rm_trend=rolling_trend,
+        weight_increment=weight_increment,
+    ))
+
+    return {
+        "next_weight": result.next_weight,
+        "next_reps": result.next_reps,
+        "strategy": result.strategy,
+        "confidence": result.confidence,
+        "explanation": result.explanation,
+        "estimated_1rm": round(result.estimated_1rm, 1),
+        "projected_1rm": round(result.projected_1rm, 1),
+    }
