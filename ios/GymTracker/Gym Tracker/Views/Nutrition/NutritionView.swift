@@ -650,7 +650,7 @@ struct NutritionView: View {
 
     private func lookupBarcode(_ barcode: String) async {
         do {
-            let results: [FoodSearchResult] = try await APIClient.shared.get("/nutrition/foods/barcode/\(barcode)")
+            let results: [FoodSearchResult] = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
             if let food = results.first {
                 // Auto-log it
                 let body = NutritionEntryBody(
@@ -984,7 +984,7 @@ struct AddFoodView: View {
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         searching = true
         do {
-            searchResults = try await APIClient.shared.get("/nutrition/foods/search",
+            searchResults = try await APIClient.shared.get("/nutrition/search",
                 query: [.init(name: "q", value: searchQuery)])
         } catch { print("[Food] Search: \(error)") }
         searching = false
@@ -1031,7 +1031,7 @@ struct AddFoodView: View {
                     let serving_label: String
                 }
                 let scale = 100.0 / qty
-                let _: [String: String] = try await APIClient.shared.post("/nutrition/foods", body: FoodCreate(
+                let _: FoodSearchResult = try await APIClient.shared.post("/nutrition/foods/community", body: FoodCreate(
                     name: manualName,
                     calories_per_100g: cal * scale,
                     protein_per_100g: pro * scale,
@@ -1060,7 +1060,7 @@ struct AddFoodView: View {
 
     private func lookupBarcode(_ barcode: String) async {
         do {
-            let results: [FoodSearchResult] = try await APIClient.shared.get("/nutrition/foods/barcode/\(barcode)")
+            let results: [FoodSearchResult] = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
             if let food = results.first {
                 await logFood(food)
             } else {

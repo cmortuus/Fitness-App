@@ -5,14 +5,23 @@ import Foundation
 struct Exercise: Codable, Identifiable {
     let id: Int
     let display_name: String?
-    let category: String?
-    let muscle_group: String?
-    let movement_type: String?
+    let movement_type: String?  // "compound" or "isolation"
+    let body_region: String?    // "upper", "lower", "full_body"
     let is_unilateral: Bool?
     let is_assisted: Bool?
     let equipment_type: String?
+    let primary_muscles: [String]?
+    let secondary_muscles: [String]?
 
     var name: String { display_name ?? "Exercise" }
+
+    /// Primary muscle group for display (e.g. "Chest", "Back")
+    var muscle_group: String? {
+        primary_muscles?.first?.replacingOccurrences(of: "_", with: " ").capitalized
+    }
+
+    /// Movement category: compound or isolation
+    var category: String? { movement_type }
 }
 
 // MARK: - Workout Plan
@@ -274,7 +283,7 @@ struct PhaseGoals: Codable {
 
 /// One row from GET /progress/ — one entry per session × exercise
 struct ProgressDataPoint: Codable, Identifiable {
-    var id: String { "\(exercise_id)_\(date)" }
+    var id: String { "\(exercise_id)_\(date)_\(estimated_1rm ?? 0)_\(volume_load ?? 0)" }
     let exercise_id: Int
     let exercise_name: String
     let date: String          // "YYYY-MM-DD"

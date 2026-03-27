@@ -434,22 +434,27 @@ struct ActiveWorkoutView: View {
                     .controlSize(.mini)
                 }
 
-                // Menu (history, swap, remove)
-                Menu {
-                    Button(action: { historyExercise = exercise }) {
-                        Label("History", systemImage: "clock.arrow.circlepath")
-                    }
-                    Button(action: { swapTarget = exercise; showAddExercise = true }) {
-                        Label("Swap Exercise", systemImage: "arrow.triangle.2.circlepath")
-                    }
-                    Button(role: .destructive, action: { removeExercise(exIdx) }) {
-                        Label("Remove Exercise", systemImage: "trash")
-                    }
-                } label: {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
+                // History, Swap, Remove buttons
+                Button(action: { historyExercise = exercise }) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption)
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                Button(action: { swapTarget = exercise; showAddExercise = true }) {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                Button(role: .destructive, action: { removeExercise(exIdx) }) {
+                    Image(systemName: "trash")
+                        .font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
             }
 
             // Notes
@@ -782,7 +787,7 @@ struct ActiveWorkoutView: View {
 
     private func recoveryPrompt(exerciseId: Int, muscleGroup: String) -> some View {
         VStack(spacing: 8) {
-            Text("How recovered is your \(muscleGroup)?")
+            Text("How recovered is your \(muscleGroup.isEmpty ? "muscles" : muscleGroup)?")
                 .font(.caption.bold())
             HStack(spacing: 12) {
                 ForEach(RecoveryRating.allCases, id: \.self) { rating in
@@ -910,18 +915,37 @@ struct ActiveWorkoutView: View {
 
     private func startWorkout() async {
         do {
-            // Check for existing in-progress session
-            let existingSessions: [WorkoutSession] = try await APIClient.shared.get(
-                "/sessions/", query: [.init(name: "limit", value: "5")]
+            // Clean up orphaned PLANNED sessions (from previous bugs / abandoned starts)
+            let recentSessions: [WorkoutSession] = try await APIClient.shared.get(
+                "/sessions/", query: [.init(name: "limit", value: "20")]
             )
-            let inProgress = existingSessions.first { $0.status == "in_progress" }
+            for orphan in recentSessions where orphan.status == "planned" && orphan.started_at == nil {
+                try? await APIClient.shared.delete("/sessions/\(orphan.id)")
+                print("[Workout] Cleaned up orphaned PLANNED session \(orphan.id)")
+            }
+
+            // Check for existing in-progress session
+            let activeSessions: [WorkoutSession] = try await APIClient.shared.get(
+                "/sessions/", query: [
+                    .init(name: "limit", value: "5"),
+                    .init(name: "status_filter", value: "in_progress"),
+                ]
+            )
+            let inProgress = activeSessions.first { $0.completed_at == nil }
+            print("[Workout] Active sessions: \(activeSessions.count), resuming: \(inProgress?.id ?? -1)")
 
             let response: WorkoutSession
             if let existing = inProgress {
                 response = try await APIClient.shared.get("/sessions/\(existing.id)")
+                let completedSets = (response.sets ?? []).filter { $0.completed_at != nil }.count
+                let totalSets = (response.sets ?? []).count
+                print("[Workout] Resuming session \(existing.id): \(completedSets)/\(totalSets) sets completed")
+                for s in (response.sets ?? []) {
+                    print("[Workout]   Set \(s.id): completed_at=\(s.completed_at ?? "nil"), actual_reps=\(s.actual_reps ?? -1)")
+                }
             } else if let pid = planId {
                 do {
-                    response = try await APIClient.shared.post(
+                    let created: WorkoutSession = try await APIClient.shared.post(
                         "/sessions/from-plan/\(pid)",
                         body: nil as String?,
                         queryItems: [
@@ -929,11 +953,14 @@ struct ActiveWorkoutView: View {
                             .init(name: "overload_style", value: "rep"),
                         ]
                     )
+                    // Transition from PLANNED → IN_PROGRESS (sets started_at)
+                    response = try await APIClient.shared.post("/sessions/\(created.id)/start")
                 } catch APIError.httpError(409, let body) {
                     if let data = body?.data(using: .utf8),
                        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                        let detail = json["detail"] as? [String: Any],
                        let sid = detail["session_id"] as? Int {
+                        // Existing session found — fetch it (it's already IN_PROGRESS per the 409 guard)
                         response = try await APIClient.shared.get("/sessions/\(sid)")
                     } else {
                         throw APIError.httpError(409, body)
@@ -1007,6 +1034,21 @@ struct ActiveWorkoutView: View {
                     },
                     note: notes[String(exId)]?["note"]
                 )
+            }
+
+            // Restore elapsed time from started_at if resuming
+            if let startedAt = response.started_at {
+                let df = ISO8601DateFormatter()
+                df.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+                if let startDate = df.date(from: startedAt) {
+                    elapsed = max(0, Int(Date().timeIntervalSince(startDate)))
+                } else {
+                    // Try without fractional seconds
+                    df.formatOptions = [.withInternetDateTime]
+                    if let startDate = df.date(from: startedAt) {
+                        elapsed = max(0, Int(Date().timeIntervalSince(startDate)))
+                    }
+                }
             }
 
             loading = false
@@ -1425,7 +1467,21 @@ struct ActiveWorkoutView: View {
     // MARK: - HealthKit
 
     private func writeWorkoutToHealthKit() {
-        // TODO: Direct HealthKit write (replaces Capacitor plugin)
-        // This will be implemented in the Settings + HealthKit phase
+        let bodyWeightKg = UserDefaults.standard.double(forKey: SettingsKey.lastBodyWeightKg)
+        let bw = bodyWeightKg > 0 ? bodyWeightKg : 70.0 // fallback
+        let workoutDuration = TimeInterval(elapsed)
+        let workoutStart = Date().addingTimeInterval(-workoutDuration)
+        let name = planName.isEmpty ? "Workout" : planName
+        let exs = exercises
+
+        Task {
+            await HealthKitManager.shared.writeWorkout(
+                name: name,
+                startDate: workoutStart,
+                duration: workoutDuration,
+                exercises: exs,
+                bodyWeightKg: bw
+            )
+        }
     }
 }

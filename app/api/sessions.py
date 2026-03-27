@@ -75,7 +75,8 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
 
 def serialize_session(workout_session: WorkoutSession) -> dict:
     """Serialize a WorkoutSession to a dictionary with sets."""
-    sets_data = [serialize_set(s) for s in workout_session.sets] if workout_session.sets else []
+    sorted_sets = sorted(workout_session.sets, key=lambda s: s.id) if workout_session.sets else []
+    sets_data = [serialize_set(s) for s in sorted_sets]
     return {
         "id": workout_session.id,
         "name": workout_session.name,
@@ -98,17 +99,19 @@ async def list_sessions(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 20,
     offset: int = 0,
+    status_filter: str | None = None,
 ) -> list[dict]:
-    """List workout sessions, most recent first."""
+    """List workout sessions, most recent first. Optional status_filter (e.g. 'in_progress')."""
     limit = min(limit, 500)
-    result = await db.execute(
+    stmt = (
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.user_id == user.id)
-        .order_by(desc(WorkoutSession.date))
-        .limit(limit)
-        .offset(offset)
     )
+    if status_filter:
+        stmt = stmt.where(WorkoutSession.status == status_filter)
+    stmt = stmt.order_by(desc(WorkoutSession.date), desc(WorkoutSession.id)).limit(limit).offset(offset)
+    result = await db.execute(stmt)
     sessions = result.scalars().all()
     return [serialize_session(s) for s in sessions]
 
@@ -603,6 +606,25 @@ async def create_session_from_plan(
                 "session_name": existing.name or "",
             },
         )
+
+    # Guard: reuse existing PLANNED session for the same plan + day instead of
+    # creating duplicates.  This prevents orphan pile-up when the client calls
+    # from-plan but crashes/navigates away before calling /start.
+    planned_result = await db.execute(
+        select(WorkoutSession).where(
+            WorkoutSession.workout_plan_id == plan_id,
+            WorkoutSession.name == f"{plan.name} - {day_name}",
+            WorkoutSession.status == WorkoutStatus.PLANNED,
+            WorkoutSession.started_at.is_(None),
+            WorkoutSession.user_id == user.id,
+        )
+        .order_by(desc(WorkoutSession.id))
+    )
+    existing_planned = planned_result.scalars().first()
+    if existing_planned:
+        # Return the existing PLANNED session so the client can /start it
+        existing_planned = await _get_session_with_sets(db, existing_planned.id, user_id=user.id)
+        return serialize_session(existing_planned)
 
     # ── Look up most recent prior session for the same plan + same day ────────
     # Require at least one set with actual_reps filled in — this is the real

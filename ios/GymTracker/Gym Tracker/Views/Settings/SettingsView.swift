@@ -423,6 +423,9 @@ struct SettingsView: View {
 
     // MARK: - Apple Health Section
 
+    @State private var importingWeight = false
+    @State private var importedWeight: String? = nil
+
     @ViewBuilder
     private var appleHealthSection: some View {
         if HKHealthStore.isHealthDataAvailable() {
@@ -436,12 +439,67 @@ struct SettingsView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+
+                    Button {
+                        Task { await importWeightFromHealth() }
+                    } label: {
+                        HStack {
+                            Label("Import Latest Weight", systemImage: "arrow.down.circle")
+                            Spacer()
+                            if importingWeight {
+                                ProgressView()
+                            } else if let msg = importedWeight {
+                                Text(msg)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                    .disabled(importingWeight)
                 } else {
                     Button("Connect Apple Health") {
                         requestHealthKitPermissions()
                     }
                 }
             }
+        }
+    }
+
+    private func importWeightFromHealth() async {
+        importingWeight = true
+        defer { importingWeight = false }
+
+        guard let kg = await HealthKitManager.shared.readLatestBodyWeight() else {
+            importedWeight = "No data found"
+            return
+        }
+
+        // Also read body fat % (BIA scales)
+        let bodyFat = await HealthKitManager.shared.readLatestBodyFatPercentage()
+
+        // Save to backend
+        struct AddBW: Encodable {
+            let weight_kg: Double
+            let body_fat_pct: Double?
+            let notes: String?
+        }
+
+        do {
+            let entry: BodyWeightEntry = try await APIClient.shared.post(
+                "/body-weight/",
+                body: AddBW(weight_kg: kg, body_fat_pct: bodyFat, notes: "Imported from Apple Health")
+            )
+            weighIns.insert(entry, at: 0)
+            UserDefaults.standard.set(kg, forKey: SettingsKey.lastBodyWeightKg)
+
+            let display = weightUnit == "lbs"
+                ? String(format: "%.1f lbs", kg * 2.20462)
+                : String(format: "%.1f kg", kg)
+            let bfStr = bodyFat.map { String(format: " (%.1f%% BF)", $0) } ?? ""
+            importedWeight = "✓ \(display)\(bfStr)"
+        } catch {
+            importedWeight = "Error saving"
+            print("[HealthKit] Import weight error: \(error)")
         }
     }
 
@@ -597,11 +655,8 @@ struct SettingsView: View {
         }
         loadingWeighIns = false
 
-        if HKHealthStore.isHealthDataAvailable() {
-            let status = healthStore.authorizationStatus(
-                for: HKObjectType.quantityType(forIdentifier: .bodyMass)!)
-            await MainActor.run { healthKitAuthorized = (status == .sharingAuthorized) }
-        }
+        HealthKitManager.shared.checkAuthorization()
+        healthKitAuthorized = HealthKitManager.shared.isAuthorized
     }
 
     private func saveWeighIn() async {
@@ -633,12 +688,7 @@ struct SettingsView: View {
 
             // Mirror to HealthKit
             if healthKitAuthorized {
-                let sample = HKQuantitySample(
-                    type: HKObjectType.quantityType(forIdentifier: .bodyMass)!,
-                    quantity: HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg),
-                    start: Date(), end: Date()
-                )
-                try? await healthStore.save(sample)
+                await HealthKitManager.shared.writeBodyWeight(kg: kg)
             }
         } catch {
             print("[Settings] Save weigh-in error: \(error)")
@@ -661,17 +711,9 @@ struct SettingsView: View {
     }
 
     private func requestHealthKitPermissions() {
-        let typesToWrite: Set<HKSampleType> = [
-            HKObjectType.workoutType(),
-            HKObjectType.quantityType(forIdentifier: .bodyMass)!,
-            HKObjectType.quantityType(forIdentifier: .dietaryEnergyConsumed)!,
-        ]
-        let typesToRead: Set<HKObjectType> = [
-            HKObjectType.quantityType(forIdentifier: .bodyMass)!,
-            HKObjectType.quantityType(forIdentifier: .stepCount)!,
-        ]
-        healthStore.requestAuthorization(toShare: typesToWrite, read: typesToRead) { success, _ in
-            DispatchQueue.main.async { healthKitAuthorized = success }
+        Task {
+            let success = await HealthKitManager.shared.requestAuthorization()
+            healthKitAuthorized = success
         }
     }
 }

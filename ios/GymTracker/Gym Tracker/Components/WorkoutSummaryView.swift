@@ -32,10 +32,13 @@ struct WorkoutSummaryView: View {
         }
     }
 
-    /// MET-based calorie estimate. MET ≈ 5.0 for moderate-intensity strength training.
+    /// Calorie estimate using per-exercise MET values from Compendium of Physical Activities.
     private var estimatedCalories: Int {
-        let hours = Double(duration) / 3600
-        let kcal = 5.0 * bodyWeightKg * hours
+        let kcal = HealthKitManager.shared.estimateCalories(
+            exercises: exercises,
+            durationSeconds: TimeInterval(duration),
+            bodyWeightKg: bodyWeightKg
+        )
         return max(1, Int(kcal.rounded()))
     }
 

@@ -1,5 +1,46 @@
 import SwiftUI
 
+// MARK: - Dashboard Widget Identifiers
+
+enum DashboardWidget: String, CaseIterable, Identifiable, Codable {
+    case stats      = "stats"
+    case calendar   = "calendar"
+    case insights   = "insights"
+    case nextWorkout = "nextWorkout"
+    case nutrition  = "nutrition"
+    case recent     = "recent"
+    case quickStart = "quickStart"
+    case quickLinks = "quickLinks"
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .stats:      return "Stats Strip"
+        case .calendar:   return "Week Calendar"
+        case .insights:   return "Insights"
+        case .nextWorkout: return "Next Workout"
+        case .nutrition:  return "Nutrition"
+        case .recent:     return "Recent Workouts"
+        case .quickStart: return "Quick Start"
+        case .quickLinks: return "Quick Links"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .stats:      return "chart.bar.fill"
+        case .calendar:   return "calendar"
+        case .insights:   return "lightbulb.fill"
+        case .nextWorkout: return "figure.strengthtraining.traditional"
+        case .nutrition:  return "fork.knife"
+        case .recent:     return "clock.arrow.circlepath"
+        case .quickStart: return "bolt.fill"
+        case .quickLinks: return "square.grid.2x2"
+        }
+    }
+}
+
 struct DashboardView: View {
     @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
 
@@ -13,6 +54,13 @@ struct DashboardView: View {
     @State private var nutritionSummary: DailySummary?
     @State private var nextDay = 1
     @State private var insights: [DashboardInsight] = []
+    @State private var activeSession: WorkoutSession? = nil
+    private var hasActiveSession: Bool { activeSession != nil }
+
+    // Widget ordering & visibility
+    @State private var widgetOrder: [DashboardWidget] = DashboardWidget.allCases
+    @State private var hiddenWidgets: Set<String> = []
+    @State private var isEditing = false
 
     struct DashboardInsight: Codable, Identifiable {
         var id: String { text }
@@ -42,74 +90,28 @@ struct DashboardView: View {
                     .padding(.top, 40)
                 } else {
                     VStack(spacing: 16) {
-                        // Greeting
+                        // Greeting is always first, not reorderable
                         greetingHeader
 
-                        // Quick stats strip
-                        statsStrip
-
-                        // 7-day mini calendar
-                        weekCalendar
-
-                        // Insights
-                        if !insights.isEmpty {
-                            insightsSection
+                        // Active workout resume banner
+                        if let session = activeSession {
+                            activeWorkoutBanner(session)
                         }
 
-                        // Next workout
-                        if let plan = plans.first {
-                            NextWorkoutCard(plan: plan, nextDay: nextDay, totalDays: plan.dayCount)
+                        if isEditing {
+                            editModeHeader
                         }
 
-                        // Today's nutrition snapshot
-                        if let nutrition = nutritionSummary {
-                            nutritionSnapshot(nutrition)
-                        }
-
-                        // Recent workouts
-                        if !recentSessions.isEmpty {
-                            recentWorkoutsSection
-                        }
-
-                        // Quick workout + Plans row
-                        HStack(spacing: 12) {
-                            NavigationLink {
-                                ActiveWorkoutView(
-                                    planId: nil,
-                                    planName: "Quick Workout",
-                                    dayNumber: 1
-                                )
-                            } label: {
-                                Label("Quick Workout", systemImage: "bolt.fill")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.borderedProminent)
-
-                            NavigationLink {
-                                PlansView()
-                            } label: {
-                                Label("Plans", systemImage: "list.bullet")
-                                    .frame(maxWidth: .infinity)
-                            }
-                            .buttonStyle(.bordered)
-                        }
-
-                        // Quick links
-                        HStack(spacing: 12) {
-                            NavigationLink {
-                                ProgressView_()
-                            } label: {
-                                quickLink(icon: "chart.line.uptrend.xyaxis", label: "Progress")
-                            }
-                            NavigationLink {
-                                WorkoutHistoryView()
-                            } label: {
-                                quickLink(icon: "clock.arrow.circlepath", label: "History")
-                            }
-                            NavigationLink {
-                                WorkoutCalendarView()
-                            } label: {
-                                quickLink(icon: "calendar", label: "Calendar")
+                        // Reorderable widgets
+                        ForEach(widgetOrder) { widget in
+                            if !hiddenWidgets.contains(widget.rawValue) {
+                                widgetView(for: widget)
+                                    .overlay(alignment: .topTrailing) {
+                                        if isEditing {
+                                            editOverlay(for: widget)
+                                        }
+                                    }
+                                    .opacity(isEditing ? Double(0.9) : Double(1.0))
                             }
                         }
                     }
@@ -117,8 +119,232 @@ struct DashboardView: View {
                 }
             }
             .navigationTitle("Training")
-            .task { await loadData() }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        withAnimation(.spring(duration: 0.3)) {
+                            if isEditing {
+                                saveWidgetConfig()
+                            }
+                            isEditing.toggle()
+                        }
+                    } label: {
+                        Image(systemName: isEditing ? "checkmark.circle.fill" : "square.grid.2x2")
+                            .foregroundStyle(isEditing ? .green : .blue)
+                    }
+                }
+            }
+            .onAppear {
+                loadWidgetConfig()
+                Task { await loadData() }
+            }
             .refreshable { await loadData() }
+        }
+    }
+
+    // MARK: - Edit Mode
+
+    private var editModeHeader: some View {
+        VStack(spacing: 8) {
+            Text("Customize Dashboard")
+                .font(.subheadline.bold())
+            Text("Tap arrows to reorder, tap eye to show/hide")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            // Show hidden widgets that can be re-enabled
+            if !hiddenWidgets.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Hidden").font(.caption2).foregroundStyle(.secondary)
+                    ForEach(DashboardWidget.allCases.filter { hiddenWidgets.contains($0.rawValue) }) { widget in
+                        Button {
+                            withAnimation { _ = hiddenWidgets.remove(widget.rawValue) }
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: widget.icon).font(.caption).frame(width: 20)
+                                Text(widget.displayName).font(.caption)
+                                Spacer()
+                                Image(systemName: "plus.circle.fill").foregroundStyle(.green)
+                            }
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .background(Color(.tertiarySystemGroupedBackground))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.blue.opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func editOverlay(for widget: DashboardWidget) -> some View {
+        HStack(spacing: 6) {
+            // Move up
+            Button {
+                moveWidget(widget, direction: -1)
+            } label: {
+                Image(systemName: "chevron.up.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+            }
+            .disabled(widgetOrder.first == widget)
+
+            // Move down
+            Button {
+                moveWidget(widget, direction: 1)
+            } label: {
+                Image(systemName: "chevron.down.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.blue)
+            }
+            .disabled(widgetOrder.last == widget)
+
+            // Hide
+            Button {
+                withAnimation { _ = hiddenWidgets.insert(widget.rawValue) }
+            } label: {
+                Image(systemName: "eye.slash.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+            }
+        }
+        .padding(6)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(4)
+    }
+
+    private func moveWidget(_ widget: DashboardWidget, direction: Int) {
+        guard let idx = widgetOrder.firstIndex(of: widget) else { return }
+        let newIdx = idx + direction
+        guard newIdx >= 0, newIdx < widgetOrder.count else { return }
+        withAnimation(.spring(duration: 0.25)) {
+            widgetOrder.swapAt(idx, newIdx)
+        }
+    }
+
+    // MARK: - Widget Dispatch
+
+    @ViewBuilder
+    private func widgetView(for widget: DashboardWidget) -> some View {
+        switch widget {
+        case .stats:
+            statsStrip
+        case .calendar:
+            weekCalendar
+        case .insights:
+            if !insights.isEmpty { insightsSection }
+        case .nextWorkout:
+            if let plan = plans.first {
+                NextWorkoutCard(plan: plan, nextDay: nextDay, totalDays: plan.dayCount, isResume: hasActiveSession)
+            }
+        case .nutrition:
+            if let nutrition = nutritionSummary {
+                nutritionSnapshot(nutrition)
+            }
+        case .recent:
+            if !recentSessions.isEmpty { recentWorkoutsSection }
+        case .quickStart:
+            quickStartButtons
+        case .quickLinks:
+            quickLinksRow
+        }
+    }
+
+    private var quickStartButtons: some View {
+        HStack(spacing: 12) {
+            NavigationLink {
+                ActiveWorkoutView(planId: nil, planName: "Quick Workout", dayNumber: 1)
+            } label: {
+                Label("Quick Workout", systemImage: "bolt.fill").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+
+            NavigationLink {
+                PlansView()
+            } label: {
+                Label("Plans", systemImage: "list.bullet").frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+    }
+
+    private var quickLinksRow: some View {
+        HStack(spacing: 12) {
+            NavigationLink { ProgressView_() } label: {
+                quickLink(icon: "chart.line.uptrend.xyaxis", label: "Progress")
+            }
+            NavigationLink { WorkoutHistoryView() } label: {
+                quickLink(icon: "clock.arrow.circlepath", label: "History")
+            }
+            NavigationLink { WorkoutCalendarView() } label: {
+                quickLink(icon: "calendar", label: "Calendar")
+            }
+        }
+    }
+
+    // MARK: - Active Workout Banner
+
+    private func activeWorkoutBanner(_ session: WorkoutSession) -> some View {
+        NavigationLink {
+            ActiveWorkoutView(
+                planId: session.workout_plan_id,
+                planName: session.name ?? "Workout",
+                dayNumber: session.day_number ?? 1
+            )
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "figure.strengthtraining.traditional")
+                    .font(.title2)
+                    .foregroundStyle(.white)
+                    .symbolEffect(.pulse)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Workout In Progress")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(.white)
+                    Text(session.name ?? "Tap to resume")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                }
+
+                Spacer()
+
+                Image(systemName: "arrow.right.circle.fill")
+                    .font(.title2)
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            .padding()
+            .background(
+                LinearGradient(colors: [.orange, .red],
+                               startPoint: .leading, endPoint: .trailing)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+    }
+
+    // MARK: - Widget Config Persistence
+
+    private func loadWidgetConfig() {
+        if let data = UserDefaults.standard.data(forKey: "dashboardWidgetOrder"),
+           let order = try? JSONDecoder().decode([DashboardWidget].self, from: data) {
+            widgetOrder = order
+        }
+        if let data = UserDefaults.standard.data(forKey: "dashboardHiddenWidgets"),
+           let hidden = try? JSONDecoder().decode(Set<String>.self, from: data) {
+            hiddenWidgets = hidden
+        }
+    }
+
+    private func saveWidgetConfig() {
+        if let data = try? JSONEncoder().encode(widgetOrder) {
+            UserDefaults.standard.set(data, forKey: "dashboardWidgetOrder")
+        }
+        if let data = try? JSONEncoder().encode(hiddenWidgets) {
+            UserDefaults.standard.set(data, forKey: "dashboardHiddenWidgets")
         }
     }
 
@@ -130,7 +356,7 @@ struct DashboardView: View {
         let icon: String
         switch hour {
         case 5..<12:
-            greeting = "Good morning"; icon = "sun.rise.fill"
+            greeting = "Good morning"; icon = "sunrise.fill"
         case 12..<17:
             greeting = "Good afternoon"; icon = "sun.max.fill"
         case 17..<21:
@@ -463,6 +689,9 @@ struct DashboardView: View {
             plans = try await p
             let allSessions = try await s
             recentSessions = allSessions.filter { $0.status == "completed" }
+            activeSession = allSessions.first { s in
+                s.status == "in_progress" || (s.started_at != nil && s.completed_at == nil)
+            }
             insights = (try? await ins) ?? []
 
             // Calculate next day number
@@ -480,6 +709,12 @@ struct DashboardView: View {
             latestBodyWeight = try await bw
             nutritionSummary = try? await ns
             loading = false
+        } catch is CancellationError {
+            // Task was cancelled (view disappeared or pull-to-refresh restarted) — ignore
+            return
+        } catch let error as NSError where error.code == -999 {
+            // URLSession cancelled — ignore
+            return
         } catch {
             self.error = error.localizedDescription
             print("[Dashboard] Load error: \(error)")
@@ -494,10 +729,11 @@ struct NextWorkoutCard: View {
     let plan: WorkoutPlan
     let nextDay: Int
     let totalDays: Int
+    var isResume: Bool = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Next Workout")
+            Text(isResume ? "Active Workout" : "Next Workout")
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Text(plan.name)
@@ -506,10 +742,14 @@ struct NextWorkoutCard: View {
                 .font(.caption)
                 .foregroundStyle(.blue)
 
-            NavigationLink("Start Workout") {
+            NavigationLink {
                 ActiveWorkoutView(planId: plan.id, planName: plan.name, dayNumber: nextDay)
+            } label: {
+                Label(isResume ? "Resume Workout" : "Start Workout",
+                      systemImage: isResume ? "arrow.counterclockwise" : "play.fill")
             }
             .buttonStyle(.borderedProminent)
+            .tint(isResume ? .orange : .blue)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
