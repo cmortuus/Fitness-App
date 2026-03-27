@@ -31,9 +31,9 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log()  { echo -e "${GREEN}[deploy]${NC} $*"; }
-warn() { echo -e "${YELLOW}[warn]${NC} $*"; }
-err()  { echo -e "${RED}[error]${NC} $*" >&2; }
+log()  { echo -e "${GREEN}[deploy $(date '+%Y-%m-%d %H:%M:%S')]${NC} $*"; }
+warn() { echo -e "${YELLOW}[warn $(date '+%H:%M:%S')]${NC} $*"; }
+err()  { echo -e "${RED}[error $(date '+%H:%M:%S')]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[info]${NC} $*"; }
 
 # ── Check if Docker is running ────────────────────────────────────────────────

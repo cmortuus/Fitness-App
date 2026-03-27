@@ -878,17 +878,17 @@
           onclick={async () => {
             // Set flag to suppress the "new version" banner after reload
             sessionStorage.setItem('gymtracker_force_updated', '1');
-            // Clear caches but DON'T unregister SW — that causes a re-registration
-            // cycle that triggers the update banner again (#263) and can lose auth (#269)
+            // Nuclear option: clear ALL caches AND unregister SW
             if ('caches' in window) {
               const keys = await caches.keys();
               await Promise.all(keys.map(k => caches.delete(k)));
             }
-            // Tell the SW to skip waiting if there's a new version queued
-            if (navigator.serviceWorker?.controller) {
-              navigator.serviceWorker.controller.postMessage({ type: 'SKIP_WAITING' });
+            if ('serviceWorker' in navigator) {
+              const regs = await navigator.serviceWorker.getRegistrations();
+              await Promise.all(regs.map(r => r.unregister()));
             }
-            window.location.reload();
+            // Hard reload — bypass any remaining cache
+            window.location.href = window.location.pathname + '?t=' + Date.now();
           }}
           class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-primary-600/20 text-primary-400 hover:bg-primary-600/30"
         >
