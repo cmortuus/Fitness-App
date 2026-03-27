@@ -186,7 +186,10 @@ docker_deploy() {
     git archive origin/dev | tar -x -C "$tmpdir"
     docker build -t fitness-app-dev "$tmpdir"
     rm -rf "$tmpdir"
-    docker compose up -d --no-build dev
+
+    # Stop old container, then recreate with the freshly built image
+    docker compose stop dev
+    docker compose up -d --no-build --force-recreate dev
     docker_health_check_async dev
     return
   elif [ "$target" = "main" ]; then
@@ -214,7 +217,7 @@ docker_deploy() {
     docker build -t fitness-app-dev "$tmpdir"
     rm -rf "$tmpdir"
 
-    docker compose up -d --no-build
+    docker compose up -d --no-build --force-recreate
   fi
 
   docker_health_check_async all
