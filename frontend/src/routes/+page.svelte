@@ -441,7 +441,7 @@
 
     <!-- Add widget panel -->
     {#if showAddPanel && hiddenWidgets.length > 0}
-      <div class="card border border-zinc-700">
+      <div class="card border border-zinc-700 add-widget-panel">
         <p class="text-xs text-zinc-500 mb-2">Add widgets</p>
         <div class="space-y-1">
           {#each hiddenWidgets as widget}
@@ -969,6 +969,9 @@
     pointer-events: auto !important;
   }
   :global(.edit-mode [class*="sticky"] a) {
+    pointer-events: auto !important;
+  }
+  :global(.edit-mode .add-widget-panel button) {
     pointer-events: auto !important;
   }
 </style>
