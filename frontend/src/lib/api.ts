@@ -578,7 +578,7 @@ export const MICRO_META: Record<string, { label: string; unit: string; rda: numb
 export interface FoodSearchResult {
   name: string;
   brand: string | null;
-  source: 'openfoodfacts' | 'usda' | 'custom';
+  source: 'openfoodfacts' | 'usda' | 'custom' | 'pending' | 'community' | 'calorieninjas';
   source_id: string | null;
   barcode: string | null;
   calories_per_100g: number | null;
@@ -593,6 +593,7 @@ export interface FoodSearchResult {
 export interface FoodItem extends FoodSearchResult {
   id: number;
   is_custom: boolean;
+  submission_count?: number;
 }
 
 export interface NutritionEntry {
