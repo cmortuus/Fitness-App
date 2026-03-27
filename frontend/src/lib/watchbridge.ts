@@ -1,27 +1,11 @@
 /**
- * Watch Bridge — sends workout state to Apple Watch via Capacitor native plugin.
- * No-op on web/PWA. Only active when running inside the iOS Capacitor shell.
+ * Watch Bridge stubs.
+ *
+ * The native SwiftUI app communicates with Apple Watch directly.
+ * These no-op exports keep existing imports working on web/PWA.
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
-
-interface WatchBridgePlugin {
-  sendWorkoutState(options: { state: string }): Promise<void>;
-  sendWorkoutEnded(): Promise<void>;
-}
-
-const WatchBridge = registerPlugin<WatchBridgePlugin>('WatchBridge');
-
-/** Check if we're running in native iOS */
-function isNative(): boolean {
-  return Capacitor.isNativePlatform();
-}
-
-/**
- * Send current workout state to the Watch.
- * Call this whenever the workout UI state changes (set completed, rest timer tick, etc.)
- */
-export async function sendWorkoutStateToWatch(state: {
+export async function sendWorkoutStateToWatch(_state: {
   sessionId: number;
   workoutName: string;
   exercises: Array<{
@@ -42,50 +26,13 @@ export async function sendWorkoutStateToWatch(state: {
   elapsed: number;
   restActive: boolean;
   restSecs: number;
-}): Promise<void> {
-  if (!isNative()) return;
-  try {
-    await WatchBridge.sendWorkoutState({ state: JSON.stringify(state) });
-  } catch (e) {
-    // Silently fail — Watch may not be connected
-  }
-}
+}): Promise<void> {}
 
-/** Notify Watch that workout has ended */
-export async function sendWorkoutEndedToWatch(): Promise<void> {
-  if (!isNative()) return;
-  try {
-    await WatchBridge.sendWorkoutEnded();
-  } catch {
-    // Silently fail
-  }
-}
+export async function sendWorkoutEndedToWatch(): Promise<void> {}
 
-/**
- * Listen for Watch actions (set complete, skip rest).
- * The native plugin dispatches CustomEvents on window.
- * Returns a cleanup function to remove listeners.
- */
-export function listenForWatchActions(handlers: {
+export function listenForWatchActions(_handlers: {
   onSetAction?: (exerciseId: number, setLocalId: string, action: 'complete' | 'skip') => void;
   onSkipRest?: () => void;
 }): () => void {
-  if (!isNative()) return () => {};
-
-  const handleSetAction = (e: Event) => {
-    const detail = (e as CustomEvent).detail;
-    handlers.onSetAction?.(detail.exerciseId, detail.setLocalId, detail.action);
-  };
-
-  const handleSkipRest = () => {
-    handlers.onSkipRest?.();
-  };
-
-  window.addEventListener('watchSetAction', handleSetAction);
-  window.addEventListener('watchSkipRest', handleSkipRest);
-
-  return () => {
-    window.removeEventListener('watchSetAction', handleSetAction);
-    window.removeEventListener('watchSkipRest', handleSkipRest);
-  };
+  return () => {};
 }

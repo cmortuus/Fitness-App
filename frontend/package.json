@@ -26,10 +26,6 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
-    "@capacitor/cli": "^8.3.0",
-    "@capacitor/core": "^8.3.0",
-    "@capacitor/ios": "^8.3.0",
-    "@capgo/capacitor-health": "^8.4.2",
     "@sveltejs/adapter-static": "^3.0.10",
     "@tanstack/svelte-query": "^5.17.0",
     "axios": "^1.6.0",
