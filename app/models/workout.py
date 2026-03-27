@@ -110,6 +110,9 @@ class WorkoutSession(Base):
     total_reps: Mapped[int] = mapped_column(Integer, default=0)
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # User notes
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Timestamps
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

@@ -8,7 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback,
+    saveExerciseFeedback, syncSessionToPlan, patchSession,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -128,8 +128,6 @@
     return groups;
   }
 
-  let exerciseGroups = $derived(computeGroups(uiExercises));
-
   // ─── State ────────────────────────────────────────────────────────────────
   let loading = $state(true);
   let error = $state<string | null>(null);
@@ -142,6 +140,8 @@
   let workoutName = $state('Workout');
   let allExercises = $state<Exercise[]>([]);
   let uiExercises = $state<UIExercise[]>([]);
+
+  let exerciseGroups = $derived(computeGroups(uiExercises));
   let exerciseNotes = $state<Record<number, string>>({});
   let editingNoteId = $state<number | null>(null);
   let editingNoteText = $state('');
@@ -149,7 +149,10 @@
   let focusedExerciseId = $state<number | null>(null);
   let finished = $state(false);
   let finishing = $state(false);
-  let summaryCardEl: HTMLDivElement;
+  let syncToPlan = $state(true);
+  let hasLinkedPlan = $state(false);
+  let syncCount = $state<number | null>(null);
+  let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
   let sharing = $state(false);
 
   async function shareWorkout() {
@@ -249,7 +252,7 @@
     return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
   }
 
-  async function submitRecovery(ex: UIExercise, rating: string) {
+  async function submitRecovery(ex: UIExercise, rating: 'poor' | 'ok' | 'good' | 'fresh') {
     const muscle = getMuscleGroup(ex.exerciseId);
     recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
@@ -267,7 +270,7 @@
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
   }
 
-  async function submitEffort(ex: UIExercise, rir: number, pump: string) {
+  async function submitEffort(ex: UIExercise, rir: number, pump: 'none' | 'mild' | 'good' | 'great') {
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
     const progression = $settings.progression;
 
@@ -575,6 +578,7 @@
       const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
+      hasLinkedPlan = true;
       currentSession.set(sess);
 
       const plan = await getPlan(planId);
@@ -702,6 +706,7 @@
       const sess = await getSession($currentSession!.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
+      hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
 
       // Restore elapsed time from when the session started.
@@ -1612,6 +1617,7 @@
         saving: false,
         oneRM: null, initWeight: null, initReps: null,
         setType: 'standard' as string,
+        partialReps: null,
         drops: [] as { weightLbs: number | null; reps: number | null }[],
       }));
       uiExercises = [...uiExercises, {
@@ -1635,6 +1641,25 @@
     finishing = true;
     try {
       await completeSession(sessionId);
+      // Persist any notes the user entered
+      const noteKey = `hgt_session_note_${sessionId}`;
+      const savedNote = localStorage.getItem(noteKey)?.trim();
+      if (savedNote) {
+        try {
+          await patchSession(sessionId, { notes: savedNote });
+          localStorage.removeItem(noteKey);
+        } catch (e) {
+          console.error('Failed to save session notes:', e);
+        }
+      }
+      if (syncToPlan) {
+        try {
+          const data = await syncSessionToPlan(sessionId);
+          syncCount = data.updated;
+        } catch (e) {
+          console.error('Failed to sync session to plan:', e);
+        }
+      }
     } catch (e) {
       console.error('Failed to complete session:', e);
     }
@@ -2034,6 +2059,13 @@
         </div>
       {/if}
 
+      <!-- Sync result -->
+      {#if syncCount !== null}
+        <div class="mb-4 flex items-center gap-2 text-sm text-green-400 bg-green-900/20 border border-green-700/40 rounded-lg px-3 py-2">
+          <span>✓ {syncCount} exercise{syncCount !== 1 ? 's' : ''} updated in plan</span>
+        </div>
+      {/if}
+
       <!-- Exercise summary -->
       <div class="space-y-1 mb-6 max-h-48 overflow-y-auto">
         {#each uiExercises as ex}
@@ -2408,14 +2440,14 @@
                           {#if set.saving}
                             <span class="text-zinc-400 text-xs">…</span>
                           {:else if sideDone}
-                            <button onclick={() => undoSide(ex.uiId, set.localId, side)}
+                            <button onclick={() => undoSide(ex.uiId, set.localId, side as 'left' | 'right')}
                                     title="Undo — mark as incomplete"
                                     class="h-10 w-10 rounded-xl bg-green-700/30 text-green-400 font-bold text-lg">✓</button>
                           {:else if set.skipped}
                             <button onclick={() => unskipSet(ex.uiId, set.localId)}
                                     class="h-10 px-2 rounded-xl bg-amber-600/20 text-amber-400 text-xs font-semibold">Undo</button>
                           {:else}
-                            <button onclick={() => completeSide(ex.uiId, set.localId, side)}
+                            <button onclick={() => completeSide(ex.uiId, set.localId, side as 'left' | 'right')}
                                     disabled={(sideReps ?? 0) <= 0}
                                     title="Log this set"
                                     class="h-10 w-10 rounded-xl bg-primary-600 hover:bg-primary-500 text-white font-bold transition-colors disabled:opacity-30">✓</button>
@@ -2692,7 +2724,7 @@
               <div class="flex gap-2">
                 {#each [['😩', 'poor', 'Poor'], ['😐', 'ok', 'OK'], ['💪', 'good', 'Good'], ['🔥', 'fresh', 'Fresh']] as [emoji, value, label]}
                   <button
-                    onclick={() => submitRecovery(ex, value)}
+                    onclick={() => submitRecovery(ex, value as 'poor' | 'ok' | 'good' | 'fresh')}
                     class="flex-1 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-xs text-center transition-colors">
                     <span class="text-base">{emoji}</span><br/>{label}
                   </button>
@@ -2736,7 +2768,7 @@
               {#if feedbackData[ex.exerciseId]?.rir != null && feedbackData[ex.exerciseId]?.pump_rating}
                 <div class="flex gap-2">
                   <button
-                    onclick={() => submitEffort(ex, feedbackData[ex.exerciseId]!.rir!, feedbackData[ex.exerciseId]!.pump_rating!)}
+                    onclick={() => submitEffort(ex, feedbackData[ex.exerciseId]!.rir!, feedbackData[ex.exerciseId]!.pump_rating! as 'none' | 'mild' | 'good' | 'great')}
                     class="flex-1 btn-primary text-sm !py-2">Submit</button>
                   <button onclick={() => dismissEffort(ex)}
                           class="px-3 py-2 text-sm text-zinc-500 hover:text-zinc-300 transition-colors">Skip</button>
@@ -2796,12 +2828,20 @@
               {incompleteSets} set{incompleteSets !== 1 ? 's' : ''} remaining
             </button>
           {:else}
-            <button onclick={doFinish} disabled={finishing}
-                    class="flex-1 py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
-                           text-white font-bold text-lg rounded-2xl transition-colors
-                           disabled:opacity-50 shadow-sm">
-              {finishing ? 'Saving…' : '✓ Finish Workout'}
-            </button>
+            <div class="flex-1 flex flex-col gap-2">
+              {#if hasLinkedPlan}
+                <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
+                  <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
+                  Update plan with today's weights & reps
+                </label>
+              {/if}
+              <button onclick={doFinish} disabled={finishing}
+                      class="w-full py-4 bg-green-600 hover:bg-green-500 active:bg-green-700
+                             text-white font-bold text-lg rounded-2xl transition-colors
+                             disabled:opacity-50 shadow-sm">
+                {finishing ? 'Saving…' : '✓ Finish Workout'}
+              </button>
+            </div>
           {/if}
         </div>
 

@@ -144,7 +144,7 @@
     let totalSecs = 0;
     for (const ex of day.exercises) {
       const exercise = allExercises.find(e => e.id === ex.exercise_id);
-      const isCompound = exercise?.movement_type === 'compound' || exercise?.movement_type === 'squat' || exercise?.movement_type === 'hinge';
+      const isCompound = exercise?.movement_type === 'compound';
       const isUpper = exercise?.body_region === 'upper';
       // Pick rest duration based on exercise type
       let restSec: number;
@@ -377,7 +377,7 @@
             <h4 class="text-sm font-semibold text-primary-400">{day.day_name}</h4>
             {#each day.exercises as ex}
               <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
-                <span class="text-zinc-300 truncate">{getExerciseName(ex.exercise_id)}</span>
+                <span class="text-zinc-300 truncate">{ex.exercise_name || getExerciseName(ex.exercise_id)}</span>
                 <span class="text-xs text-zinc-500 shrink-0 ml-2">{ex.sets} sets</span>
               </div>
             {/each}

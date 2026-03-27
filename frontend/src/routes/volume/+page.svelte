@@ -74,8 +74,8 @@
 
   <!-- Time range -->
   <div class="flex gap-2">
-    {#each [[7, '7d'], [14, '14d'], [21, '3wk']] as [val, label]}
-      <button onclick={() => { days = val; loadData(); }}
+    {#each [[7, '7d'], [14, '14d'], [21, '3wk']] as [val, label] (val)}
+      <button onclick={() => { days = val as number; loadData(); }}
               class="px-3 py-1 text-sm rounded-lg {days === val ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}">
         {label}
       </button>

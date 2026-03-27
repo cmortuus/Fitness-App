@@ -11,7 +11,7 @@
 
   interface Session {
     id: number;
-    name: string;
+    name: string | null;
     date: string;
     status: string;
     total_sets: number;
@@ -98,7 +98,8 @@
   }
 
   // Guess muscle group from session name
-  function guessColor(name: string): string {
+  function guessColor(name: string | null): string {
+    if (!name) return '#6366f1';
     const lower = (name ?? '').toLowerCase();
     for (const [key, color] of Object.entries(MUSCLE_COLORS)) {
       if (lower.includes(key)) return color;
@@ -189,9 +190,9 @@
         <div class="flex flex-col items-center gap-1">
           <span class="text-sm font-semibold text-zinc-200">{monthLabel}</span>
           <div class="flex rounded-lg overflow-hidden border border-zinc-700">
-            <button class="px-2.5 py-0.5 text-xs {viewMode === 'week' ? 'bg-zinc-800 text-zinc-400' : 'bg-primary-600 text-white'}"
+            <button class="px-2.5 py-0.5 text-xs bg-primary-600 text-white"
                     onclick={() => viewMode = 'month'}>Month</button>
-            <button class="px-2.5 py-0.5 text-xs {viewMode === 'week' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
+            <button class="px-2.5 py-0.5 text-xs bg-zinc-800 text-zinc-400"
                     onclick={() => viewMode = 'week'}>Week</button>
           </div>
         </div>
@@ -203,9 +204,9 @@
         <div class="flex flex-col items-center gap-1">
           <span class="text-sm font-semibold text-zinc-200">This Week</span>
           <div class="flex rounded-lg overflow-hidden border border-zinc-700">
-            <button class="px-2.5 py-0.5 text-xs {viewMode === 'week' ? 'bg-zinc-800 text-zinc-400' : 'bg-primary-600 text-white'}"
+            <button class="px-2.5 py-0.5 text-xs bg-zinc-800 text-zinc-400"
                     onclick={() => viewMode = 'month'}>Month</button>
-            <button class="px-2.5 py-0.5 text-xs {viewMode === 'week' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
+            <button class="px-2.5 py-0.5 text-xs bg-primary-600 text-white"
                     onclick={() => viewMode = 'week'}>Week</button>
           </div>
         </div>
