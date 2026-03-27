@@ -878,7 +878,7 @@ struct AddFoodView: View {
                     Image(systemName: "bookmark.slash").font(.system(size: 40)).foregroundStyle(.tertiary)
                     Text("No saved foods yet")
                         .font(.subheadline).foregroundStyle(.secondary)
-                    Text("Log a food manually and toggle\n"Save to My Foods" to save it here.")
+                    Text("Log a food manually and toggle\n\"Save to My Foods\" to save it here.")
                         .font(.caption).foregroundStyle(.tertiary)
                         .multilineTextAlignment(.center)
                 }

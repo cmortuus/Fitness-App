@@ -68,7 +68,7 @@ struct PlansView: View {
             Button("Delete", role: .destructive) { Task { await deletePlan(plan) } }
             Button("Cancel", role: .cancel) {}
         } message: { plan in
-            Text(""\(plan.name)" will be permanently deleted. This cannot be undone.")
+            Text("\"\(plan.name)\" will be permanently deleted. This cannot be undone.")
         }
         .safeAreaInset(edge: .bottom) {
             if let msg = actionMessage {
@@ -235,7 +235,7 @@ struct PlansView: View {
         do {
             let _: WorkoutPlan = try await APIClient.shared.post("/plans/\(plan.id)/archive")
             await loadPlans()
-            showMessage(""\(plan.name)" archived")
+            showMessage("\"\(plan.name)\" archived")
         } catch {}
     }
 

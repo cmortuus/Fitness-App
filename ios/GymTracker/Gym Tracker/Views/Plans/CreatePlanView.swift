@@ -2,7 +2,7 @@ import SwiftUI
 
 // MARK: - Local models for plan creation
 
-private struct PlanExercise: Identifiable {
+private struct CreatePlanExercise: Identifiable {
     let id = UUID()
     let exercise: Exercise
     var sets: Int = 3
@@ -11,11 +11,11 @@ private struct PlanExercise: Identifiable {
     var startingWeightKg: Double? = nil
 }
 
-private struct PlanDay: Identifiable {
+private struct CreatePlanDay: Identifiable {
     let id = UUID()
     var dayNumber: Int
     var dayName: String
-    var exercises: [PlanExercise] = []
+    var exercises: [CreatePlanExercise] = []
 }
 
 // MARK: - Create Plan View
@@ -36,7 +36,7 @@ struct CreatePlanView: View {
     @State private var durationWeeks = 4
 
     // Days
-    @State private var days: [PlanDay] = []
+    @State private var days: [CreatePlanDay] = []
 
     // Exercise picker
     @State private var allExercises: [Exercise] = []
@@ -204,7 +204,7 @@ struct CreatePlanView: View {
     }
 
     @ViewBuilder
-    private func exerciseRow(day: PlanDay, ex: Binding<PlanExercise>) -> some View {
+    private func exerciseRow(day: CreatePlanDay, ex: Binding<CreatePlanExercise>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(ex.wrappedValue.exercise.display_name ?? "Exercise")
                 .font(.subheadline.bold())
@@ -303,7 +303,7 @@ struct CreatePlanView: View {
         if days.count != numDays {
             let defaultNames = ["Push", "Pull", "Legs", "Upper", "Lower", "Full Body", "Accessory"]
             days = (1...numDays).map { i in
-                PlanDay(
+                CreatePlanDay(
                     dayNumber: i,
                     dayName: i <= defaultNames.count ? defaultNames[i - 1] : "Day \(i)"
                 )
@@ -314,7 +314,7 @@ struct CreatePlanView: View {
 
     private func addExercise(_ exercise: Exercise, sets: Int, toDayNumber dayNumber: Int) {
         guard let idx = days.firstIndex(where: { $0.dayNumber == dayNumber }) else { return }
-        days[idx].exercises.append(PlanExercise(exercise: exercise, sets: sets))
+        days[idx].exercises.append(CreatePlanExercise(exercise: exercise, sets: sets))
     }
 
     private func savePlan(isDraft: Bool) async {

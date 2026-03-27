@@ -275,14 +275,14 @@ struct DashboardView: View {
                 // Progress bars toward goals
                 VStack(spacing: 6) {
                     macroPill(label: "Calories", value: summary.totals.calories,
-                              goal: goals.calories, unit: "kcal", color: .orange)
+                              goal: goals.calories ?? 0, unit: "kcal", color: .orange)
                     HStack(spacing: 8) {
                         macroPill(label: "Protein", value: summary.totals.protein,
-                                  goal: goals.protein, unit: "g", color: .blue)
+                                  goal: goals.protein ?? 0, unit: "g", color: .blue)
                         macroPill(label: "Carbs", value: summary.totals.carbs,
-                                  goal: goals.carbs, unit: "g", color: .green)
+                                  goal: goals.carbs ?? 0, unit: "g", color: .green)
                         macroPill(label: "Fat", value: summary.totals.fat,
-                                  goal: goals.fat, unit: "g", color: .yellow)
+                                  goal: goals.fat ?? 0, unit: "g", color: .yellow)
                     }
                 }
             } else {

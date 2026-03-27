@@ -219,7 +219,7 @@ struct TemplatesView: View {
         struct CloneResponse: Decodable { let id: Int; let name: String }
         do {
             let _: CloneResponse = try await APIClient.shared.post("/templates/\(tmpl.id)/clone")
-            showToast(""\(tmpl.name)" added to your plans!")
+            showToast("\"\(tmpl.name)\" added to your plans!")
         } catch {
             showToast("Failed to clone template")
         }

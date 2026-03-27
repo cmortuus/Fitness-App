@@ -1,5 +1,12 @@
 import SwiftUI
 
+private struct PctRow: Identifiable {
+    let id: Int
+    let pct: Int
+    let weight: Int
+    let reps: Int
+}
+
 struct CalculatorView: View {
     @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
     @Environment(\.dismiss) private var dismiss
@@ -40,7 +47,8 @@ struct CalculatorView: View {
         return Int((Double(results.map(\.value).reduce(0, +)) / Double(results.count)).rounded())
     }
 
-    private let percentages = [100, 95, 90, 85, 80, 75, 70, 65, 60, 55, 50]
+    private let pctValues = [100, 95, 90, 85, 80, 75, 70, 65, 60, 55, 50]
+
 
     var body: some View {
         NavigationStack {
@@ -98,44 +106,7 @@ struct CalculatorView: View {
                     }
 
                     // ── Percentage table ───────────────────────────────────
-                    Section("% of Max (Epley)") {
-                        HStack {
-                            Text("%").frame(width: 40, alignment: .leading)
-                                .font(.caption.bold()).foregroundStyle(.secondary)
-                            Spacer()
-                            Text("Weight").frame(width: 80, alignment: .trailing)
-                                .font(.caption.bold()).foregroundStyle(.secondary)
-                            Text("~Reps").frame(width: 60, alignment: .trailing)
-                                .font(.caption.bold()).foregroundStyle(.secondary)
-                        }
-                        .listRowBackground(Color.clear)
-
-                        ForEach(percentages, id: \.self) { pct in
-                            let pctWeight = Int((Double(avg) * Double(pct) / 100).rounded())
-                            // Estimated reps from Epley: reps = 30 * (1RM/w - 1)
-                            let estReps: Int = pct == 100 ? 1 : {
-                                let ratio = Double(avg) / Double(pctWeight)
-                                let r = max(1, Int((30 * (ratio - 1)).rounded()))
-                                return min(r, 30)
-                            }()
-
-                            HStack {
-                                Text("\(pct)%")
-                                    .frame(width: 40, alignment: .leading)
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                                Spacer()
-                                Text("\(pctWeight) \(weightUnit)")
-                                    .frame(width: 80, alignment: .trailing)
-                                    .font(.body.monospacedDigit())
-                                    .foregroundStyle(pct == 100 ? .primary : pct >= 85 ? .orange : .primary)
-                                Text("~\(estReps)")
-                                    .frame(width: 60, alignment: .trailing)
-                                    .font(.caption.monospacedDigit())
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
+                    percentageTable(avg: avg)
                 } else if weightInput.isEmpty && repsInput.isEmpty {
                     Section {
                         VStack(spacing: 10) {
@@ -168,6 +139,64 @@ struct CalculatorView: View {
                     .disabled(weightInput.isEmpty && repsInput.isEmpty)
                 }
             }
+        }
+    }
+
+    private func percentageTable(avg: Int) -> some View {
+        PercentageTableSection(avg: avg, weightUnit: weightUnit, pctValues: pctValues)
+    }
+
+}
+
+// MARK: - Percentage Table (separate struct to help Swift type checker)
+
+struct PercentageTableSection: View {
+    let avg: Int
+    let weightUnit: String
+    let pctValues: [Int]
+
+    var body: some View {
+        let avgD = Double(avg)
+        Section("% of Max (Epley)") {
+            HStack {
+                Text("%").frame(width: 40, alignment: .leading)
+                    .font(.caption.bold()).foregroundStyle(.secondary)
+                Spacer()
+                Text("Weight").frame(width: 80, alignment: .trailing)
+                    .font(.caption.bold()).foregroundStyle(.secondary)
+                Text("~Reps").frame(width: 60, alignment: .trailing)
+                    .font(.caption.bold()).foregroundStyle(.secondary)
+            }
+            .listRowBackground(Color.clear)
+
+            ForEach(rows(avgD: avgD)) { row in
+                HStack {
+                    Text("\(row.pct)%")
+                        .frame(width: 40, alignment: .leading)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(row.weight) \(weightUnit)")
+                        .frame(width: 80, alignment: .trailing)
+                        .font(.body.monospacedDigit())
+                        .foregroundStyle(row.pct >= 85 ? Color.orange : Color.primary)
+                    Text("~\(row.reps)")
+                        .frame(width: 60, alignment: .trailing)
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    private func rows(avgD: Double) -> [PctRow] {
+        pctValues.enumerated().map { (i, pct) in
+            let w = Int((avgD * Double(pct) / 100.0).rounded())
+            let r: Int = pct == 100 ? 1 : {
+                let ratio = avgD / Double(w)
+                return min(max(1, Int((30.0 * (ratio - 1.0)).rounded())), 30)
+            }()
+            return PctRow(id: i, pct: pct, weight: w, reps: r)
         }
     }
 }
