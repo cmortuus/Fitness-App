@@ -69,5 +69,8 @@ recordings/
 # Claude
 .claude/
 
+# Food data dumps (large downloads)
+data/food_dumps/
+
 # Backup files
 *.bak
