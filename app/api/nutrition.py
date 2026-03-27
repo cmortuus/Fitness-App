@@ -20,8 +20,8 @@ router = APIRouter()
 
 # ── Serializers ───────────────────────────────────────────────────────────────
 
-def serialize_food_item(item: FoodItem) -> dict:
-    return {
+def serialize_food_item(item: FoodItem, submission_count: int | None = None) -> dict:
+    d = {
         "id": item.id,
         "name": item.name,
         "brand": item.brand,
@@ -37,6 +37,9 @@ def serialize_food_item(item: FoodItem) -> dict:
         "is_custom": item.is_custom,
         "micronutrients": json.loads(item.micronutrients) if item.micronutrients else None,
     }
+    if submission_count is not None:
+        d["submission_count"] = submission_count
+    return d
 
 
 def serialize_entry(entry: NutritionEntry) -> dict:
@@ -101,7 +104,13 @@ async def barcode_lookup(
     )
     local_food = local_result.scalar_one_or_none()
     if local_food:
-        return serialize_food_item(local_food)
+        sc = None
+        if local_food.source == "pending":
+            cr = await db.execute(
+                select(func.count()).select_from(FoodSubmission).where(FoodSubmission.food_item_id == local_food.id)
+            )
+            sc = cr.scalar_one()
+        return serialize_food_item(local_food, submission_count=sc)
 
     # Fall back to external APIs
     result = await lookup_barcode(code)
@@ -119,12 +128,32 @@ async def list_foods(
     q: str = "",
     limit: int = 50,
 ) -> list[dict]:
-    """List saved foods, optionally filtered by name substring."""
-    stmt = select(FoodItem).where(FoodItem.user_id == user.id).order_by(desc(FoodItem.created_at)).limit(limit)
+    """List saved foods — includes custom foods and pending community submissions by this user."""
+    own_ids = select(FoodItem.id).where(FoodItem.user_id == user.id)
+    submitted_ids = select(FoodSubmission.food_item_id).where(FoodSubmission.user_id == user.id)
+    stmt = (
+        select(FoodItem)
+        .where(FoodItem.id.in_(own_ids.union(submitted_ids)))
+        .order_by(desc(FoodItem.created_at))
+        .limit(limit)
+    )
     if q.strip():
         stmt = stmt.where(FoodItem.name.ilike(f"%{q.strip()}%"))
     result = await db.execute(stmt)
-    return [serialize_food_item(f) for f in result.scalars().all()]
+    foods = result.scalars().all()
+
+    # Enrich pending foods with submission counts
+    pending_ids = [f.id for f in foods if f.source == "pending"]
+    counts: dict[int, int] = {}
+    if pending_ids:
+        count_result = await db.execute(
+            select(FoodSubmission.food_item_id, func.count())
+            .where(FoodSubmission.food_item_id.in_(pending_ids))
+            .group_by(FoodSubmission.food_item_id)
+        )
+        counts = dict(count_result.all())
+
+    return [serialize_food_item(f, submission_count=counts.get(f.id)) for f in foods]
 
 
 @router.post("/foods", status_code=status.HTTP_201_CREATED)
@@ -259,7 +288,7 @@ async def create_community_food(
 
     await db.flush()
     await db.refresh(pending)
-    return serialize_food_item(pending)
+    return serialize_food_item(pending, submission_count=submission_count)
 
 
 @router.delete("/foods/{food_id}", status_code=status.HTTP_204_NO_CONTENT)
