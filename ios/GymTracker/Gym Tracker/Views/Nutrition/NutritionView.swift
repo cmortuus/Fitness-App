@@ -566,6 +566,7 @@ private struct NutritionEntryBody: Encodable {
 }
 
 struct FoodSearchResult: Codable {
+    let id: Int?
     let name: String
     let brand: String?
     let calories_per_100g: Double?
@@ -581,13 +582,20 @@ struct AddFoodView: View {
     let onSave: () -> Void
     @Environment(\.dismiss) var dismiss
 
+    enum Tab { case search, saved, manual }
+    @State private var activeTab: Tab = .search
+
     @State private var searchQuery = ""
     @State private var searchResults: [FoodSearchResult] = []
     @State private var searching = false
-    @State private var showManual = false
     @State private var showScanner = false
     @State private var showLabelScanner = false
     @State private var pendingBarcode: String? = nil
+
+    // Saved/custom foods
+    @State private var savedFoods: [FoodSearchResult] = []
+    @State private var savedQuery = ""
+    @State private var loadingSaved = false
 
     // Manual entry
     @State private var manualName = ""
@@ -596,82 +604,35 @@ struct AddFoodView: View {
     @State private var manualCarbs = ""
     @State private var manualFat = ""
     @State private var manualQty = "100"
-    @State private var saveAsCustom = false
+    @State private var saveAsCustom = true
     @State private var saving = false
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // Search bar
-                HStack(spacing: 8) {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                    TextField("Search foods...", text: $searchQuery)
-                        .textFieldStyle(.plain)
-                        .onSubmit { Task { await search() } }
-                    if !searchQuery.isEmpty {
-                        Button { searchQuery = ""; searchResults = [] } label: {
-                            Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
-                        }
-                    }
-                    Button { showScanner = true } label: {
-                        Image(systemName: "barcode.viewfinder")
-                            .font(.title3)
+                // Tab segmented control
+                Picker("Tab", selection: $activeTab) {
+                    Text("Search").tag(Tab.search)
+                    Text("My Foods").tag(Tab.saved)
+                    Text("Manual").tag(Tab.manual)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .onChange(of: activeTab) { _, tab in
+                    if tab == .saved && savedFoods.isEmpty {
+                        Task { await loadSavedFoods() }
                     }
                 }
-                .padding(12)
-                .background(Color(.tertiarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
-                .padding()
 
-                if showManual {
+                switch activeTab {
+                case .search:
+                    searchTab
+                case .saved:
+                    savedTab
+                case .manual:
                     manualEntryForm
-                } else if searching {
-                    ProgressView().padding(.top, 40)
-                    Spacer()
-                } else if searchResults.isEmpty && !searchQuery.isEmpty {
-                    VStack(spacing: 8) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.largeTitle)
-                            .foregroundStyle(.tertiary)
-                        Text("No results found")
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 60)
-                    Spacer()
-                } else if searchResults.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "text.magnifyingglass")
-                            .font(.system(size: 40))
-                            .foregroundStyle(.tertiary)
-                        Text("Search for a food or scan a barcode")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 60)
-                    Spacer()
-                } else {
-                    List(searchResults, id: \.name) { food in
-                        Button { Task { await logFood(food) } } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(food.name)
-                                        .font(.subheadline)
-                                        .foregroundStyle(.primary)
-                                    if let brand = food.brand, !brand.isEmpty {
-                                        Text(brand)
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Text("\(Int(food.calories_per_100g ?? 0)) cal")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                    }
-                    .listStyle(.plain)
                 }
             }
             .navigationTitle("Add Food")
@@ -682,15 +643,17 @@ struct AddFoodView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    if showManual {
+                    if activeTab == .manual {
                         Button {
                             Task { await saveManual() }
                         } label: {
                             if saving { ProgressView() } else { Text("Save") }
                         }
                         .disabled(saving || manualName.isEmpty)
-                    } else {
-                        Button("Manual") { showManual = true }
+                    } else if activeTab == .search {
+                        Button { showScanner = true } label: {
+                            Image(systemName: "barcode.viewfinder")
+                        }
                     }
                 }
             }
@@ -708,9 +671,136 @@ struct AddFoodView: View {
                     manualProtein = scanned.protein > 0 ? "\(Int(scanned.protein))" : ""
                     manualCarbs = scanned.carbs > 0 ? "\(Int(scanned.carbs))" : ""
                     manualFat = scanned.fat > 0 ? "\(Int(scanned.fat))" : ""
-                    showManual = true
+                    activeTab = .manual
                 }
             }
+        }
+    }
+
+    // MARK: - Search Tab
+
+    private var searchTab: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search foods...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .onSubmit { Task { await search() } }
+                if !searchQuery.isEmpty {
+                    Button { searchQuery = ""; searchResults = [] } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(.tertiarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding([.horizontal, .bottom])
+
+            if searching {
+                ProgressView().padding(.top, 40)
+                Spacer()
+            } else if searchResults.isEmpty && !searchQuery.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.largeTitle).foregroundStyle(.tertiary)
+                    Text("No results found").foregroundStyle(.secondary)
+                }
+                .padding(.top, 60)
+                Spacer()
+            } else if searchResults.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "text.magnifyingglass").font(.system(size: 40)).foregroundStyle(.tertiary)
+                    Text("Search for a food or scan a barcode").font(.subheadline).foregroundStyle(.secondary)
+                }
+                .padding(.top, 60)
+                Spacer()
+            } else {
+                foodList(searchResults)
+            }
+        }
+    }
+
+    // MARK: - Saved Tab
+
+    private var savedTab: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Filter saved foods...", text: $savedQuery)
+                    .textFieldStyle(.plain)
+                    .onChange(of: savedQuery) { _, _ in
+                        Task { await loadSavedFoods() }
+                    }
+                if !savedQuery.isEmpty {
+                    Button { savedQuery = ""; Task { await loadSavedFoods() } } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(12)
+            .background(Color(.tertiarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .padding([.horizontal, .bottom])
+
+            if loadingSaved {
+                ProgressView().padding(.top, 40)
+                Spacer()
+            } else if savedFoods.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "bookmark.slash").font(.system(size: 40)).foregroundStyle(.tertiary)
+                    Text("No saved foods yet")
+                        .font(.subheadline).foregroundStyle(.secondary)
+                    Text("Log a food manually and toggle\n"Save to My Foods" to save it here.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                        .multilineTextAlignment(.center)
+                }
+                .padding(.top, 60)
+                Spacer()
+            } else {
+                List {
+                    ForEach(savedFoods, id: \.name) { food in
+                        Button { Task { await logFood(food) } } label: {
+                            foodRow(food)
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            if let foodId = food.id {
+                                Button(role: .destructive) {
+                                    Task { await deleteCustomFood(id: foodId) }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
+                            }
+                        }
+                    }
+                }
+                .listStyle(.plain)
+            }
+        }
+    }
+
+    private func foodList(_ foods: [FoodSearchResult]) -> some View {
+        List(foods, id: \.name) { food in
+            Button { Task { await logFood(food) } } label: {
+                foodRow(food)
+            }
+        }
+        .listStyle(.plain)
+    }
+
+    private func foodRow(_ food: FoodSearchResult) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(food.name)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+                if let brand = food.brand, !brand.isEmpty {
+                    Text(brand).font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            Text("\(Int(food.calories_per_100g ?? 0)) cal/100g")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -853,6 +943,26 @@ struct AddFoodView: View {
             pendingBarcode = barcode
             showLabelScanner = true
         }
+    }
+
+    private func loadSavedFoods() async {
+        loadingSaved = true
+        do {
+            let query = savedQuery.trimmingCharacters(in: .whitespaces)
+            var queryItems: [URLQueryItem] = []
+            if !query.isEmpty { queryItems.append(.init(name: "q", value: query)) }
+            savedFoods = try await APIClient.shared.get("/nutrition/foods", query: queryItems)
+        } catch {
+            print("[Food] Load saved: \(error)")
+        }
+        loadingSaved = false
+    }
+
+    private func deleteCustomFood(id: Int) async {
+        do {
+            try await APIClient.shared.delete("/nutrition/foods/\(id)")
+            savedFoods.removeAll { $0.id == id }
+        } catch { print("[Food] Delete: \(error)") }
     }
 }
 
