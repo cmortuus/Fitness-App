@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -29,10 +29,10 @@ router = APIRouter()
 async def _get_session_with_sets(
     db: AsyncSession, session_id: int, user_id: int | None = None,
 ) -> WorkoutSession | None:
-    """Fetch a WorkoutSession with its sets eagerly loaded."""
+    """Fetch a WorkoutSession with its sets and exercise names eagerly loaded."""
     stmt = (
         select(WorkoutSession)
-        .options(selectinload(WorkoutSession.sets))
+        .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.id == session_id)
     )
     if user_id is not None:
@@ -46,6 +46,11 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
     return {
         "id": exercise_set.id,
         "exercise_id": exercise_set.exercise_id,
+        "exercise_name": (
+            exercise_set.exercise.display_name
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
         "set_number": exercise_set.set_number,
         "planned_reps": exercise_set.planned_reps,
         "planned_reps_left": exercise_set.planned_reps_left,
@@ -70,7 +75,8 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
 
 def serialize_session(workout_session: WorkoutSession) -> dict:
     """Serialize a WorkoutSession to a dictionary with sets."""
-    sets_data = [serialize_set(s) for s in workout_session.sets] if workout_session.sets else []
+    sorted_sets = sorted(workout_session.sets, key=lambda s: s.id) if workout_session.sets else []
+    sets_data = [serialize_set(s) for s in sorted_sets]
     return {
         "id": workout_session.id,
         "name": workout_session.name,
@@ -82,6 +88,7 @@ def serialize_session(workout_session: WorkoutSession) -> dict:
         "total_reps": workout_session.total_reps,
         "started_at": workout_session.started_at,
         "completed_at": workout_session.completed_at,
+        "notes": workout_session.notes,
         "sets": sets_data,
     }
 
@@ -92,17 +99,19 @@ async def list_sessions(
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: int = 20,
     offset: int = 0,
+    status_filter: str | None = None,
 ) -> list[dict]:
-    """List workout sessions, most recent first."""
+    """List workout sessions, most recent first. Optional status_filter (e.g. 'in_progress')."""
     limit = min(limit, 500)
-    result = await db.execute(
+    stmt = (
         select(WorkoutSession)
-        .options(selectinload(WorkoutSession.sets))
+        .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.user_id == user.id)
-        .order_by(desc(WorkoutSession.date))
-        .limit(limit)
-        .offset(offset)
     )
+    if status_filter:
+        stmt = stmt.where(WorkoutSession.status == status_filter)
+    stmt = stmt.order_by(desc(WorkoutSession.date), desc(WorkoutSession.id)).limit(limit).offset(offset)
+    result = await db.execute(stmt)
     sessions = result.scalars().all()
     return [serialize_session(s) for s in sessions]
 
@@ -136,7 +145,7 @@ async def get_session(
     """Get a workout session by ID."""
     result = await db.execute(
         select(WorkoutSession)
-        .options(selectinload(WorkoutSession.sets))
+        .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.id == session_id)
         .where(WorkoutSession.user_id == user.id)
     )
@@ -219,6 +228,129 @@ async def complete_session(
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
+
+
+@router.patch("/{session_id}", response_model=WorkoutSessionResponse)
+async def update_session(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    notes: str | None = Body(default=None, embed=True),
+    name: str | None = Body(default=None, embed=True),
+) -> dict:
+    """Patch mutable fields (notes, name) on a session."""
+    result = await db.execute(
+        select(WorkoutSession)
+        .where(WorkoutSession.id == session_id)
+        .where(WorkoutSession.user_id == user.id)
+    )
+    workout_session = result.scalar_one_or_none()
+    if not workout_session:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Session not found")
+    if notes is not None:
+        workout_session.notes = notes
+    if name is not None:
+        workout_session.name = name
+    await db.flush()
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
+    return serialize_session(workout_session)
+
+
+@router.post("/{session_id}/sync-to-plan")
+async def sync_session_to_plan(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Sync actual weights/reps from a completed session back to its linked plan template."""
+    # Load session and verify ownership + completion
+    result = await db.execute(
+        select(WorkoutSession).where(
+            WorkoutSession.id == session_id,
+            WorkoutSession.user_id == user.id,
+        )
+    )
+    session = result.scalar_one_or_none()
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+    if session.status != WorkoutStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Session must be completed before syncing to plan",
+        )
+
+    # If there's no linked plan, nothing to do
+    if not session.workout_plan_id:
+        return {"updated": 0}
+
+    # Load all sets for this session that have actual weight data
+    sets_result = await db.execute(
+        select(ExerciseSet).where(
+            ExerciseSet.workout_session_id == session_id,
+            ExerciseSet.actual_weight_kg.is_not(None),
+        )
+    )
+    sets = sets_result.scalars().all()
+
+    if not sets:
+        return {"updated": 0}
+
+    # Compute per-exercise: max actual_weight_kg and most common actual_reps
+    exercise_data: dict[int, dict] = {}
+    for s in sets:
+        eid = s.exercise_id
+        if eid not in exercise_data:
+            exercise_data[eid] = {"max_weight": 0.0, "reps_counts": {}}
+        if (s.actual_weight_kg or 0.0) > exercise_data[eid]["max_weight"]:
+            exercise_data[eid]["max_weight"] = s.actual_weight_kg
+        if s.actual_reps is not None:
+            reps_counts = exercise_data[eid]["reps_counts"]
+            reps_counts[s.actual_reps] = reps_counts.get(s.actual_reps, 0) + 1
+
+    # Resolve most common reps per exercise
+    exercise_updates: dict[int, dict] = {}
+    for eid, data in exercise_data.items():
+        most_common_reps = None
+        if data["reps_counts"]:
+            most_common_reps = max(data["reps_counts"], key=lambda r: data["reps_counts"][r])
+        exercise_updates[eid] = {
+            "starting_weight_kg": data["max_weight"],
+            "reps": most_common_reps,
+        }
+
+    # Load the linked plan (verify ownership)
+    plan_result = await db.execute(
+        select(WorkoutPlan).where(
+            WorkoutPlan.id == session.workout_plan_id,
+            WorkoutPlan.user_id == user.id,
+        )
+    )
+    plan = plan_result.scalar_one_or_none()
+    if not plan:
+        return {"updated": 0}
+
+    # Parse and mutate the planned_exercises JSON
+    planned = json.loads(plan.planned_exercises) if isinstance(plan.planned_exercises, str) else plan.planned_exercises
+    updated_count = 0
+
+    days = planned.get("days", [])
+    for day in days:
+        for exercise in day.get("exercises", []):
+            eid = exercise.get("exercise_id")
+            if eid in exercise_updates:
+                exercise["starting_weight_kg"] = exercise_updates[eid]["starting_weight_kg"]
+                if exercise_updates[eid]["reps"] is not None:
+                    exercise["reps"] = exercise_updates[eid]["reps"]
+                updated_count += 1
+
+    # Save updated plan
+    plan.planned_exercises = json.dumps(planned)
+    await db.flush()
+
+    return {"updated": updated_count}
 
 
 @router.post("/{session_id}/sets", response_model=SetResponse, status_code=status.HTTP_201_CREATED)
@@ -474,6 +606,25 @@ async def create_session_from_plan(
                 "session_name": existing.name or "",
             },
         )
+
+    # Guard: reuse existing PLANNED session for the same plan + day instead of
+    # creating duplicates.  This prevents orphan pile-up when the client calls
+    # from-plan but crashes/navigates away before calling /start.
+    planned_result = await db.execute(
+        select(WorkoutSession).where(
+            WorkoutSession.workout_plan_id == plan_id,
+            WorkoutSession.name == f"{plan.name} - {day_name}",
+            WorkoutSession.status == WorkoutStatus.PLANNED,
+            WorkoutSession.started_at.is_(None),
+            WorkoutSession.user_id == user.id,
+        )
+        .order_by(desc(WorkoutSession.id))
+    )
+    existing_planned = planned_result.scalars().first()
+    if existing_planned:
+        # Return the existing PLANNED session so the client can /start it
+        existing_planned = await _get_session_with_sets(db, existing_planned.id, user_id=user.id)
+        return serialize_session(existing_planned)
 
     # ── Look up most recent prior session for the same plan + same day ────────
     # Require at least one set with actual_reps filled in — this is the real
