@@ -816,7 +816,7 @@ export async function endPhase(): Promise<void> {
 export interface WorkoutTemplateDay {
   day_number: number;
   day_name: string;
-  exercises: { exercise_id: number; sets: number; reps: number; starting_weight_kg: number; progression_type: string }[];
+  exercises: { exercise_id: number; exercise_name: string; sets: number; reps: number; starting_weight_kg: number; progression_type: string }[];
 }
 
 export interface WorkoutTemplate {

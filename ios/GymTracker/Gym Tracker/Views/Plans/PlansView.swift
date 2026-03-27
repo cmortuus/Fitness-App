@@ -11,6 +11,7 @@ struct PlansView: View {
     @State private var planToDelete: WorkoutPlan? = nil
     @State private var showDeleteAlert = false
     @State private var actionMessage: String? = nil
+    @State private var showTemplates = false
 
     private var activePlans: [WorkoutPlan] {
         plans.filter { !($0.is_archived ?? false) && !($0.is_draft ?? false) }
@@ -34,6 +35,18 @@ struct PlansView: View {
             }
         }
         .navigationTitle("Plans")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showTemplates = true
+                } label: {
+                    Label("Browse Templates", systemImage: "doc.text.magnifyingglass")
+                }
+            }
+        }
+        .sheet(isPresented: $showTemplates) {
+            TemplatesView()
+        }
         .task { await loadPlans() }
         .refreshable { await loadPlans() }
         .alert("Delete Plan?", isPresented: $showDeleteAlert, presenting: planToDelete) { plan in
@@ -168,11 +181,17 @@ struct PlansView: View {
                 .foregroundStyle(.secondary)
             Text("No Plans Yet")
                 .font(.title2.bold())
-            Text("Create a workout plan on the web app, then come back here to run it.")
+            Text("Browse pre-built templates to get started, or create a plan on the web app.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
+            Button {
+                showTemplates = true
+            } label: {
+                Label("Browse Templates", systemImage: "doc.text.magnifyingglass")
+            }
+            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

@@ -331,6 +331,37 @@ struct VolumeLandmarksResponse: Codable {
     let total_sets: Int
 }
 
+// MARK: - Workout Templates
+
+struct WorkoutTemplateExercise: Codable {
+    let exercise_id: Int
+    let exercise_name: String?
+    let sets: Int?
+    let reps: Int?
+    let starting_weight_kg: Double?
+    let progression_type: String?
+
+    var displayName: String { exercise_name ?? "Exercise #\(exercise_id)" }
+}
+
+struct WorkoutTemplateDay: Codable {
+    let day_number: Int
+    let day_name: String
+    let exercises: [WorkoutTemplateExercise]
+}
+
+struct WorkoutTemplate: Codable, Identifiable {
+    let id: Int
+    let name: String
+    let split_type: String?
+    let days_per_week: Int?
+    let equipment_tier: String?
+    let description: String?
+    let block_type: String?
+    let exercise_count: Int?
+    let days: [WorkoutTemplateDay]?
+}
+
 // MARK: - Recipe Models
 
 struct RecipeIngredientModel: Codable, Identifiable {
