@@ -297,6 +297,20 @@ class NutritionEntryCreate(BaseModel):
     micronutrients: dict | None = None
 
 
+class NutritionEntryUpdate(BaseModel):
+    quantity_g: float | None = Field(default=None, gt=0)
+    calories: float | None = Field(default=None, ge=0)
+    protein: float | None = Field(default=None, ge=0)
+    carbs: float | None = Field(default=None, ge=0)
+    fat: float | None = Field(default=None, ge=0)
+    meal: MealType | None = None
+
+
+class WaterEntryCreate(BaseModel):
+    date: date
+    amount_ml: float = Field(gt=0)
+
+
 class MacroGoalsUpdate(BaseModel):
     calories: float = Field(gt=0)
     protein: float = Field(ge=0)
@@ -304,6 +318,7 @@ class MacroGoalsUpdate(BaseModel):
     fat: float = Field(ge=0)
     effective_from: date | None = None
     micronutrient_goals: dict | None = None
+    water_goal_ml: float | None = Field(default=None, gt=0)
 
 
 class PhaseType(str, Enum):

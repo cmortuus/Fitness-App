@@ -70,9 +70,25 @@ class MacroGoal(Base):
     protein: Mapped[float] = mapped_column(Float, nullable=False)
     carbs: Mapped[float] = mapped_column(Float, nullable=False)
     fat: Mapped[float] = mapped_column(Float, nullable=False)
+    water_goal_ml: Mapped[float] = mapped_column(Float, nullable=False, default=2500.0)
     effective_from: Mapped[date_type] = mapped_column(Date, nullable=False)
     micronutrient_goals: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: RDA targets
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+
+class WaterEntry(Base):
+    """A single water intake log entry."""
+
+    __tablename__ = "water_entries"
+    __table_args__ = (Index("ix_water_entries_date", "date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    amount_ml: Mapped[float] = mapped_column(Float, nullable=False)
+    logged_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
