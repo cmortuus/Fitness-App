@@ -62,10 +62,7 @@ recordings/
 *.onnx
 *.pth
 
-# iOS / Capacitor
-frontend/ios/App/App/public/
-frontend/ios/App/Pods/
-frontend/ios/DerivedData/
+# iOS / Xcode
 *.xcworkspace/xcuserdata/
 *.xcodeproj/xcuserdata/
 
