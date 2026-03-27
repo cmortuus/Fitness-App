@@ -24,7 +24,7 @@
 
   // Add food modal
   let showAddModal = $state(false);
-  let activeTab = $state<'search' | 'scan' | 'label' | 'manual' | 'custom' | 'quick' | 'recipes'>('search');
+  let activeTab = $state<'search' | 'scan' | 'label' | 'manual' | 'custom' | 'quick' | 'recipes' | 'alcohol'>('search');
 
   // Search tab
   let searchQuery = $state('');
@@ -68,6 +68,49 @@
       await loadDay();
     } catch (e) { console.error('Quick add error:', e); }
     quickSaving = false;
+  }
+
+  // Alcohol calculator tab
+  let alcoholDrinkType = $state<'beer' | 'wine' | 'spirit' | 'custom'>('beer');
+  const DRINK_PRESETS = {
+    beer:   { name: 'Beer',    volumeMl: 355, abv: 5.0 },
+    wine:   { name: 'Wine',    volumeMl: 148, abv: 12.5 },
+    spirit: { name: 'Spirit',  volumeMl: 44,  abv: 40.0 },
+    custom: { name: 'Custom',  volumeMl: 355, abv: 5.0 },
+  };
+  let alcoholVolumeMl = $state(355);
+  let alcoholAbv = $state(5.0);
+  let alcoholName = $state('Beer');
+  let alcoholMeal = $state('snack');
+  let alcoholLogging = $state(false);
+
+  $effect(() => {
+    const p = DRINK_PRESETS[alcoholDrinkType];
+    alcoholVolumeMl = p.volumeMl;
+    alcoholAbv = p.abv;
+    if (alcoholDrinkType !== 'custom') alcoholName = p.name;
+  });
+
+  // calories = volume_ml × (abv/100) × 0.789 × 7
+  let alcoholCalories = $derived(Math.round(alcoholVolumeMl * (alcoholAbv / 100) * 0.789 * 7));
+
+  async function logAlcohol() {
+    alcoholLogging = true;
+    try {
+      await addNutritionEntry({
+        name: alcoholName || 'Alcoholic drink',
+        date: selectedDate,
+        quantity_g: 0,
+        calories: alcoholCalories,
+        protein: 0,
+        carbs: Math.round(alcoholVolumeMl * 0.03), // rough carb estimate
+        fat: 0,
+        meal: alcoholMeal,
+      });
+      showAddModal = false;
+      await loadDay();
+    } catch (e) { console.error('Alcohol log error:', e); }
+    alcoholLogging = false;
   }
 
   // Recipes tab
@@ -999,7 +1042,7 @@
       {:else}
         <!-- Tabs -->
         <div class="flex border-b border-zinc-800 shrink-0">
-          {#each [['quick', '⚡'], ['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved'], ['recipes', '🍳']] as [tab, label]}
+          {#each [['quick', '⚡'], ['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved'], ['recipes', '🍳'], ['alcohol', '🍺']] as [tab, label]}
             <button onclick={() => { if (activeTab === 'scan') stopScanner(); activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); if (tab === 'recipes' && !recipesLoaded) loadRecipes(); }}
                     class="flex-1 py-2.5 text-xs font-medium transition-colors
                            {activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-zinc-500 hover:text-zinc-300'}">
@@ -1453,6 +1496,66 @@
                 {/if}
               </div>
             {/if}
+
+          <!-- Alcohol calculator tab -->
+          {:else if activeTab === 'alcohol'}
+            <div class="p-4 space-y-4">
+              <p class="text-xs text-zinc-500">Calculate and log calories from alcoholic drinks.</p>
+
+              <!-- Drink type selector -->
+              <div class="grid grid-cols-4 gap-1.5">
+                {#each [['beer', '🍺', 'Beer'], ['wine', '🍷', 'Wine'], ['spirit', '🥃', 'Spirit'], ['custom', '✏️', 'Custom']] as [type, emoji, name]}
+                  <button onclick={() => alcoholDrinkType = type as typeof alcoholDrinkType}
+                          class="py-2 rounded-xl text-center transition-colors
+                                 {alcoholDrinkType === type ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                    <div class="text-lg">{emoji}</div>
+                    <div class="text-xs font-medium">{name}</div>
+                  </button>
+                {/each}
+              </div>
+
+              <!-- Volume + ABV inputs -->
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="text-xs text-zinc-400 block mb-1">Volume (mL)</label>
+                  <input type="number" bind:value={alcoholVolumeMl} min="1" class="input" />
+                </div>
+                <div>
+                  <label class="text-xs text-zinc-400 block mb-1">ABV (%)</label>
+                  <input type="number" bind:value={alcoholAbv} min="0" max="100" step="0.1" class="input" />
+                </div>
+              </div>
+
+              {#if alcoholDrinkType === 'custom'}
+                <div>
+                  <label class="text-xs text-zinc-400 block mb-1">Drink name</label>
+                  <input type="text" bind:value={alcoholName} placeholder="e.g. IPA" class="input" />
+                </div>
+              {/if}
+
+              <!-- Calorie estimate -->
+              <div class="bg-zinc-800/80 rounded-xl p-4 text-center">
+                <p class="text-3xl font-bold text-orange-400">{alcoholCalories}</p>
+                <p class="text-xs text-zinc-500 mt-1">estimated kcal</p>
+                <p class="text-xs text-zinc-600 mt-0.5">vol × ABV × 0.789 × 7</p>
+              </div>
+
+              <!-- Meal picker -->
+              <div class="grid grid-cols-4 gap-1.5">
+                {#each ['breakfast', 'lunch', 'dinner', 'snack'] as m}
+                  <button onclick={() => alcoholMeal = m}
+                          class="py-2 text-xs rounded-lg transition-colors font-medium
+                                 {alcoholMeal === m ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}">
+                    {m.charAt(0).toUpperCase() + m.slice(1)}
+                  </button>
+                {/each}
+              </div>
+
+              <button onclick={logAlcohol} disabled={alcoholLogging || alcoholCalories <= 0}
+                      class="btn-primary w-full disabled:opacity-40">
+                {alcoholLogging ? 'Logging…' : `Log ${alcoholCalories} kcal`}
+              </button>
+            </div>
           {/if}
         </div>
       {/if}
