@@ -39,7 +39,7 @@ async function loadTranslations(loc: Locale): Promise<Record<string, string>> {
   if (current[loc] && Object.keys(current[loc]).length > 0) return current[loc];
 
   try {
-    let mod: { default: Record<string, string> };
+    let mod: { default: Record<string, any> };
     switch (loc) {
       case 'en': mod = await import('./en.json'); break;
       case 'es': mod = await import('./es.json'); break;

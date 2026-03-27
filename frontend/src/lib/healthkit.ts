@@ -16,7 +16,7 @@ async function getPlugin() {
   if (!Capacitor.isNativePlatform()) return null;
   try {
     const mod = await import('@capgo/capacitor-health');
-    CapHealth = mod.CapacitorHealth;
+    CapHealth = (mod as any).CapacitorHealth ?? mod.Health;
     return CapHealth;
   } catch {
     console.warn('[HealthKit] Plugin not available');

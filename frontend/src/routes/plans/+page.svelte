@@ -144,7 +144,7 @@
     let totalSecs = 0;
     for (const ex of day.exercises) {
       const exercise = allExercises.find(e => e.id === ex.exercise_id);
-      const isCompound = exercise?.movement_type === 'compound' || exercise?.movement_type === 'squat' || exercise?.movement_type === 'hinge';
+      const isCompound = exercise?.movement_type === 'compound';
       const isUpper = exercise?.body_region === 'upper';
       // Pick rest duration based on exercise type
       let restSec: number;
