@@ -182,6 +182,7 @@ export interface RecentExercise extends Exercise {
 export interface Set {
   id: number;
   exercise_id: number;
+  exercise_name: string | null;
   set_number: number;
   planned_reps: number | null;
   planned_reps_left: number | null;

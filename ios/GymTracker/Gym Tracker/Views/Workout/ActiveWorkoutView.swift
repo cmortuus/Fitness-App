@@ -22,6 +22,7 @@ struct ActiveWorkoutView: View {
     // Rest timer
     @State private var restActive = false
     @State private var restSecs = 0
+    @State private var restTotal = 0
     @State private var restTimer: Timer?
     @State private var restEndTime: Date?
     // restDurations is now a computed property (currentRestDurations) using @AppStorage values
@@ -288,28 +289,55 @@ struct ActiveWorkoutView: View {
     // MARK: - Rest Timer Banner
 
     private var restTimerBanner: some View {
-        HStack {
-            Image(systemName: "timer").foregroundStyle(.blue)
-            Text(formatTime(restSecs))
-                .font(.title2.bold().monospacedDigit())
-                .foregroundStyle(restSecs <= 10 ? .orange : .primary)
-            Spacer()
-            Button(action: { adjustRest(-15) }) {
-                Text("-15s").font(.caption)
+        let fraction = restTotal > 0 ? Double(restSecs) / Double(restTotal) : 0.0
+        let isLow = restSecs <= 10
+        let accentColor: Color = isLow ? .orange : .blue
+
+        return VStack(spacing: 6) {
+            HStack {
+                Image(systemName: isLow ? "exclamationmark.triangle.fill" : "timer")
+                    .foregroundStyle(accentColor)
+                    .symbolEffect(.pulse, isActive: isLow)
+                Text(formatTime(restSecs))
+                    .font(.title2.bold().monospacedDigit())
+                    .foregroundStyle(accentColor)
+                Text("rest")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button(action: { adjustRest(-15) }) {
+                    Text("-15s").font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .tint(accentColor)
+                Button(action: { adjustRest(15) }) {
+                    Text("+15s").font(.caption)
+                }
+                .buttonStyle(.bordered)
+                .tint(accentColor)
+                Button("Skip") { skipRest() }
+                    .font(.caption.bold())
+                    .buttonStyle(.borderedProminent)
+                    .tint(accentColor)
             }
-            .buttonStyle(.bordered)
-            Button(action: { adjustRest(15) }) {
-                Text("+15s").font(.caption)
+
+            // Progress bar
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(accentColor.opacity(0.15))
+                        .frame(height: 4)
+                    Capsule()
+                        .fill(accentColor)
+                        .frame(width: geo.size.width * fraction, height: 4)
+                        .animation(.linear(duration: 1), value: fraction)
+                }
             }
-            .buttonStyle(.bordered)
-            Button("Skip") { skipRest() }
-                .font(.caption)
-                .buttonStyle(.borderedProminent)
-                .tint(.blue)
+            .frame(height: 4)
         }
         .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(.blue.opacity(0.1))
+        .padding(.vertical, 10)
+        .background(accentColor.opacity(0.08))
     }
 
     // MARK: - Bottom Bar
@@ -363,10 +391,28 @@ struct ActiveWorkoutView: View {
                     Text(exercise.name)
                         .font(.headline)
                         .foregroundStyle(allSetsDone ? .green : .primary)
-                    if !exercise.muscleGroup.isEmpty {
-                        Text(exercise.muscleGroup)
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        if !exercise.muscleGroup.isEmpty {
+                            Text(exercise.muscleGroup)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        // Set progress dots
+                        if !exercise.sets.isEmpty {
+                            let doneSets = exercise.sets.filter { $0.done || $0.skipped }.count
+                            let totalSets = exercise.sets.count
+                            HStack(spacing: 3) {
+                                ForEach(exercise.sets.indices, id: \.self) { i in
+                                    let s = exercise.sets[i]
+                                    Circle()
+                                        .fill(s.done ? Color.green : s.skipped ? Color.orange : Color.secondary.opacity(0.3))
+                                        .frame(width: 6, height: 6)
+                                }
+                            }
+                            Text("\(doneSets)/\(totalSets)")
+                                .font(.caption2.monospacedDigit())
+                                .foregroundStyle(allSetsDone ? .green : .secondary)
+                        }
                     }
                 }
 
@@ -479,8 +525,17 @@ struct ActiveWorkoutView: View {
             }
         }
         .padding()
-        .background(Color(.systemGray6).opacity(allSetsDone ? 0.3 : 0.5))
+        .background(
+            allSetsDone
+                ? Color.green.opacity(0.06)
+                : Color(.systemGray6).opacity(0.5)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(allSetsDone ? Color.green.opacity(0.3) : Color.clear, lineWidth: 1)
+        )
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .animation(.easeInOut(duration: 0.3), value: allSetsDone)
     }
 
     // MARK: - Set Row
@@ -1308,6 +1363,7 @@ struct ActiveWorkoutView: View {
 
     private func startRest(seconds: Int) {
         restSecs = seconds
+        restTotal = seconds
         restActive = true
         restEndTime = Date().addingTimeInterval(TimeInterval(seconds))
         restTimer?.invalidate()

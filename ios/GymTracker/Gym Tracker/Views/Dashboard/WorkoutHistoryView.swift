@@ -283,8 +283,9 @@ struct SessionDetailView: View {
     }
 
     private func exerciseBlock(exerciseId: Int, sets: [ExerciseSet]) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Exercise #\(exerciseId)")
+        let exerciseName = sets.first?.exercise_name ?? "Exercise #\(exerciseId)"
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(exerciseName)
                 .font(.headline)
                 .padding(.horizontal)
 

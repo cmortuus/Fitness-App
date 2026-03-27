@@ -42,6 +42,9 @@ struct DashboardView: View {
                     .padding(.top, 40)
                 } else {
                     VStack(spacing: 16) {
+                        // Greeting
+                        greetingHeader
+
                         // Quick stats strip
                         statsStrip
 
@@ -116,6 +119,48 @@ struct DashboardView: View {
             .navigationTitle("Training")
             .task { await loadData() }
             .refreshable { await loadData() }
+        }
+    }
+
+    // MARK: - Greeting Header
+
+    private var greetingHeader: some View {
+        let hour = Calendar.current.component(.hour, from: Date())
+        let greeting: String
+        let icon: String
+        switch hour {
+        case 5..<12:
+            greeting = "Good morning"; icon = "sun.rise.fill"
+        case 12..<17:
+            greeting = "Good afternoon"; icon = "sun.max.fill"
+        case 17..<21:
+            greeting = "Good evening"; icon = "sunset.fill"
+        default:
+            greeting = "Good night"; icon = "moon.stars.fill"
+        }
+        let streakSuffix = streak > 0 ? " · \(streak) day streak 🔥" : ""
+        return HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon)
+                        .foregroundStyle(.orange)
+                        .font(.subheadline)
+                    Text(greeting)
+                        .font(.subheadline.bold())
+                }
+                Text("Ready to train?\(streakSuffix)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            // Show today's date
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(Date().formatted(.dateTime.weekday(.wide)))
+                    .font(.caption.bold())
+                Text(Date().formatted(.dateTime.month(.abbreviated).day()))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -215,21 +260,62 @@ struct DashboardView: View {
     // MARK: - Nutrition Snapshot
 
     private func nutritionSnapshot(_ summary: DailySummary) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Today's Nutrition")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 16) {
-                macroItem(label: "Cal", value: Int(summary.totals.calories), color: .orange)
-                macroItem(label: "P", value: Int(summary.totals.protein), color: .red)
-                macroItem(label: "C", value: Int(summary.totals.carbs), color: .blue)
-                macroItem(label: "F", value: Int(summary.totals.fat), color: .yellow)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Today's Nutrition")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(summary.totals.calories)) kcal")
+                    .font(.caption.bold())
+                    .foregroundStyle(.orange)
+            }
+
+            if let goals = summary.goals {
+                // Progress bars toward goals
+                VStack(spacing: 6) {
+                    macroPill(label: "Calories", value: summary.totals.calories,
+                              goal: goals.calories, unit: "kcal", color: .orange)
+                    HStack(spacing: 8) {
+                        macroPill(label: "Protein", value: summary.totals.protein,
+                                  goal: goals.protein, unit: "g", color: .blue)
+                        macroPill(label: "Carbs", value: summary.totals.carbs,
+                                  goal: goals.carbs, unit: "g", color: .green)
+                        macroPill(label: "Fat", value: summary.totals.fat,
+                                  goal: goals.fat, unit: "g", color: .yellow)
+                    }
+                }
+            } else {
+                HStack(spacing: 16) {
+                    macroItem(label: "Cal", value: Int(summary.totals.calories), color: .orange)
+                    macroItem(label: "P", value: Int(summary.totals.protein), color: .blue)
+                    macroItem(label: "C", value: Int(summary.totals.carbs), color: .green)
+                    macroItem(label: "F", value: Int(summary.totals.fat), color: .yellow)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func macroPill(label: String, value: Double, goal: Double, unit: String, color: Color) -> some View {
+        let fraction = goal > 0 ? min(value / goal, 1.0) : 0.0
+        return VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 0) {
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(value))/\(Int(goal))\(unit)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            }
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(color.opacity(0.15)).frame(height: 5)
+                    Capsule().fill(color).frame(width: geo.size.width * fraction, height: 5)
+                }
+            }
+            .frame(height: 5)
+        }
     }
 
     private func macroItem(label: String, value: Int, color: Color) -> some View {

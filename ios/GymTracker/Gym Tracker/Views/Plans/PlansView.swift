@@ -12,6 +12,7 @@ struct PlansView: View {
     @State private var showDeleteAlert = false
     @State private var actionMessage: String? = nil
     @State private var showTemplates = false
+    @State private var showCreatePlan = false
 
     private var activePlans: [WorkoutPlan] {
         plans.filter { !($0.is_archived ?? false) && !($0.is_draft ?? false) }
@@ -37,15 +38,29 @@ struct PlansView: View {
         .navigationTitle("Plans")
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
-                Button {
-                    showTemplates = true
+                Menu {
+                    Button {
+                        showCreatePlan = true
+                    } label: {
+                        Label("Create Plan", systemImage: "plus.circle")
+                    }
+                    Button {
+                        showTemplates = true
+                    } label: {
+                        Label("Browse Templates", systemImage: "doc.text.magnifyingglass")
+                    }
                 } label: {
-                    Label("Browse Templates", systemImage: "doc.text.magnifyingglass")
+                    Image(systemName: "plus")
                 }
             }
         }
         .sheet(isPresented: $showTemplates) {
             TemplatesView()
+        }
+        .sheet(isPresented: $showCreatePlan) {
+            CreatePlanView {
+                Task { await loadPlans() }
+            }
         }
         .task { await loadPlans() }
         .refreshable { await loadPlans() }
@@ -181,17 +196,26 @@ struct PlansView: View {
                 .foregroundStyle(.secondary)
             Text("No Plans Yet")
                 .font(.title2.bold())
-            Text("Browse pre-built templates to get started, or create a plan on the web app.")
+            Text("Create a custom plan or browse pre-built templates to get started.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 40)
-            Button {
-                showTemplates = true
-            } label: {
-                Label("Browse Templates", systemImage: "doc.text.magnifyingglass")
+            HStack(spacing: 12) {
+                Button {
+                    showCreatePlan = true
+                } label: {
+                    Label("Create Plan", systemImage: "plus.circle")
+                }
+                .buttonStyle(.borderedProminent)
+
+                Button {
+                    showTemplates = true
+                } label: {
+                    Label("Templates", systemImage: "doc.text.magnifyingglass")
+                }
+                .buttonStyle(.bordered)
             }
-            .buttonStyle(.borderedProminent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

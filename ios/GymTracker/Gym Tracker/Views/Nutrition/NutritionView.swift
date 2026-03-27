@@ -466,63 +466,110 @@ struct NutritionView: View {
             if allEntries.isEmpty {
                 VStack(spacing: 12) {
                     Image(systemName: "fork.knife")
-                        .font(.system(size: 30))
+                        .font(.system(size: 34))
                         .foregroundStyle(.tertiary)
-                    Text("No food logged yet")
-                        .font(.subheadline)
+                    Text("No food logged today")
+                        .font(.subheadline.bold())
+                    Text("Tap the + button to log a meal.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
+                    Button {
+                        showAddFood = true
+                    } label: {
+                        Label("Log Food", systemImage: "plus.circle.fill")
+                            .font(.subheadline.bold())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .padding(.top, 4)
                 }
-                .padding(.vertical, 30)
+                .padding(.vertical, 32)
                 .frame(maxWidth: .infinity)
                 .background(Color(.secondarySystemGroupedBackground))
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal)
             } else {
-                VStack(spacing: 0) {
-                    // Header
-                    HStack {
-                        Text("Food Log")
-                            .font(.subheadline.weight(.semibold))
-                        Spacer()
-                        Text("\(allEntries.count) items")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
+                let orderedMeals = ["breakfast", "lunch", "dinner", "snack"]
+                let presentMeals = orderedMeals.filter { !(mealEntries[$0]?.isEmpty ?? true) }
+                let otherMeals = mealEntries.keys.filter { !orderedMeals.contains($0) }.sorted()
 
-                    ForEach(allEntries) { entry in
-                        foodRow(entry)
-                        if entry.id != allEntries.last?.id {
-                            Divider().padding(.leading, 16)
+                VStack(spacing: 10) {
+                    ForEach(presentMeals + otherMeals, id: \.self) { meal in
+                        if let entries = mealEntries[meal], !entries.isEmpty {
+                            mealSection(meal: meal, entries: entries)
                         }
                     }
                 }
-                .background(Color(.secondarySystemGroupedBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 14))
                 .padding(.horizontal)
             }
         }
     }
 
+    private func mealSection(meal: String, entries: [NutritionEntry]) -> some View {
+        let mealCalories = entries.compactMap(\.calories).reduce(0, +)
+        let mealIcon: String
+        switch meal {
+        case "breakfast": mealIcon = "sun.horizon.fill"
+        case "lunch":     mealIcon = "sun.max.fill"
+        case "dinner":    mealIcon = "moon.fill"
+        default:          mealIcon = "fork.knife"
+        }
+
+        return VStack(spacing: 0) {
+            // Meal header
+            HStack(spacing: 6) {
+                Image(systemName: mealIcon)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(meal.capitalized)
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(Int(mealCalories)) kcal")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(Color(.tertiarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+
+            // Entries
+            VStack(spacing: 0) {
+                ForEach(entries) { entry in
+                    foodRow(entry)
+                    if entry.id != entries.last?.id {
+                        Divider().padding(.leading, 16)
+                    }
+                }
+            }
+            .background(Color(.secondarySystemGroupedBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+    }
+
     private func foodRow(_ entry: NutritionEntry) -> some View {
         HStack(spacing: 12) {
-            VStack(alignment: .leading, spacing: 3) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(entry.name)
                     .font(.subheadline)
                     .lineLimit(1)
-                HStack(spacing: 8) {
+                HStack(spacing: 6) {
                     if let cal = entry.calories {
-                        Text("\(Int(cal)) cal").foregroundStyle(.orange)
+                        Text("\(Int(cal)) kcal")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
                     if let p = entry.protein, p > 0 {
-                        Text("\(Int(p))g P").foregroundStyle(.purple)
+                        Text("·")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                        Text("P \(Int(p))g").foregroundStyle(.blue)
                     }
                     if let c = entry.carbs, c > 0 {
-                        Text("\(Int(c))g C").foregroundStyle(.orange.opacity(0.7))
+                        Text("C \(Int(c))g").foregroundStyle(.green)
                     }
                     if let f = entry.fat, f > 0 {
-                        Text("\(Int(f))g F").foregroundStyle(.yellow)
+                        Text("F \(Int(f))g").foregroundStyle(.yellow)
                     }
                 }
                 .font(.caption2)
@@ -531,12 +578,13 @@ struct NutritionView: View {
             Button(role: .destructive) {
                 Task { await deleteEntry(entry.id) }
             } label: {
-                Image(systemName: "minus.circle")
-                    .font(.caption)
-                    .foregroundStyle(.red.opacity(0.5))
+                Image(systemName: "minus.circle.fill")
+                    .font(.body)
+                    .foregroundStyle(.red.opacity(0.4))
             }
+            .buttonStyle(.plain)
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 14)
         .padding(.vertical, 10)
     }
 

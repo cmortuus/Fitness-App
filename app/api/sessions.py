@@ -29,10 +29,10 @@ router = APIRouter()
 async def _get_session_with_sets(
     db: AsyncSession, session_id: int, user_id: int | None = None,
 ) -> WorkoutSession | None:
-    """Fetch a WorkoutSession with its sets eagerly loaded."""
+    """Fetch a WorkoutSession with its sets and exercise names eagerly loaded."""
     stmt = (
         select(WorkoutSession)
-        .options(selectinload(WorkoutSession.sets))
+        .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.id == session_id)
     )
     if user_id is not None:
@@ -46,6 +46,11 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
     return {
         "id": exercise_set.id,
         "exercise_id": exercise_set.exercise_id,
+        "exercise_name": (
+            exercise_set.exercise.display_name
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
         "set_number": exercise_set.set_number,
         "planned_reps": exercise_set.planned_reps,
         "planned_reps_left": exercise_set.planned_reps_left,
@@ -98,7 +103,7 @@ async def list_sessions(
     limit = min(limit, 500)
     result = await db.execute(
         select(WorkoutSession)
-        .options(selectinload(WorkoutSession.sets))
+        .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.user_id == user.id)
         .order_by(desc(WorkoutSession.date))
         .limit(limit)
@@ -137,7 +142,7 @@ async def get_session(
     """Get a workout session by ID."""
     result = await db.execute(
         select(WorkoutSession)
-        .options(selectinload(WorkoutSession.sets))
+        .options(selectinload(WorkoutSession.sets).selectinload(ExerciseSet.exercise))
         .where(WorkoutSession.id == session_id)
         .where(WorkoutSession.user_id == user.id)
     )

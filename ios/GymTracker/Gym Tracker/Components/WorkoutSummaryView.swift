@@ -89,15 +89,42 @@ struct WorkoutSummaryView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Exercise Summary")
                         .font(.headline)
-                    ForEach(exercises) { ex in
-                        HStack {
-                            Text(ex.name)
-                                .font(.subheadline)
-                            Spacer()
-                            let done = ex.sets.filter(\.done).count
-                            Text("\(done)/\(ex.sets.count) sets")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    ForEach(exercises.indices, id: \.self) { i in
+                        let ex = exercises[i]
+                        let doneSets = ex.sets.filter(\.done)
+                        let exVolume = doneSets.reduce(0.0) { $0 + ($1.weight ?? 0) * Double($1.reps ?? 0) }
+                        let dispVolume = weightUnit == "lbs" ? exVolume * 2.20462 : exVolume
+
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(ex.name)
+                                    .font(.subheadline.bold())
+                                Spacer()
+                                Text("\(doneSets.count)/\(ex.sets.count) sets")
+                                    .font(.caption)
+                                    .foregroundStyle(doneSets.count == ex.sets.count ? .green : .secondary)
+                            }
+                            if !doneSets.isEmpty {
+                                let weightValues = doneSets.compactMap(\.weight)
+                                let repValues = doneSets.compactMap(\.reps)
+                                if !weightValues.isEmpty, !repValues.isEmpty {
+                                    HStack(spacing: 8) {
+                                        Text(formatSetSummary(doneSets))
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                        if dispVolume > 0 {
+                                            Text("·")
+                                                .font(.caption2).foregroundStyle(.tertiary)
+                                            Text("\(Int(dispVolume)) \(weightUnit)")
+                                                .font(.caption)
+                                                .foregroundStyle(.blue)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        if i < exercises.count - 1 {
+                            Divider()
                         }
                     }
                 }
@@ -227,6 +254,28 @@ struct WorkoutSummaryView: View {
         // v is in display units already (lbs or kg depending on how sets are stored)
         if v >= 1000 { return String(format: "%.1fk", v / 1000) }
         return "\(Int(v))"
+    }
+
+    /// Summarize sets as "4 × 185" or "3 × 185, 1 × 175" for the top weights
+    private func formatSetSummary(_ sets: [UISet]) -> String {
+        // Group by weight
+        var groups: [(weight: Double, count: Int)] = []
+        for set in sets {
+            let w = set.weight ?? 0
+            if let idx = groups.firstIndex(where: { abs($0.weight - w) < 0.1 }) {
+                groups[idx].count += 1
+            } else {
+                groups.append((weight: w, count: 1))
+            }
+        }
+        let kgToLbs = 2.20462
+        let parts = groups.prefix(2).map { g -> String in
+            let disp = weightUnit == "lbs" ? g.weight * kgToLbs : g.weight
+            let wStr = disp == disp.rounded() ? "\(Int(disp))" : String(format: "%.1f", disp)
+            return "\(g.count) × \(wStr)"
+        }
+        let suffix = groups.count > 2 ? " …" : ""
+        return parts.joined(separator: ", ") + suffix
     }
 }
 

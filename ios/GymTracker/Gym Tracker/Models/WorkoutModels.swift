@@ -114,6 +114,7 @@ struct WorkoutSession: Codable, Identifiable {
 struct ExerciseSet: Codable, Identifiable {
     let id: Int
     let exercise_id: Int?
+    let exercise_name: String?
     let set_number: Int?
     let planned_reps: Int?
     let planned_weight_kg: Double?
