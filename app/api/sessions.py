@@ -587,6 +587,12 @@ async def create_session_from_plan(
         exercise_model_map: dict[int, Exercise] = {
             ex.id: ex for ex in ex_rows.scalars().all()
         }
+        missing = [eid for eid in day_exercise_ids if eid not in exercise_model_map]
+        if missing:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Plan references exercises that no longer exist: {missing}. Edit the plan to replace them.",
+            )
     else:
         exercise_model_map = {}
 
