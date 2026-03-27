@@ -4,6 +4,7 @@ from datetime import date, datetime, timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
+from pydantic import BaseModel as _PydanticBase
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -15,6 +16,7 @@ from app.models.exercise import Exercise
 from app.models.nutrition import MacroGoal, NutritionEntry
 from app.models.user import User
 from app.models.workout import ExerciseSet, WorkoutSession, WorkoutStatus
+from app.services.overload import OverloadInput, calculate_overload, epley_1rm
 
 router = APIRouter()
 
@@ -565,9 +567,6 @@ async def get_volume_landmarks(
 
 # ── Progressive Overload ───────────────────────────────────────────────────
 
-from pydantic import BaseModel as _PydanticBase
-from app.services.overload import calculate_overload, OverloadInput, epley_1rm
-
 
 class OverloadRequest(_PydanticBase):
     exercise_id: int
@@ -609,7 +608,6 @@ async def get_overload_suggestion(
 
     # Conversion
     kg_to_unit = 2.20462 if body.weight_unit == "lbs" else 1.0
-    unit_to_kg = 1 / kg_to_unit
     weight_increment = 5.0 if body.weight_unit == "lbs" else 2.5
 
     # Determine baseline (oldest of recent sets)
