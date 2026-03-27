@@ -396,7 +396,7 @@ async def get_insights(
         four_weeks_ago = today - timedelta(days=28)
         recent_exercise_ids = set()
         for sess in recent_sess_list:
-            if sess.date >= str(four_weeks_ago):
+            if sess.date >= four_weeks_ago:
                 for s in (sess.sets or []):
                     recent_exercise_ids.add(s.exercise_id)
 
