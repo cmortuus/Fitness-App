@@ -6,7 +6,9 @@
     getDailySummary, setMacroGoals,
     searchFoods, lookupBarcode, getCustomFoods, createCustomFood, createCommunityFood,
     getActivePhase, createPhase, endPhase, recalculatePhase,
+    getRecipes, logRecipe, createRecipe, deleteRecipe,
   } from '$lib/api';
+  import type { Recipe } from '$lib/api';
   import { MICRO_META } from '$lib/api';
   import { writeNutrition } from '$lib/healthkit';
   import type {
@@ -22,7 +24,7 @@
 
   // Add food modal
   let showAddModal = $state(false);
-  let activeTab = $state<'search' | 'scan' | 'label' | 'manual' | 'custom'>('search');
+  let activeTab = $state<'search' | 'scan' | 'label' | 'manual' | 'custom' | 'quick' | 'recipes'>('search');
 
   // Search tab
   let searchQuery = $state('');
@@ -39,6 +41,90 @@
   let manualQty = $state(100);
   let saveAsCustom = $state(false);
   let showFullMacros = $state(false);
+
+  // Quick-add tab
+  let quickCal = $state<number | null>(null);
+  let quickProtein = $state<number | null>(null);
+  let quickLabel = $state('');
+  let quickMeal = $state<string>('snack');
+  let quickSaving = $state(false);
+
+  async function logQuickAdd() {
+    if (!quickCal || quickCal <= 0) return;
+    quickSaving = true;
+    try {
+      await addNutritionEntry({
+        name: quickLabel.trim() || 'Quick Add',
+        date: selectedDate,
+        quantity_g: 0,
+        calories: quickCal,
+        protein: quickProtein ?? 0,
+        carbs: 0,
+        fat: 0,
+        meal: quickMeal,
+      });
+      quickCal = null; quickProtein = null; quickLabel = ''; quickMeal = 'snack';
+      showAddModal = false;
+      await loadDay();
+    } catch (e) { console.error('Quick add error:', e); }
+    quickSaving = false;
+  }
+
+  // Recipes tab
+  let recipes = $state<Recipe[]>([]);
+  let recipesLoaded = $state(false);
+  let showRecipeBuilder = $state(false);
+  let selectedRecipe = $state<Recipe | null>(null);
+  let recipeServings = $state(1);
+  let recipeMeal = $state('snack');
+  let recipeLogging = $state(false);
+  // Recipe builder state
+  let newRecipeName = $state('');
+  let newRecipeDesc = $state('');
+  let newRecipeServings = $state(1);
+  let newRecipeIngredients = $state<{name: string; quantity: string; unit: string; calories: string; protein: string; carbs: string; fat: string}[]>([]);
+  let recipeSaving = $state(false);
+
+  async function loadRecipes() {
+    try { recipes = await getRecipes(); recipesLoaded = true; } catch { recipes = []; }
+  }
+
+  async function logSelectedRecipe() {
+    if (!selectedRecipe) return;
+    recipeLogging = true;
+    try {
+      await logRecipe(selectedRecipe.id, { date: selectedDate, servings: recipeServings, meal_type: recipeMeal });
+      selectedRecipe = null;
+      showAddModal = false;
+      await loadDay();
+    } catch (e) { console.error('Recipe log error:', e); }
+    recipeLogging = false;
+  }
+
+  async function saveNewRecipe() {
+    if (!newRecipeName.trim()) return;
+    recipeSaving = true;
+    try {
+      await createRecipe({
+        name: newRecipeName.trim(),
+        description: newRecipeDesc || undefined,
+        servings: newRecipeServings,
+        ingredients: newRecipeIngredients.filter(i => i.name.trim()).map(i => ({
+          name: i.name.trim(),
+          quantity: parseFloat(i.quantity) || 1,
+          unit: i.unit || 'serving',
+          calories: parseFloat(i.calories) || 0,
+          protein: parseFloat(i.protein) || 0,
+          carbs: parseFloat(i.carbs) || 0,
+          fat: parseFloat(i.fat) || 0,
+        })),
+      });
+      newRecipeName = ''; newRecipeDesc = ''; newRecipeServings = 1; newRecipeIngredients = [];
+      showRecipeBuilder = false;
+      await loadRecipes();
+    } catch (e) { console.error('Recipe save error:', e); }
+    recipeSaving = false;
+  }
 
   // Custom foods tab
   let customFoods = $state<FoodItem[]>([]);
@@ -912,8 +998,8 @@
       {:else}
         <!-- Tabs -->
         <div class="flex border-b border-zinc-800 shrink-0">
-          {#each [['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved']] as [tab, label]}
-            <button onclick={() => { if (activeTab === 'scan') stopScanner(); activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); }}
+          {#each [['quick', '⚡'], ['search', 'Search'], ['scan', 'Scan'], ['manual', 'Manual'], ['custom', 'Saved'], ['recipes', '🍳']] as [tab, label]}
+            <button onclick={() => { if (activeTab === 'scan') stopScanner(); activeTab = tab as any; if (tab === 'custom') loadCustomFoods(); if (tab === 'recipes' && !recipesLoaded) loadRecipes(); }}
                     class="flex-1 py-2.5 text-xs font-medium transition-colors
                            {activeTab === tab ? 'text-primary-400 border-b-2 border-primary-400' : 'text-zinc-500 hover:text-zinc-300'}">
               {label}
@@ -1030,7 +1116,7 @@
                     {#each [['ocr-cal', 'Calories', 'calories'], ['ocr-pro', 'Protein', 'protein'], ['ocr-carb', 'Carbs', 'carbs'], ['ocr-fat', 'Fat', 'fat']] as [id, label, key]}
                       <div>
                         <label for={id} class="text-[10px] text-zinc-500">{label}</label>
-                        <input {id} type="number" bind:value={ocrResult[key]} class="input !py-1.5 text-sm" />
+                        <input {id} type="number" bind:value={(ocrResult as any)[key]} class="input !py-1.5 text-sm" />
                       </div>
                     {/each}
                   </div>
@@ -1038,7 +1124,7 @@
                     {#each [['ocr-fiber', 'Fiber (g)', 'fiber'], ['ocr-sodium', 'Sodium (mg)', 'sodium'], ['ocr-sugar', 'Sugar (g)', 'sugar']] as [id, label, key]}
                       <div>
                         <label for={id} class="text-[10px] text-zinc-500">{label}</label>
-                        <input {id} type="number" bind:value={ocrResult[key]} class="input !py-1.5 text-sm" />
+                        <input {id} type="number" bind:value={(ocrResult as any)[key]} class="input !py-1.5 text-sm" />
                       </div>
                     {/each}
                   </div>
@@ -1193,6 +1279,42 @@
               </button>
             </div>
 
+          <!-- Quick-add tab -->
+          {:else if activeTab === 'quick'}
+            <div class="p-4 space-y-4">
+              <p class="text-xs text-zinc-500">Log calories fast — no food lookup needed.</p>
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">Calories *</label>
+                <input type="number" bind:value={quickCal} placeholder="e.g. 450"
+                       class="input text-2xl font-bold text-center h-16" autofocus />
+              </div>
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">Protein (g, optional)</label>
+                <input type="number" bind:value={quickProtein} placeholder="0" class="input" />
+              </div>
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">Label (optional)</label>
+                <input type="text" bind:value={quickLabel} placeholder="e.g. Protein shake" class="input" />
+              </div>
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">Meal</label>
+                <div class="grid grid-cols-4 gap-1.5">
+                  {#each ['breakfast', 'lunch', 'dinner', 'snack'] as m}
+                    <button onclick={() => quickMeal = m}
+                            class="py-2 text-xs rounded-lg transition-colors font-medium
+                                   {quickMeal === m ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}">
+                      {m.charAt(0).toUpperCase() + m.slice(1)}
+                    </button>
+                  {/each}
+                </div>
+              </div>
+              <button onclick={logQuickAdd}
+                      disabled={!quickCal || quickCal <= 0 || quickSaving}
+                      class="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed">
+                {quickSaving ? 'Logging…' : `Log ${quickCal ? quickCal + ' kcal' : ''}`}
+              </button>
+            </div>
+
           <!-- Custom/saved tab -->
           {:else if activeTab === 'custom'}
             <div class="p-4">
@@ -1217,6 +1339,119 @@
                 <p class="text-center text-zinc-500 text-sm py-8">No saved foods yet</p>
               {/if}
             </div>
+
+          <!-- Recipes tab -->
+          {:else if activeTab === 'recipes'}
+            {#if selectedRecipe}
+              <!-- Recipe log view -->
+              <div class="p-4 space-y-4">
+                <button onclick={() => selectedRecipe = null} class="text-xs text-zinc-500 hover:text-zinc-300">← Back to recipes</button>
+                <div>
+                  <h3 class="font-semibold text-white">{selectedRecipe.name}</h3>
+                  {#if selectedRecipe.description}
+                    <p class="text-xs text-zinc-500 mt-0.5">{selectedRecipe.description}</p>
+                  {/if}
+                </div>
+                <div class="grid grid-cols-4 gap-2">
+                  {#each [['kcal', selectedRecipe.total_calories, 'text-orange-400'], ['P', selectedRecipe.total_protein, 'text-blue-400'], ['C', selectedRecipe.total_carbs, 'text-green-400'], ['F', selectedRecipe.total_fat, 'text-yellow-400']] as [lbl, val, cls]}
+                    <div class="text-center py-2 bg-zinc-800/60 rounded-lg">
+                      <p class="text-sm font-bold {cls}">{Math.round(val as number)}{lbl !== 'kcal' ? 'g' : ''}</p>
+                      <p class="text-xs text-zinc-500">{lbl}</p>
+                    </div>
+                  {/each}
+                </div>
+                <div>
+                  <label class="text-xs text-zinc-400 block mb-1">Servings</label>
+                  <div class="flex items-center gap-3">
+                    <button onclick={() => recipeServings = Math.max(0.5, recipeServings - 0.5)}
+                            class="w-8 h-8 rounded-full bg-zinc-800 text-white text-lg flex items-center justify-center">−</button>
+                    <span class="font-bold text-white w-8 text-center">{recipeServings}</span>
+                    <button onclick={() => recipeServings += 0.5}
+                            class="w-8 h-8 rounded-full bg-zinc-800 text-white text-lg flex items-center justify-center">+</button>
+                  </div>
+                </div>
+                <div class="grid grid-cols-4 gap-1.5">
+                  {#each ['breakfast', 'lunch', 'dinner', 'snack'] as m}
+                    <button onclick={() => recipeMeal = m}
+                            class="py-2 text-xs rounded-lg transition-colors font-medium
+                                   {recipeMeal === m ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}">
+                      {m.charAt(0).toUpperCase() + m.slice(1)}
+                    </button>
+                  {/each}
+                </div>
+                <button onclick={logSelectedRecipe} disabled={recipeLogging}
+                        class="btn-primary w-full disabled:opacity-40">
+                  {recipeLogging ? 'Logging…' : 'Log Recipe'}
+                </button>
+              </div>
+            {:else if showRecipeBuilder}
+              <!-- Recipe builder -->
+              <div class="p-4 space-y-3 overflow-y-auto">
+                <button onclick={() => showRecipeBuilder = false} class="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+                <input type="text" bind:value={newRecipeName} placeholder="Recipe name *" class="input" />
+                <input type="text" bind:value={newRecipeDesc} placeholder="Description (optional)" class="input" />
+                <div class="flex items-center gap-2">
+                  <label class="text-xs text-zinc-400">Servings:</label>
+                  <input type="number" bind:value={newRecipeServings} min="1" class="input w-20" />
+                </div>
+                <div class="space-y-2">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs font-semibold text-zinc-300">Ingredients</p>
+                    <button onclick={() => newRecipeIngredients = [...newRecipeIngredients, {name:'',quantity:'1',unit:'serving',calories:'',protein:'',carbs:'',fat:''}]}
+                            class="text-xs text-primary-400 hover:text-primary-300">+ Add</button>
+                  </div>
+                  {#each newRecipeIngredients as ing, i}
+                    <div class="bg-zinc-800/60 rounded-xl p-3 space-y-2">
+                      <div class="flex gap-2">
+                        <input type="text" bind:value={ing.name} placeholder="Name" class="input flex-1 text-sm" />
+                        <button onclick={() => newRecipeIngredients = newRecipeIngredients.filter((_,j) => j !== i)}
+                                class="text-zinc-500 hover:text-red-400 text-lg px-1">×</button>
+                      </div>
+                      <div class="grid grid-cols-2 gap-2">
+                        <input type="number" bind:value={ing.quantity} placeholder="Qty" class="input text-sm" />
+                        <input type="text" bind:value={ing.unit} placeholder="Unit" class="input text-sm" />
+                      </div>
+                      <div class="grid grid-cols-4 gap-1.5">
+                        <div><input type="number" bind:value={ing.calories} placeholder="kcal" class="input text-xs text-center" /><p class="text-zinc-600 text-xs text-center">kcal</p></div>
+                        <div><input type="number" bind:value={ing.protein} placeholder="P" class="input text-xs text-center" /><p class="text-zinc-600 text-xs text-center">P(g)</p></div>
+                        <div><input type="number" bind:value={ing.carbs} placeholder="C" class="input text-xs text-center" /><p class="text-zinc-600 text-xs text-center">C(g)</p></div>
+                        <div><input type="number" bind:value={ing.fat} placeholder="F" class="input text-xs text-center" /><p class="text-zinc-600 text-xs text-center">F(g)</p></div>
+                      </div>
+                    </div>
+                  {/each}
+                  {#if newRecipeIngredients.length === 0}
+                    <p class="text-xs text-zinc-600 text-center py-2">No ingredients yet — add one above</p>
+                  {/if}
+                </div>
+                <button onclick={saveNewRecipe} disabled={!newRecipeName.trim() || recipeSaving}
+                        class="btn-primary w-full disabled:opacity-40">
+                  {recipeSaving ? 'Saving…' : 'Save Recipe'}
+                </button>
+              </div>
+            {:else}
+              <!-- Recipe list -->
+              <div class="p-3 flex justify-between items-center">
+                <p class="text-xs text-zinc-500">{recipes.length} recipe{recipes.length !== 1 ? 's' : ''}</p>
+                <button onclick={() => showRecipeBuilder = true}
+                        class="text-xs text-primary-400 hover:text-primary-300 font-medium">+ New Recipe</button>
+              </div>
+              <div class="px-2 space-y-1 overflow-y-auto">
+                {#each recipes as recipe}
+                  <button onclick={() => { selectedRecipe = recipe; recipeServings = 1; }}
+                          class="w-full text-left px-3 py-2.5 hover:bg-zinc-800 rounded-xl transition-colors">
+                    <p class="text-sm text-white font-medium">{recipe.name}</p>
+                    <p class="text-xs text-zinc-500">{Math.round(recipe.total_calories)} kcal · P:{Math.round(recipe.total_protein)}g · {recipe.servings} serving{recipe.servings !== 1 ? 's' : ''}</p>
+                  </button>
+                {/each}
+                {#if recipes.length === 0}
+                  <div class="text-center py-8">
+                    <p class="text-zinc-500 text-sm">No recipes yet</p>
+                    <button onclick={() => showRecipeBuilder = true}
+                            class="mt-2 text-primary-400 text-xs hover:text-primary-300">Create your first recipe →</button>
+                  </div>
+                {/if}
+              </div>
+            {/if}
           {/if}
         </div>
       {/if}

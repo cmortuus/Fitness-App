@@ -194,8 +194,14 @@ export interface Set {
   notes: string | null;
   started_at: string | null;
   completed_at: string | null;
+  skipped_at: string | null;
   set_type: string | null;
-  sub_sets: { weight_kg: number; reps: number }[] | null;
+  sub_sets: { weight_kg: number; reps: number; type?: string }[] | null;
+  // Draft fields populated by the server for in-progress sets
+  draft_weight_kg: number | null;
+  draft_reps: number | null;
+  draft_reps_left: number | null;
+  draft_reps_right: number | null;
 }
 
 export interface WorkoutSession {
@@ -616,6 +622,8 @@ export interface DailySummary {
   totals: { calories: number; protein: number; carbs: number; fat: number };
   goals: MacroGoals | null;
   remaining: { calories: number; protein: number; carbs: number; fat: number } | null;
+  micronutrient_totals: Record<string, number> | null;
+  micronutrient_goals: Record<string, number> | null;
 }
 
 export interface DailyEntries {
@@ -861,6 +869,75 @@ export async function saveExerciseFeedback(sessionId: number, data: ExerciseFeed
 
 export async function getExerciseFeedback(sessionId: number): Promise<any[]> {
   const response = await api.get(`/sessions/${sessionId}/feedback`);
+  return response.data;
+}
+
+// ── Recipes ──────────────────────────────────────────────────────────────────
+
+export interface RecipeIngredient {
+  id: number;
+  name: string;
+  quantity: number;
+  unit: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
+export interface Recipe {
+  id: number;
+  name: string;
+  description: string | null;
+  servings: number;
+  total_calories: number;
+  total_protein: number;
+  total_carbs: number;
+  total_fat: number;
+  created_at: string;
+  ingredients?: RecipeIngredient[];
+}
+
+export async function getRecipes(): Promise<Recipe[]> {
+  const response = await api.get('/recipes');
+  return response.data;
+}
+
+export async function getRecipe(id: number): Promise<Recipe> {
+  const response = await api.get(`/recipes/${id}`);
+  return response.data;
+}
+
+export async function createRecipe(data: {
+  name: string;
+  description?: string;
+  servings: number;
+  ingredients: Omit<RecipeIngredient, 'id'>[];
+}): Promise<Recipe> {
+  const response = await api.post('/recipes', data);
+  return response.data;
+}
+
+export async function updateRecipe(id: number, data: {
+  name: string;
+  description?: string;
+  servings: number;
+  ingredients: Omit<RecipeIngredient, 'id'>[];
+}): Promise<Recipe> {
+  const response = await api.put(`/recipes/${id}`, data);
+  return response.data;
+}
+
+export async function deleteRecipe(id: number): Promise<void> {
+  await api.delete(`/recipes/${id}`);
+}
+
+export async function logRecipe(recipeId: number, data: {
+  date: string;
+  servings: number;
+  meal_type: string;
+}): Promise<NutritionEntry> {
+  const response = await api.post(`/recipes/${recipeId}/log`, data);
   return response.data;
 }
 
