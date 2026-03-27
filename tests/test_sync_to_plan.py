@@ -1,5 +1,4 @@
 """Tests for sync-to-plan structural changes (#346)."""
-import json
 import pytest
 from httpx import AsyncClient
 
