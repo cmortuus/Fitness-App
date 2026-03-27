@@ -152,6 +152,7 @@
   let syncToPlan = $state(true);
   let hasLinkedPlan = $state(false);
   let syncCount = $state<number | null>(null);
+  let syncStructural = $state<number | null>(null);
   let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
   let sharing = $state(false);
 
@@ -1657,6 +1658,7 @@
         try {
           const data = await syncSessionToPlan(sessionId);
           syncCount = data.updated;
+          syncStructural = data.structural_changes ?? 0;
         } catch (e) {
           console.error('Failed to sync session to plan:', e);
         }
@@ -2107,7 +2109,7 @@
       <!-- Sync result -->
       {#if syncCount !== null}
         <div class="mb-4 flex items-center gap-2 text-sm text-green-400 bg-green-900/20 border border-green-700/40 rounded-lg px-3 py-2">
-          <span>✓ {syncCount} exercise{syncCount !== 1 ? 's' : ''} updated in plan</span>
+          <span>✓ Plan updated{syncCount ? ` — ${syncCount} weight/rep update${syncCount !== 1 ? 's' : ''}` : ''}{syncStructural ? ` — ${syncStructural} structural change${syncStructural !== 1 ? 's' : ''}` : ''}</span>
         </div>
       {/if}
 
@@ -2877,7 +2879,7 @@
               {#if hasLinkedPlan}
                 <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
                   <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
-                  Update plan with today's weights & reps
+                  Update plan with today's changes
                 </label>
               {/if}
               <button onclick={doFinish} disabled={finishing}
