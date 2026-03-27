@@ -1,5 +1,6 @@
 """Nutrition tracking models — food items, daily entries, and macro goals."""
 
+import os
 from datetime import date as date_type, datetime
 
 from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
@@ -123,8 +124,7 @@ class FoodSubmission(Base):
 
 # Number of distinct user submissions required to promote a pending food to community.
 # Configurable via COMMUNITY_FOOD_THRESHOLD env var (default 1 — single user promotes immediately).
-import os as _os
-COMMUNITY_THRESHOLD: int = int(_os.environ.get("COMMUNITY_FOOD_THRESHOLD", "1"))
+COMMUNITY_THRESHOLD: int = int(os.environ.get("COMMUNITY_FOOD_THRESHOLD", "1"))
 
 
 class Recipe(Base):
