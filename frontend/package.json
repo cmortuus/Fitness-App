@@ -7,12 +7,9 @@
     "dev": "vite",
     "build": "vite build && node -e \"const fs=require('fs');const f='build/client/sw.js';fs.writeFileSync(f,fs.readFileSync(f,'utf8').replace('__BUILD_TIMESTAMP__',Date.now()))\"",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui"
+    "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "@sveltejs/adapter-node": "^2.0.0",
     "@sveltejs/kit": "^2.0.0",
     "@sveltejs/vite-plugin-svelte": "^4.0.0",
