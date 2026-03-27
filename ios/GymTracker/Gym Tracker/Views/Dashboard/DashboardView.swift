@@ -224,33 +224,49 @@ struct DashboardView: View {
 
     private var recentWorkoutsSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recent Workouts")
-                .font(.headline)
+            HStack {
+                Text("Recent Workouts")
+                    .font(.headline)
+                Spacer()
+                NavigationLink("See All") {
+                    WorkoutHistoryView()
+                }
+                .font(.caption)
+                .foregroundStyle(.blue)
+            }
 
             ForEach(recentSessions.prefix(5)) { session in
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(session.name ?? "Workout")
-                            .font(.subheadline.bold())
-                        if let date = session.date {
-                            Text(formatRelativeDate(date))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                NavigationLink {
+                    SessionDetailView(session: session, weightUnit: weightUnit)
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(session.name ?? "Workout")
+                                .font(.subheadline.bold())
+                                .foregroundStyle(.primary)
+                            if let date = session.date {
+                                Text(formatRelativeDate(date))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            if let sets = session.total_sets {
+                                Text("\(sets) sets").font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let vol = session.total_volume_kg, vol > 0 {
+                                let disp = weightUnit == "lbs" ? vol * 2.20462 : vol
+                                Text("\(Int(disp)) \(weightUnit)")
+                                    .font(.caption).foregroundStyle(.blue)
+                            }
+                        }
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
                     }
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 2) {
-                        if let sets = session.total_sets {
-                            Text("\(sets) sets").font(.caption).foregroundStyle(.secondary)
-                        }
-                        if let vol = session.total_volume_kg, vol > 0 {
-                            let disp = weightUnit == "lbs" ? vol * 2.20462 : vol
-                            Text("\(Int(disp)) \(weightUnit)")
-                                .font(.caption).foregroundStyle(.blue)
-                        }
-                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             }
         }
         .padding()
