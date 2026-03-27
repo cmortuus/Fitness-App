@@ -14,6 +14,7 @@ struct NutritionView: View {
     @State private var showAlcoholCalc = false
     @State private var showQuickAdd = false
     @State private var showRecipes = false
+    @State private var showGoalsSheet = false
 
     private let meals = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -131,6 +132,9 @@ struct NutritionView: View {
             }
             .sheet(isPresented: $showRecipes) {
                 RecipesView(date: dateString, onLog: { Task { await loadDay() } })
+            }
+            .sheet(isPresented: $showGoalsSheet) {
+                MacroGoalsSheet(currentGoals: summary?.goals, onSave: { Task { await loadDay() } })
             }
         }
     }
@@ -301,13 +305,31 @@ struct NutritionView: View {
                     .frame(maxWidth: .infinity)
                 }
             } else {
-                // No goals — simple totals
-                HStack(spacing: 20) {
-                    simpleMacro("Cal", totals.calories, .orange)
-                    simpleMacro("P", totals.protein, .red)
-                    simpleMacro("C", totals.carbs, .blue)
-                    simpleMacro("F", totals.fat, .yellow)
+                // No goals — simple totals + set goals prompt
+                VStack(spacing: 12) {
+                    HStack(spacing: 20) {
+                        simpleMacro("Cal", totals.calories, .orange)
+                        simpleMacro("P", totals.protein, .red)
+                        simpleMacro("C", totals.carbs, .blue)
+                        simpleMacro("F", totals.fat, .yellow)
+                    }
+                    Button { showGoalsSheet = true } label: {
+                        Label("Set Macro Goals", systemImage: "target")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
                 }
+            }
+
+            // Edit goals button (shown when goals are set)
+            if goals != nil {
+                Button { showGoalsSheet = true } label: {
+                    Image(systemName: "slider.horizontal.3")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
         .padding()
@@ -1112,6 +1134,133 @@ struct QuickAddView: View {
             onSave()
             dismiss()
         } catch { print("[QuickAdd] Error: \(error)") }
+        saving = false
+    }
+}
+
+// MARK: - Macro Goals Sheet
+
+struct MacroGoalsSheet: View {
+    let currentGoals: MacroGoals?
+    let onSave: () -> Void
+
+    @State private var calories: Double?
+    @State private var protein: Double?
+    @State private var carbs: Double?
+    @State private var fat: Double?
+    @State private var saving = false
+    @Environment(\.dismiss) private var dismiss
+
+    init(currentGoals: MacroGoals?, onSave: @escaping () -> Void) {
+        self.currentGoals = currentGoals
+        self.onSave = onSave
+        _calories = State(initialValue: currentGoals?.calories)
+        _protein = State(initialValue: currentGoals?.protein)
+        _carbs = State(initialValue: currentGoals?.carbs)
+        _fat = State(initialValue: currentGoals?.fat)
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    macroField("Calories (kcal)", value: $calories)
+                    macroField("Protein (g)", value: $protein)
+                    macroField("Carbs (g)", value: $carbs)
+                    macroField("Fat (g)", value: $fat)
+                } header: {
+                    Text("Daily Macro Goals")
+                } footer: {
+                    Text("Goals are used to show progress rings in the nutrition view.")
+                        .font(.caption)
+                }
+
+                if let cal = calories, let p = protein {
+                    Section("Summary") {
+                        HStack {
+                            Text("Calories")
+                            Spacer()
+                            Text("\(Int(cal)) kcal")
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Text("Protein")
+                            Spacer()
+                            Text(String(format: "%.0fg (%.0f%%)", p, p * 4 / cal * 100))
+                                .foregroundStyle(.secondary)
+                        }
+                        if let c = carbs {
+                            HStack {
+                                Text("Carbs")
+                                Spacer()
+                                Text(String(format: "%.0fg (%.0f%%)", c, c * 4 / cal * 100))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                        if let f = fat {
+                            HStack {
+                                Text("Fat")
+                                Spacer()
+                                Text(String(format: "%.0fg (%.0f%%)", f, f * 9 / cal * 100))
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Macro Goals")
+            .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") {
+                        Task { await saveGoals() }
+                    }
+                    .disabled(saving || calories == nil)
+                    .fontWeight(.semibold)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
+    }
+
+    private func macroField(_ label: String, value: Binding<Double?>) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", value: value, format: .number)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 100)
+        }
+    }
+
+    private func saveGoals() async {
+        guard let cal = calories else { return }
+        saving = true
+        struct GoalsBody: Encodable {
+            let calories: Double
+            let protein: Double
+            let carbs: Double
+            let fat: Double
+        }
+        let body = GoalsBody(
+            calories: cal,
+            protein: protein ?? 0,
+            carbs: carbs ?? 0,
+            fat: fat ?? 0
+        )
+        do {
+            struct GoalsResponse: Decodable { let id: Int? }
+            let _: GoalsResponse = try await APIClient.shared.put("/nutrition/goals", body: body)
+            onSave()
+            dismiss()
+        } catch {
+            print("[MacroGoals] Save error: \(error)")
+        }
         saving = false
     }
 }
