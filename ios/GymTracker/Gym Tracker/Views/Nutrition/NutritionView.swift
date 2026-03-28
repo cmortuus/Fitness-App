@@ -37,29 +37,42 @@ struct NutritionView: View {
         NavigationStack {
             ZStack(alignment: .bottomTrailing) {
                 ScrollView {
-                    VStack(spacing: 12) {
-                        dateNav
+                    VStack(spacing: 0) {
+                        // Hero header with date + calorie summary
+                        heroHeader
 
                         if loading {
                             ProgressView().padding(.top, 60)
                         } else {
-                            phaseCard
-                            macroDashboard
-                            waterCard
-                            micronutrients
-                            foodLog
+                            VStack(spacing: 16) {
+                                // Macro bars
+                                macroDashboard
+
+                                // Phase (compact)
+                                phaseCard
+
+                                // Water
+                                waterCard
+
+                                // Food log
+                                foodLog
+
+                                // Micronutrients
+                                micronutrients
+                            }
+                            .padding(.top, 16)
                         }
 
-                        Spacer(minLength: 80)
+                        Spacer(minLength: 90)
                     }
                 }
-                .background(Color(.systemGroupedBackground))
+                .background(Color.black)
+                .ignoresSafeArea(edges: .top)
 
-                // Expandable FAB
+                // FAB
                 expandableFAB
             }
-            .navigationTitle("Nutrition")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarHidden(true)
             .keyboardDoneButton()
             .task { await loadAll(); await loadPhase() }
             .refreshable { await loadAll() }
@@ -105,40 +118,121 @@ struct NutritionView: View {
         }
     }
 
-    // MARK: - Date Navigation
+    // MARK: - Hero Header
 
-    private var dateNav: some View {
-        HStack(spacing: 16) {
-            Button { shiftDate(-1) } label: {
-                Image(systemName: "chevron.left")
-                    .font(.body.weight(.semibold))
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            VStack(spacing: 1) {
-                Text(Calendar.current.isDateInToday(selectedDate) ? "Today" : selectedDate.formatted(.dateTime.weekday(.wide)))
-                    .font(.title3.weight(.semibold))
-                Text(selectedDate.formatted(.dateTime.month(.wide).day()))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-            Spacer()
-            HStack(spacing: 16) {
-                Button { showCopyDayConfirm = true } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.body)
+    private var heroHeader: some View {
+        let totals = summary?.totals ?? MacroTotals(calories: 0, protein: 0, carbs: 0, fat: 0)
+        let goalCal = summary?.goals?.calories ?? (activePhase?.current_goals?.calories)
+
+        return VStack(spacing: 0) {
+            // Date row
+            HStack {
+                Button { shiftDate(-1) } label: {
+                    Image(systemName: "chevron.left").font(.body.weight(.medium))
+                }
+                Spacer()
+                VStack(spacing: 0) {
+                    Text(Calendar.current.isDateInToday(selectedDate) ? "Today" : selectedDate.formatted(.dateTime.weekday(.wide)))
+                        .font(.caption.weight(.semibold))
+                        .textCase(.uppercase)
+                        .tracking(1.2)
                         .foregroundStyle(.secondary)
+                    Text(selectedDate.formatted(.dateTime.month(.abbreviated).day()))
+                        .font(.subheadline)
                 }
-                Button { shiftDate(1) } label: {
-                    Image(systemName: "chevron.right")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(Calendar.current.isDateInToday(selectedDate) ? .tertiary : .secondary)
+                Spacer()
+                HStack(spacing: 14) {
+                    Button { showCopyDayConfirm = true } label: {
+                        Image(systemName: "doc.on.doc").font(.caption)
+                    }
+                    .foregroundStyle(.secondary)
+                    Button { shiftDate(1) } label: {
+                        Image(systemName: "chevron.right").font(.body.weight(.medium))
+                            .foregroundStyle(Calendar.current.isDateInToday(selectedDate) ? .tertiary : .primary)
+                    }
+                    .disabled(Calendar.current.isDateInToday(selectedDate))
                 }
-                .disabled(Calendar.current.isDateInToday(selectedDate))
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 54)
+            .padding(.bottom, 12)
+
+            // Big calorie number
+            VStack(spacing: 4) {
+                Text("\(Int(totals.calories))")
+                    .font(.system(size: 56, weight: .heavy, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.white)
+
+                if let goal = goalCal {
+                    let rem = goal - totals.calories
+                    HStack(spacing: 6) {
+                        Text("of \(Int(goal)) kcal")
+                            .foregroundStyle(.white.opacity(0.5))
+                        Text(rem >= 0 ? "\(Int(rem)) left" : "\(Int(abs(rem))) over")
+                            .foregroundStyle(rem >= 0 ? .green : .red)
+                            .fontWeight(.semibold)
+                    }
+                    .font(.subheadline)
+                } else {
+                    Text("calories")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.4))
+                }
+            }
+            .padding(.bottom, 20)
+
+            // Quick macro pills
+            HStack(spacing: 0) {
+                macroPill("P", totals.protein, .blue)
+                macroPill("C", totals.carbs, .green)
+                macroPill("F", totals.fat, .yellow)
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 20)
+        }
+        .background(
+            LinearGradient(
+                colors: [Color(white: 0.12), Color.black],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    private func macroPill(_ label: String, _ value: Double, _ color: Color) -> some View {
+        let goals = summary?.goals ?? {
+            guard let phase = activePhase, let pg = phase.current_goals else { return nil }
+            return MacroGoals(calories: pg.calories, protein: pg.protein, carbs: pg.carbs, fat: pg.fat)
+        }()
+        let goal: Double? = switch label {
+        case "P": goals?.protein
+        case "C": goals?.carbs
+        case "F": goals?.fat
+        default: nil
+        }
+
+        return VStack(spacing: 6) {
+            HStack(spacing: 4) {
+                Text(label).font(.caption2.weight(.semibold)).foregroundStyle(color)
+                Text("\(Int(value))g")
+                    .font(.subheadline.weight(.bold).monospacedDigit())
+                if let g = goal {
+                    Text("/ \(Int(g))").font(.caption2).foregroundStyle(.white.opacity(0.3))
+                }
+            }
+            if let g = goal, g > 0 {
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(color.opacity(0.15)).frame(height: 4)
+                        Capsule().fill(value > g ? .red : color)
+                            .frame(width: geo.size.width * min(value / g, 1.0), height: 4)
+                    }
+                }
+                .frame(height: 4)
             }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, 8)
+        .frame(maxWidth: .infinity)
     }
 
     private func shiftDate(_ days: Int) {
@@ -191,7 +285,7 @@ struct NutritionView: View {
                     }
                 }
                 .padding(14)
-                .background(Color(.secondarySystemGroupedBackground))
+                .background(Color(white: 0.11))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             } else {
@@ -199,10 +293,11 @@ struct NutritionView: View {
                     HStack(spacing: 8) {
                         Image(systemName: "chart.line.uptrend.xyaxis").foregroundStyle(.blue)
                         Text("Start a diet phase").font(.subheadline).foregroundStyle(.blue)
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 14)
-                    .background(Color(.secondarySystemGroupedBackground))
+                    .padding(14)
+                    .background(Color(white: 0.11))
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(.horizontal)
@@ -210,104 +305,43 @@ struct NutritionView: View {
         }
     }
 
-    // MARK: - Macro Dashboard (horizontal bars)
+    // MARK: - Macro Dashboard
 
+    @ViewBuilder
     private var macroDashboard: some View {
-        let totals = summary?.totals ?? MacroTotals(calories: 0, protein: 0, carbs: 0, fat: 0)
         let goals = summary?.goals ?? {
             guard let phase = activePhase, let pg = phase.current_goals else { return nil }
             return MacroGoals(calories: pg.calories, protein: pg.protein, carbs: pg.carbs, fat: pg.fat)
         }()
 
-        return VStack(spacing: 14) {
-            if let g = goals {
-                // Calorie headline with remaining pill
-                HStack(alignment: .firstTextBaseline) {
-                    Text("\(Int(totals.calories))")
-                        .font(.system(size: 36, weight: .bold, design: .rounded).monospacedDigit())
-                    Text("/ \(Int(g.calories ?? 2000)) kcal")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
+        if goals == nil {
+            Button { showGoalsSheet = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "target").foregroundStyle(.blue)
+                    Text("Set macro goals to track progress").font(.subheadline).foregroundStyle(.blue)
                     Spacer()
-                    let remaining = (g.calories ?? 2000) - totals.calories
-                    Text("\(abs(Int(remaining))) \(remaining >= 0 ? "left" : "over")")
-                        .font(.caption.weight(.semibold).monospacedDigit())
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 4)
-                        .background(remaining >= 0 ? Color.green.opacity(0.15) : Color.red.opacity(0.15))
-                        .foregroundStyle(remaining >= 0 ? .green : .red)
-                        .clipShape(Capsule())
+                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
-
-                // Calorie bar
-                macroBar(value: totals.calories, goal: g.calories ?? 2000, color: .orange, height: 10)
-
-                // P / C / F rows
-                macroRow(label: "Protein", value: totals.protein, goal: g.protein ?? 150, unit: "g", color: .blue)
-                macroRow(label: "Carbs", value: totals.carbs, goal: g.carbs ?? 200, unit: "g", color: .green)
-                macroRow(label: "Fat", value: totals.fat, goal: g.fat ?? 65, unit: "g", color: .yellow)
-
-                // Edit goals
-                HStack {
-                    Spacer()
-                    Button { showGoalsSheet = true } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            } else {
-                VStack(spacing: 12) {
-                    HStack(spacing: 20) {
-                        simpleMacro("Cal", totals.calories, .orange)
-                        simpleMacro("P", totals.protein, .blue)
-                        simpleMacro("C", totals.carbs, .green)
-                        simpleMacro("F", totals.fat, .yellow)
-                    }
-                    Button { showGoalsSheet = true } label: {
-                        Label("Set Macro Goals", systemImage: "target").font(.caption)
-                    }
-                    .buttonStyle(.bordered).controlSize(.small)
-                }
+                .padding(14)
+                .background(Color(white: 0.11))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
             }
-        }
-        .padding(14)
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
-        .padding(.horizontal)
-    }
-
-    private func macroBar(value: Double, goal: Double, color: Color, height: CGFloat) -> some View {
-        GeometryReader { geo in
-            ZStack(alignment: .leading) {
-                Capsule().fill(color.opacity(0.12)).frame(height: height)
-                Capsule().fill(value > goal ? Color.red : color)
-                    .frame(width: geo.size.width * min(goal > 0 ? value / goal : 0, 1.0), height: height)
-                    .animation(.easeInOut(duration: 0.4), value: value)
-            }
-        }
-        .frame(height: height)
-    }
-
-    private func macroRow(label: String, value: Double, goal: Double, unit: String, color: Color) -> some View {
-        VStack(spacing: 4) {
+            .padding(.horizontal)
+        } else {
+            // Goals edit button
             HStack {
-                Text(label).font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Text("\(Int(value))\(unit)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
-                Text("/ \(Int(goal))\(unit)")
+                Button { showGoalsSheet = true } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "slider.horizontal.3")
+                        Text("Goals")
+                    }
                     .font(.caption2).foregroundStyle(.secondary)
+                }
             }
-            macroBar(value: value, goal: goal, color: color, height: 6)
+            .padding(.horizontal, 20)
+            .padding(.bottom, -8)
         }
-    }
-
-    private func simpleMacro(_ label: String, _ value: Double, _ color: Color) -> some View {
-        VStack(spacing: 4) {
-            Text("\(Int(value))").font(.title3.weight(.bold).monospacedDigit()).foregroundStyle(color)
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Water Card
@@ -359,14 +393,14 @@ struct NutritionView: View {
                                         .font(.caption2.weight(.semibold).monospacedDigit())
                                 }
                                 .padding(.vertical, 5).padding(.horizontal, 8)
-                                .background(Color(.tertiarySystemGroupedBackground))
+                                .background(Color(white: 0.08))
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
                         }
                     }
                 }
                 .padding(14)
-                .background(Color(.secondarySystemGroupedBackground))
+                .background(Color(white: 0.11))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             }
@@ -384,23 +418,35 @@ struct NutritionView: View {
     private var foodLog: some View {
         VStack(spacing: 0) {
             if allEntries.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "fork.knife").font(.system(size: 30)).foregroundStyle(.tertiary)
-                    Text("No food logged").font(.subheadline.weight(.semibold))
-                    HStack(spacing: 12) {
+                VStack(spacing: 16) {
+                    Image(systemName: "fork.knife")
+                        .font(.system(size: 28))
+                        .foregroundStyle(.white.opacity(0.15))
+                    Text("No food logged")
+                        .font(.subheadline)
+                        .foregroundStyle(.white.opacity(0.4))
+                    HStack(spacing: 10) {
                         Button { showAddFood = true } label: {
-                            Label("Add Food", systemImage: "plus.circle.fill").font(.subheadline.weight(.semibold))
+                            Label("Add Food", systemImage: "plus")
+                                .font(.subheadline.weight(.semibold))
+                                .padding(.horizontal, 16).padding(.vertical, 10)
+                                .background(Color.blue)
+                                .foregroundStyle(.white)
+                                .clipShape(Capsule())
                         }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
                         Button { showCopyDayConfirm = true } label: {
-                            Label("Copy Yesterday", systemImage: "doc.on.doc").font(.caption)
+                            Label("Copy Yesterday", systemImage: "doc.on.doc")
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 12).padding(.vertical, 8)
+                                .background(Color.white.opacity(0.08))
+                                .foregroundStyle(.white.opacity(0.6))
+                                .clipShape(Capsule())
                         }
-                        .buttonStyle(.bordered).controlSize(.small)
                     }
                 }
-                .padding(.vertical, 28)
+                .padding(.vertical, 32)
                 .frame(maxWidth: .infinity)
-                .background(Color(.secondarySystemGroupedBackground))
+                .background(Color(white: 0.11))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             } else {
@@ -431,23 +477,24 @@ struct NutritionView: View {
 
         return VStack(spacing: 0) {
             HStack(spacing: 6) {
-                Image(systemName: icon).font(.caption2).foregroundStyle(.secondary)
-                Text(meal.capitalized).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Image(systemName: icon).font(.caption2).foregroundStyle(.white.opacity(0.4))
+                Text(meal.uppercased()).font(.caption2.weight(.semibold)).tracking(0.8).foregroundStyle(.white.opacity(0.4))
                 Spacer()
-                Text("\(Int(mealCal)) kcal").font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                Text("\(Int(mealCal))").font(.caption.weight(.bold).monospacedDigit()).foregroundStyle(.orange)
+                Text("kcal").font(.caption2).foregroundStyle(.white.opacity(0.3))
             }
-            .padding(.horizontal, 12).padding(.vertical, 6)
+            .padding(.horizontal, 14).padding(.vertical, 8)
 
             VStack(spacing: 0) {
                 ForEach(entries) { entry in
                     foodRow(entry)
                     if entry.id != entries.last?.id {
-                        Divider().padding(.leading, 12)
+                        Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1).padding(.leading, 14)
                     }
                 }
             }
-            .background(Color(.secondarySystemGroupedBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .background(Color(white: 0.11))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
 
@@ -733,7 +780,7 @@ struct WaterTrackerCard: View {
             }
         }
         .padding(12)
-        .background(Color(.secondarySystemGroupedBackground))
+        .background(Color(white: 0.11))
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -925,7 +972,7 @@ struct AddFoodView: View {
                 }
             }
             .padding(12)
-            .background(Color(.tertiarySystemGroupedBackground))
+            .background(Color(white: 0.08))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding([.horizontal, .bottom])
 
@@ -970,7 +1017,7 @@ struct AddFoodView: View {
                 }
             }
             .padding(12)
-            .background(Color(.tertiarySystemGroupedBackground))
+            .background(Color(white: 0.08))
             .clipShape(RoundedRectangle(cornerRadius: 12))
             .padding([.horizontal, .bottom])
 
