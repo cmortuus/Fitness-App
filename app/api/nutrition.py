@@ -11,9 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
-from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, WaterEntry
+from app.models.body_weight import BodyWeightEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroCycle, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
 from app.models.user import User
+from app.models.workout import WorkoutSession
 from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
+from app.services.expenditure import compute_adaptive_tdee
 
 router = APIRouter()
 
@@ -562,7 +565,49 @@ async def daily_summary(
             "fat": goal.fat - totals["fat"],
         }
 
-    return {"date": target_date.isoformat(), "totals": totals, "goals": goals, "remaining": remaining, "micronutrient_totals": micro_totals or None}
+    # Macro cycling: check if active and detect training vs rest day
+    day_type = None
+    cycled_goals = None
+    cycle_result = await db.execute(
+        select(MacroCycle).where(MacroCycle.user_id == user.id, MacroCycle.is_active == True)  # noqa: E712
+    )
+    cycle = cycle_result.scalar_one_or_none()
+    if cycle:
+        # Check if user worked out on this date
+        from sqlalchemy import cast, Date
+        workout_result = await db.execute(
+            select(func.count(WorkoutSession.id)).where(
+                WorkoutSession.user_id == user.id,
+                cast(WorkoutSession.started_at, Date) == target_date,
+                WorkoutSession.completed_at.isnot(None),
+            )
+        )
+        has_workout = (workout_result.scalar() or 0) > 0
+        day_type = "training" if has_workout else "rest"
+        cycled_goals = {
+            "training": {
+                "calories": cycle.training_calories, "protein": cycle.training_protein,
+                "carbs": cycle.training_carbs, "fat": cycle.training_fat,
+            },
+            "rest": {
+                "calories": cycle.rest_calories, "protein": cycle.rest_protein,
+                "carbs": cycle.rest_carbs, "fat": cycle.rest_fat,
+            },
+        }
+        # Override remaining with day-specific targets
+        active = cycled_goals[day_type]
+        remaining = {
+            "calories": active["calories"] - totals["calories"],
+            "protein": active["protein"] - totals["protein"],
+            "carbs": active["carbs"] - totals["carbs"],
+            "fat": active["fat"] - totals["fat"],
+        }
+
+    return {
+        "date": target_date.isoformat(), "totals": totals, "goals": goals,
+        "remaining": remaining, "micronutrient_totals": micro_totals or None,
+        "day_type": day_type, "cycled_goals": cycled_goals,
+    }
 
 
 @router.get("/weekly-report")
@@ -782,3 +827,67 @@ async def delete_water(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Water entry not found")
     await db.delete(entry)
     await db.flush()
+
+
+# ── Expenditure (adaptive TDEE) ───────────────────────────────────────────────
+
+@router.get("/expenditure")
+async def get_expenditure(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: int = Query(default=90, ge=7, le=365),
+) -> dict:
+    """Return adaptive TDEE history and current estimate."""
+    today = datetime.utcnow().date()
+    start = today - timedelta(days=days)
+
+    # Check for stored TDEE history
+    tdee_result = await db.execute(
+        select(TDEEHistory)
+        .where(TDEEHistory.user_id == user.id, TDEEHistory.date >= start)
+        .order_by(TDEEHistory.date)
+    )
+    history = tdee_result.scalars().all()
+
+    # Compute current TDEE on the fly
+    intake_result = await db.execute(
+        select(NutritionEntry.date, func.sum(NutritionEntry.calories).label("total"))
+        .where(NutritionEntry.user_id == user.id, NutritionEntry.date >= today - timedelta(days=28))
+        .group_by(NutritionEntry.date)
+    )
+    intake_by_date = {row.date: row.total for row in intake_result.all()}
+
+    weight_result = await db.execute(
+        select(BodyWeightEntry)
+        .where(BodyWeightEntry.user_id == user.id, BodyWeightEntry.recorded_at >= datetime.combine(today - timedelta(days=28), datetime.min.time()))
+        .order_by(BodyWeightEntry.recorded_at)
+    )
+    weights = weight_result.scalars().all()
+
+    daily_records = []
+    for i in range(29):
+        d = today - timedelta(days=28) + timedelta(days=i)
+        daily_records.append({
+            "date": d,
+            "intake_calories": intake_by_date.get(d),
+            "weight_kg": next((w.weight_kg for w in weights if w.recorded_at.date() == d), None),
+        })
+
+    current = compute_adaptive_tdee(daily_records)
+
+    return {
+        "current_tdee": current["estimated_tdee"],
+        "confidence": current["confidence"],
+        "method": current["method"],
+        "weight_trend_kg": current["weight_trend_kg"],
+        "history": [
+            {
+                "date": h.date.isoformat(),
+                "estimated_tdee": round(h.estimated_tdee),
+                "intake_calories": round(h.intake_calories) if h.intake_calories else None,
+                "weight_trend_kg": h.weight_trend_kg,
+                "confidence": h.confidence,
+            }
+            for h in history
+        ],
+    }

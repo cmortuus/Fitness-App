@@ -10,9 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
-from app.models.nutrition import DietPhase, MacroGoal
+from app.models.nutrition import DietPhase, MacroCycle, MacroGoal
 from app.models.user import User
 from app.schemas.requests import DietPhaseCreate
+from app.services.expenditure import calculate_cycled_macros
 from app.services.diet_phase import (
     calculate_macros,
     target_end_weight,
@@ -279,3 +280,95 @@ async def end_phase(
     phase.is_active = False
     phase.ended_on = datetime.utcnow().date()
     await db.flush()
+
+
+# ── Macro Cycling ─────────────────────────────────────────────────────────────
+
+@router.post("/active/macro-cycle")
+async def set_macro_cycle(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    enabled: bool = True,
+    training_days_per_week: int = 4,
+) -> dict:
+    """Enable or disable training/rest day macro cycling on the active phase."""
+    # Get current goals
+    today = datetime.utcnow().date()
+    goal_result = await db.execute(
+        select(MacroGoal)
+        .where(MacroGoal.effective_from <= today, MacroGoal.user_id == user.id)
+        .order_by(desc(MacroGoal.effective_from))
+        .limit(1)
+    )
+    goal = goal_result.scalar_one_or_none()
+    if not goal:
+        raise HTTPException(status_code=400, detail="Set macro goals first")
+
+    # Deactivate existing cycles
+    existing = await db.execute(
+        select(MacroCycle).where(MacroCycle.user_id == user.id, MacroCycle.is_active == True)  # noqa: E712
+    )
+    for c in existing.scalars().all():
+        c.is_active = False
+
+    if not enabled:
+        await db.flush()
+        return {"enabled": False}
+
+    # Calculate cycled macros
+    cycled = calculate_cycled_macros(
+        base_calories=goal.calories,
+        protein_g=goal.protein,
+        carb_preset="moderate",
+        training_days_per_week=training_days_per_week,
+    )
+
+    cycle = MacroCycle(
+        user_id=user.id,
+        is_active=True,
+        training_calories=cycled["training"]["calories"],
+        training_protein=cycled["training"]["protein"],
+        training_carbs=cycled["training"]["carbs"],
+        training_fat=cycled["training"]["fat"],
+        rest_calories=cycled["rest"]["calories"],
+        rest_protein=cycled["rest"]["protein"],
+        rest_carbs=cycled["rest"]["carbs"],
+        rest_fat=cycled["rest"]["fat"],
+        effective_from=today,
+    )
+    db.add(cycle)
+    await db.flush()
+    await db.refresh(cycle)
+
+    return {
+        "enabled": True,
+        "training": cycled["training"],
+        "rest": cycled["rest"],
+        "training_days_per_week": training_days_per_week,
+    }
+
+
+@router.get("/active/macro-cycle")
+async def get_macro_cycle(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict | None:
+    """Get active macro cycle if one exists."""
+    result = await db.execute(
+        select(MacroCycle).where(MacroCycle.user_id == user.id, MacroCycle.is_active == True)  # noqa: E712
+    )
+    cycle = result.scalar_one_or_none()
+    if not cycle:
+        return None
+    return {
+        "enabled": True,
+        "training": {
+            "calories": cycle.training_calories, "protein": cycle.training_protein,
+            "carbs": cycle.training_carbs, "fat": cycle.training_fat,
+        },
+        "rest": {
+            "calories": cycle.rest_calories, "protein": cycle.rest_protein,
+            "carbs": cycle.rest_carbs, "fat": cycle.rest_fat,
+        },
+        "effective_from": cycle.effective_from.isoformat(),
+    }
