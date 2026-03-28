@@ -4,7 +4,12 @@ import Foundation
 final class APIClient: Sendable {
     static let shared = APIClient()
 
-    private let baseURL = "https://lethal.dev/api"
+    private let baseURL: String = {
+        if let url = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String, !url.isEmpty {
+            return url
+        }
+        return "https://lethal.dev/api"
+    }()
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
