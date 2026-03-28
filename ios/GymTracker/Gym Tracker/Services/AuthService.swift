@@ -74,8 +74,25 @@ class AuthService {
 
     // MARK: - Refresh
 
+    private var isRefreshing = false
+    private var refreshResult: Bool? = nil
+
     func refreshTokens() async -> Bool {
+        // Prevent multiple concurrent refresh attempts (from parallel API calls)
+        if isRefreshing {
+            // Wait for the in-flight refresh to finish
+            while isRefreshing {
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return refreshResult ?? false
+        }
+
         guard let refresh = refreshToken else { return false }
+
+        isRefreshing = true
+        defer {
+            isRefreshing = false
+        }
 
         struct RefreshRequest: Encodable {
             let refresh_token: String
@@ -92,9 +109,11 @@ class AuthService {
                 body: RefreshRequest(refresh_token: refresh)
             )
             saveTokens(access: response.access_token, refresh: response.refresh_token)
+            refreshResult = true
             return true
         } catch {
             logout()
+            refreshResult = false
             return false
         }
     }

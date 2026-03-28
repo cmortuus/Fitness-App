@@ -610,7 +610,7 @@ struct ProgressView_: View {
             case .recs(let r): recommendations = r
             case .bw(let b): bodyWeights = b
             case .prs(let p): personalRecords = p
-            case .vol(let v): volumeLandmarks = v?.muscles ?? [:]
+            case .vol(let v): volumeLandmarks = v?.muscles ?? []
             }
         }
 

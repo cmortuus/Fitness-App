@@ -10,8 +10,9 @@ struct GymTrackerApp: App {
                 if auth.isAuthenticated {
                     MainTabView()
                         .task {
-                            await SettingsSync.loadFromDB()
-                            await HealthKitManager.shared.syncBodyWeightOnLaunch()
+                            // Fire-and-forget — don't block app launch
+                            Task { await SettingsSync.loadFromDB() }
+                            Task { await HealthKitManager.shared.syncBodyWeightOnLaunch() }
                         }
                 } else {
                     LoginView()
