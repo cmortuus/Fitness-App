@@ -71,11 +71,37 @@ async def add_entry(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Log a new weigh-in."""
+    """Log a new weigh-in. Upserts — if an entry exists for the same calendar day, updates it."""
+    recorded = datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.utcnow()
+    target_date = recorded.date()
+
+    # Check for existing entry on the same day
+    from sqlalchemy import cast, Date
+    result = await db.execute(
+        select(BodyWeightEntry).where(
+            BodyWeightEntry.user_id == user.id,
+            cast(BodyWeightEntry.recorded_at, Date) == target_date,
+        )
+    )
+    existing = result.scalar_one_or_none()
+
+    if existing:
+        # Update existing entry
+        existing.weight_kg = data.weight_kg
+        if data.body_fat_pct is not None:
+            existing.body_fat_pct = data.body_fat_pct
+        existing.recorded_at = recorded
+        if data.notes is not None:
+            existing.notes = data.notes
+        await db.flush()
+        await db.refresh(existing)
+        return serialize_entry(existing)
+
+    # Create new entry
     entry = BodyWeightEntry(
         weight_kg=data.weight_kg,
         body_fat_pct=data.body_fat_pct,
-        recorded_at=datetime.fromisoformat(data.recorded_at) if data.recorded_at else datetime.utcnow(),
+        recorded_at=recorded,
         notes=data.notes,
         user_id=user.id,
     )
