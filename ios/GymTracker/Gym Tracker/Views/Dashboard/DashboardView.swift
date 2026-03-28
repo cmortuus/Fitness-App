@@ -134,9 +134,9 @@ struct DashboardView: View {
                     }
                 }
             }
-            .onAppear {
+            .task {
                 loadWidgetConfig()
-                Task { await loadData() }
+                await loadData()
             }
             .refreshable { await loadData() }
         }
