@@ -6,7 +6,7 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, body_weight, diet_phase, errors, exercises, nutrition, plans, progress, recipes, sessions, templates, websocket
+from app.api import auth, body_weight, checkin, diet_phase, errors, exercises, insights, nutrition, plans, progress, recipes, sessions, templates, websocket
 from app.config import get_settings
 from app.database import init_db
 
@@ -49,6 +49,8 @@ app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
 app.include_router(body_weight.router, prefix="/api/body-weight", tags=["body-weight"])
 app.include_router(nutrition.router, prefix="/api/nutrition", tags=["nutrition"])
 app.include_router(diet_phase.router, prefix="/api/nutrition/phases", tags=["diet-phases"])
+app.include_router(checkin.router, prefix="/api/nutrition", tags=["checkin"])
+app.include_router(insights.router, prefix="/api/nutrition", tags=["insights"])
 app.include_router(recipes.router, prefix="/api/recipes", tags=["recipes"])
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(errors.router, prefix="/api/errors", tags=["errors"])
