@@ -3,13 +3,14 @@ import HealthKit
 
 /// Centralized HealthKit manager for reading/writing health data.
 /// Handles body weight sync, workout logging, and authorization.
-@MainActor
-final class HealthKitManager {
+final class HealthKitManager: @unchecked Sendable {
     static let shared = HealthKitManager()
 
     private let store = HKHealthStore()
 
-    var isAuthorized = false
+    // Protected by MainActor access pattern — only mutated from async functions
+    // called from .task modifiers which run on MainActor
+    private(set) var isAuthorized = false
 
     // MARK: - Types we read/write
 

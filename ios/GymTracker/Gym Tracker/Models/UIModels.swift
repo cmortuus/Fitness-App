@@ -1,6 +1,11 @@
 import Foundation
 import SwiftUI
 import UIKit
+import os
+
+// MARK: - App Logger
+
+let appLog = Logger(subsystem: "dev.lethal.gymtracker", category: "app")
 
 // MARK: - UI State Models for Workout
 

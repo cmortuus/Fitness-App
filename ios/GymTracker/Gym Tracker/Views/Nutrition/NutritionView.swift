@@ -659,7 +659,9 @@ struct NutritionView: View {
     }
 
     private func deleteEntry(_ id: Int) async {
-        try? await APIClient.shared.delete("/nutrition/entries/\(id)")
+        do {
+            try await APIClient.shared.delete("/nutrition/entries/\(id)")
+        } catch { print("[Nutrition] Delete error: \(error)") }
     }
 
     private func duplicateEntry(_ entry: NutritionEntry) async {
@@ -821,7 +823,9 @@ struct WaterTrackerCard: View {
     private func log(_ ml: Double) async {
         struct B: Encodable { let date: String; let amount_ml: Double }
         struct R: Decodable { let id: Int }
-        let _: R? = try? await APIClient.shared.post("/nutrition/water", body: B(date: date, amount_ml: ml))
+        do {
+            let _: R = try await APIClient.shared.post("/nutrition/water", body: B(date: date, amount_ml: ml))
+        } catch { print("[Water] Log error: \(error)") }
         onLog()
     }
 }
