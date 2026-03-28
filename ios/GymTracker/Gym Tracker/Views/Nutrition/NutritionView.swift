@@ -703,26 +703,20 @@ struct NutritionView: View {
 
     // MARK: - Data Loading
 
-    @MainActor
     private func loadAll() async {
-        // Fetch data concurrently but assign @State on MainActor
-        async let summaryReq: DailySummary? = {
-            try? await APIClient.shared.get("/nutrition/summary",
+        do {
+            summary = try await APIClient.shared.get("/nutrition/summary",
                 query: [.init(name: "date", value: dateString)])
-        }()
-        async let entriesReq: EntriesResponse? = {
-            try? await APIClient.shared.get("/nutrition/entries",
+        } catch { print("[Nutrition] Summary: \(error)") }
+        do {
+            let response: EntriesResponse = try await APIClient.shared.get("/nutrition/entries",
                 query: [.init(name: "date", value: dateString)])
-        }()
-        async let waterReq: WaterSummary? = {
-            try? await APIClient.shared.get("/nutrition/water",
+            mealEntries = response.meals
+        } catch { print("[Nutrition] Entries: \(error)") }
+        do {
+            waterSummary = try await APIClient.shared.get("/nutrition/water",
                 query: [.init(name: "date", value: dateString)])
-        }()
-
-        let (s, e, w) = await (summaryReq, entriesReq, waterReq)
-        summary = s
-        mealEntries = e?.meals ?? [:]
-        waterSummary = w
+        } catch { print("[Nutrition] Water: \(error)") }
         loading = false
     }
 
@@ -731,8 +725,10 @@ struct NutritionView: View {
     }
 
     private func loadWater() async {
-        waterSummary = try? await APIClient.shared.get("/nutrition/water",
-            query: [.init(name: "date", value: dateString)])
+        do {
+            waterSummary = try await APIClient.shared.get("/nutrition/water",
+                query: [.init(name: "date", value: dateString)])
+        } catch { print("[Nutrition] Water: \(error)") }
     }
 
     private func loadPhase() async {
