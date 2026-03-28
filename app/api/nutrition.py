@@ -568,10 +568,14 @@ async def daily_summary(
     # Macro cycling: check if active and detect training vs rest day
     day_type = None
     cycled_goals = None
-    cycle_result = await db.execute(
-        select(MacroCycle).where(MacroCycle.user_id == user.id, MacroCycle.is_active == True)  # noqa: E712
-    )
-    cycle = cycle_result.scalar_one_or_none()
+    cycle = None
+    try:
+        cycle_result = await db.execute(
+            select(MacroCycle).where(MacroCycle.user_id == user.id, MacroCycle.is_active == True)  # noqa: E712
+        )
+        cycle = cycle_result.scalar_one_or_none()
+    except Exception:
+        pass  # Table may not exist yet if migration hasn't run
     if cycle:
         # Check if user worked out on this date
         from sqlalchemy import cast, Date
