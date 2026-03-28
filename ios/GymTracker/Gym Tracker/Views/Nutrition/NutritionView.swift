@@ -234,6 +234,12 @@ struct NutritionView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel({
+            let name: String = switch label { case "P": "Protein"; case "C": "Carbs"; case "F": "Fat"; default: label }
+            if let g = goal { return "\(name): \(Int(value)) of \(Int(g)) grams" }
+            return "\(name): \(Int(value)) grams"
+        }())
     }
 
     private func shiftDate(_ days: Int) {

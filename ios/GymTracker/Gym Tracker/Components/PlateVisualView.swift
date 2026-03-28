@@ -45,10 +45,13 @@ struct PlateVisualView: View {
                 .frame(height: 50)
 
                 // Text breakdown
-                Text(plates.map { "\($0.count)×\(formatWeight($0.weight))" }.joined(separator: " + ") + (oneSided ? "" : " /side"))
+                let breakdown = plates.map { "\($0.count)×\(formatWeight($0.weight))" }.joined(separator: " + ") + (oneSided ? "" : " /side")
+                Text(breakdown)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Plate layout: \(plates.map { "\($0.count) plates of \(formatWeight($0.weight))" }.joined(separator: ", "))\(oneSided ? "" : " per side")")
         }
     }
 
