@@ -3,7 +3,8 @@ import HealthKit
 
 /// Centralized HealthKit manager for reading/writing health data.
 /// Handles body weight sync, workout logging, and authorization.
-final class HealthKitManager: @unchecked Sendable {
+@MainActor
+final class HealthKitManager {
     static let shared = HealthKitManager()
 
     private let store = HKHealthStore()

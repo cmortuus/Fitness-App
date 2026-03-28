@@ -87,6 +87,7 @@ struct SettingsJSON: Codable {
     }
 }
 
+@MainActor
 enum SettingsSync {
     private static var saveTask: Task<Void, Never>?
 
