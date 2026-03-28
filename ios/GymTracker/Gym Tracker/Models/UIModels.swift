@@ -7,6 +7,20 @@ import os
 
 let appLog = Logger(subsystem: "dev.lethal.gymtracker", category: "app")
 
+// MARK: - App Constants
+
+enum AppConstants {
+    static let plateTolerance: Double = 0.1
+    static let estimatedSecondsPerSet: Double = 40.0
+    static let settingsSyncDebounceMs: UInt64 = 500
+    static let searchDebounceMs: UInt64 = 300
+    static let defaultBarWeightLbs: Double = 45.0
+    static let defaultBarWeightKg: Double = 20.0
+    static let minTapTarget: CGFloat = 44.0
+    static let cardCornerRadius: CGFloat = 12.0
+    static let darkCardBackground = Color(white: 0.11)
+}
+
 // MARK: - UI State Models for Workout
 
 enum SetType: String, CaseIterable {
