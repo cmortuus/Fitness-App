@@ -188,16 +188,30 @@ struct BodyWeightEntry: Codable, Identifiable {
 
 struct NutritionEntry: Codable, Identifiable {
     let id: Int
-    let food_item_id: Int?
     let name: String
     let date: String?
-    let meal: String?
     let calories: Double?
     let protein: Double?
     let carbs: Double?
     let fat: Double?
     let quantity_g: Double?
-    let micronutrients: [String: Double]?
+    // Decoded separately to avoid crash from unexpected JSON shapes
+    let food_item_id: Int?
+    let meal: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        date = try c.decodeIfPresent(String.self, forKey: .date)
+        calories = try c.decodeIfPresent(Double.self, forKey: .calories)
+        protein = try c.decodeIfPresent(Double.self, forKey: .protein)
+        carbs = try c.decodeIfPresent(Double.self, forKey: .carbs)
+        fat = try c.decodeIfPresent(Double.self, forKey: .fat)
+        quantity_g = try c.decodeIfPresent(Double.self, forKey: .quantity_g)
+        food_item_id = try? c.decodeIfPresent(Int.self, forKey: .food_item_id)
+        meal = try? c.decodeIfPresent(String.self, forKey: .meal)
+    }
 }
 
 struct MacroTotals: Codable {
