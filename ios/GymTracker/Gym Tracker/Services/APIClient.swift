@@ -16,8 +16,8 @@ final class APIClient: Sendable {
 
     private init() {
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        config.timeoutIntervalForResource = 30
+        config.timeoutIntervalForRequest = 8
+        config.timeoutIntervalForResource = 15
         // Route to the dev container via nginx cookie
         let cookie = HTTPCookie(properties: [
             .domain: "lethal.dev",
