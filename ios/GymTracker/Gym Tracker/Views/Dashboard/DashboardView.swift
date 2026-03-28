@@ -670,6 +670,7 @@ struct DashboardView: View {
 
     private func loadData() async {
         do {
+            // Fetch all data concurrently
             async let p: [WorkoutPlan] = APIClient.shared.get("/plans/")
             async let s: [WorkoutSession] = APIClient.shared.get("/sessions/",
                 query: [.init(name: "limit", value: "30")])
@@ -686,28 +687,41 @@ struct DashboardView: View {
             }()
             async let ins: [DashboardInsight] = APIClient.shared.get("/progress/insights")
 
-            plans = try await p
+            // Wait for all results before touching @State
+            let plansResult = try await p
             let allSessions = try await s
-            recentSessions = allSessions.filter { $0.status == "completed" }
-            activeSession = allSessions.first { s in
+            let bwResult = try await bw
+            let nsResult = try? await ns
+            let insResult = (try? await ins) ?? []
+
+            // Compute derived values from local vars (no @State access)
+            let completedSessions = allSessions.filter { $0.status == "completed" }
+            let activeSessionResult = allSessions.first { s in
                 s.status == "in_progress" || (s.started_at != nil && s.completed_at == nil)
             }
-            insights = (try? await ins) ?? []
-
-            // Calculate next day number
-            if let plan = plans.first {
+            var nextDayResult = 1
+            if let plan = plansResult.first {
                 let planSessions = allSessions.filter {
                     $0.status == "completed" && $0.workout_plan_id == plan.id
                 }
                 let totalDays = plan.dayCount
                 if totalDays > 0 {
-                    nextDay = (planSessions.count % totalDays) + 1
+                    nextDayResult = (planSessions.count % totalDays) + 1
                 }
             }
-            streak = calculateStreak(allSessions)
-            weekCount = countThisWeek(allSessions)
-            latestBodyWeight = try await bw
-            nutritionSummary = try? await ns
+            let streakResult = calculateStreak(allSessions)
+            let weekCountResult = countThisWeek(allSessions)
+
+            // Assign all @State at once on MainActor
+            plans = plansResult
+            recentSessions = completedSessions
+            activeSession = activeSessionResult
+            insights = insResult
+            nextDay = nextDayResult
+            streak = streakResult
+            weekCount = weekCountResult
+            latestBodyWeight = bwResult
+            nutritionSummary = nsResult
             loading = false
         } catch is CancellationError {
             // Task was cancelled (view disappeared or pull-to-refresh restarted) — ignore
