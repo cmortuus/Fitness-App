@@ -16,9 +16,6 @@ struct NutritionView: View {
     @State private var showQuickAdd = false
     @State private var showRecipes = false
     @State private var showGoalsSheet = false
-    @State private var waterSummary: WaterSummary?
-    @State private var editingEntry: NutritionEntry? = nil
-    @State private var showCopyDayConfirm = false
 
     private let meals = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -48,12 +45,6 @@ struct NutritionView: View {
 
                             // Macro rings
                             macroRings
-
-                            // Net calories banner
-                            netCaloriesBanner
-
-                            // Water tracker
-                            waterCard
 
                             // Micronutrients (when data available)
                             micronutrients
@@ -117,13 +108,13 @@ struct NutritionView: View {
             .navigationTitle("Nutrition")
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
-            .task { await loadAll(); await loadPhase() }
-            .refreshable { await loadAll() }
+            .task { await loadDay(); await loadPhase() }
+            .refreshable { await loadDay() }
             .sheet(isPresented: $showAddFood) {
-                AddFoodView(date: dateString, onSave: { Task { await loadAll() } })
+                AddFoodView(date: dateString, onSave: { Task { await loadDay() } })
             }
             .sheet(isPresented: $showPhaseSheet) {
-                DietPhaseSheet(activePhase: activePhase, onUpdate: { Task { await loadPhase(); await loadAll() } })
+                DietPhaseSheet(activePhase: activePhase, onUpdate: { Task { await loadPhase(); await loadDay() } })
             }
             .sheet(isPresented: $showScanner) {
                 BarcodeScannerView { barcode in
@@ -138,25 +129,16 @@ struct NutritionView: View {
                 }
             }
             .sheet(isPresented: $showAlcoholCalc) {
-                AlcoholCalculatorView(date: dateString, onSave: { Task { await loadAll() } })
+                AlcoholCalculatorView(date: dateString, onSave: { Task { await loadDay() } })
             }
             .sheet(isPresented: $showQuickAdd) {
-                QuickAddView(date: dateString, onSave: { Task { await loadAll() } })
+                QuickAddView(date: dateString, onSave: { Task { await loadDay() } })
             }
             .sheet(isPresented: $showRecipes) {
-                RecipesView(date: dateString, onLog: { Task { await loadAll() } })
+                RecipesView(date: dateString, onLog: { Task { await loadDay() } })
             }
             .sheet(isPresented: $showGoalsSheet) {
-                MacroGoalsSheet(currentGoals: summary?.goals, onSave: { Task { await loadAll() } })
-            }
-            .sheet(item: $editingEntry) { entry in
-                EditEntrySheet(entry: entry, onSave: { Task { await loadAll() } }, onDelete: {
-                    Task { await deleteEntry(entry.id); await loadAll() }
-                })
-            }
-            .confirmationDialog("Copy yesterday's food log?", isPresented: $showCopyDayConfirm, titleVisibility: .visible) {
-                Button("Copy") { Task { await copyPreviousDay() } }
-                Button("Cancel", role: .cancel) {}
+                MacroGoalsSheet(currentGoals: summary?.goals, onSave: { Task { await loadDay() } })
             }
         }
     }
@@ -193,7 +175,7 @@ struct NutritionView: View {
         if let new = Calendar.current.date(byAdding: .day, value: days, to: selectedDate) {
             selectedDate = new
             loading = true
-            Task { await loadAll() }
+            Task { await loadDay() }
         }
     }
 
@@ -488,24 +470,17 @@ struct NutritionView: View {
                         .foregroundStyle(.tertiary)
                     Text("No food logged today")
                         .font(.subheadline.bold())
-                    Text("Tap + to log a meal or copy yesterday's log.")
+                    Text("Tap the + button to log a meal.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    HStack(spacing: 12) {
-                        Button { showAddFood = true } label: {
-                            Label("Add Food", systemImage: "plus.circle.fill")
-                                .font(.subheadline.bold())
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.small)
-
-                        Button { showCopyDayConfirm = true } label: {
-                            Label("Copy Yesterday", systemImage: "doc.on.doc")
-                                .font(.subheadline)
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.small)
+                    Button {
+                        showAddFood = true
+                    } label: {
+                        Label("Log Food", systemImage: "plus.circle.fill")
+                            .font(.subheadline.bold())
                     }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
                     .padding(.top, 4)
                 }
                 .padding(.vertical, 32)
@@ -574,45 +549,43 @@ struct NutritionView: View {
     }
 
     private func foodRow(_ entry: NutritionEntry) -> some View {
-        Button { editingEntry = entry } label: {
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(entry.name)
-                        .font(.subheadline)
-                        .lineLimit(1)
-                        .foregroundStyle(.primary)
-                    HStack(spacing: 6) {
-                        if let cal = entry.calories {
-                            Text("\(Int(cal)) kcal")
-                                .font(.caption.bold())
-                                .foregroundStyle(.orange)
-                        }
-                        if let p = entry.protein, p > 0 {
-                            Text("·").font(.caption2).foregroundStyle(.tertiary)
-                            Text("P \(Int(p))g").foregroundStyle(.blue)
-                        }
-                        if let c = entry.carbs, c > 0 {
-                            Text("C \(Int(c))g").foregroundStyle(.green)
-                        }
-                        if let f = entry.fat, f > 0 {
-                            Text("F \(Int(f))g").foregroundStyle(.yellow)
-                        }
-                        if let q = entry.quantity_g, q > 0 {
-                            Text("·").font(.caption2).foregroundStyle(.tertiary)
-                            Text("\(Int(q))g").foregroundStyle(.secondary)
-                        }
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(entry.name)
+                    .font(.subheadline)
+                    .lineLimit(1)
+                HStack(spacing: 6) {
+                    if let cal = entry.calories {
+                        Text("\(Int(cal)) kcal")
+                            .font(.caption.bold())
+                            .foregroundStyle(.orange)
                     }
-                    .font(.caption2)
+                    if let p = entry.protein, p > 0 {
+                        Text("·")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                        Text("P \(Int(p))g").foregroundStyle(.blue)
+                    }
+                    if let c = entry.carbs, c > 0 {
+                        Text("C \(Int(c))g").foregroundStyle(.green)
+                    }
+                    if let f = entry.fat, f > 0 {
+                        Text("F \(Int(f))g").foregroundStyle(.yellow)
+                    }
                 }
-                Spacer()
-                Image(systemName: "pencil.circle")
-                    .font(.body)
-                    .foregroundStyle(.secondary.opacity(0.5))
+                .font(.caption2)
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
+            Spacer()
+            Button(role: .destructive) {
+                Task { await deleteEntry(entry.id) }
+            } label: {
+                Image(systemName: "minus.circle.fill")
+                    .font(.body)
+                    .foregroundStyle(.red.opacity(0.4))
+            }
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Helpers
@@ -633,54 +606,9 @@ struct NutritionView: View {
         }
     }
 
-    // MARK: - Net Calories Banner
-
-    @ViewBuilder
-    private var netCaloriesBanner: some View {
-        if let remaining = summary?.remaining, let goalCal = summary?.goals?.calories, goalCal > 0 {
-            let rem = remaining.calories ?? 0
-            let isOver = rem < 0
-            HStack(spacing: 12) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(isOver ? "Over budget" : "Remaining today")
-                        .font(.caption).foregroundStyle(.secondary)
-                    Text("\(abs(Int(rem))) kcal")
-                        .font(.title2.weight(.bold).monospacedDigit())
-                        .foregroundStyle(isOver ? .red : .green)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 4) {
-                    HStack(spacing: 4) {
-                        Text("Goal").font(.caption2).foregroundStyle(.secondary)
-                        Text("\(Int(goalCal))").font(.caption2.weight(.semibold))
-                    }
-                    HStack(spacing: 4) {
-                        Text("Eaten").font(.caption2).foregroundStyle(.secondary)
-                        Text("\(Int(summary?.totals.calories ?? 0))").font(.caption2.weight(.semibold))
-                    }
-                }
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            .background(isOver ? Color.red.opacity(0.1) : Color.green.opacity(0.1))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
-            .padding(.horizontal)
-        }
-    }
-
-    // MARK: - Water Card
-
-    @ViewBuilder
-    private var waterCard: some View {
-        if let water = waterSummary {
-            WaterTrackerCard(summary: water, date: dateString, onLog: { Task { await loadWater() } })
-                .padding(.horizontal)
-        }
-    }
-
     // MARK: - Data Loading
 
-    private func loadAll() async {
-        // Sequential loading — safe for @State mutations
+    private func loadDay() async {
         do {
             summary = try await APIClient.shared.get("/nutrition/summary",
                 query: [.init(name: "date", value: dateString)])
@@ -690,18 +618,7 @@ struct NutritionView: View {
                 query: [.init(name: "date", value: dateString)])
             mealEntries = response.meals
         } catch { print("[Nutrition] Entries: \(error)") }
-        do {
-            waterSummary = try await APIClient.shared.get("/nutrition/water",
-                query: [.init(name: "date", value: dateString)])
-        } catch { print("[Nutrition] Water: \(error)") }
         loading = false
-    }
-
-    private func loadWater() async {
-        do {
-            waterSummary = try await APIClient.shared.get("/nutrition/water",
-                query: [.init(name: "date", value: dateString)])
-        } catch { print("[Nutrition] Water: \(error)") }
     }
 
     private func loadPhase() async {
@@ -710,21 +627,7 @@ struct NutritionView: View {
 
     private func deleteEntry(_ id: Int) async {
         try? await APIClient.shared.delete("/nutrition/entries/\(id)")
-    }
-
-    private func copyPreviousDay() async {
-        let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate
-        let df = DateFormatter()
-        df.dateFormat = "yyyy-MM-dd"
-        let fromDate = df.string(from: yesterday)
-        do {
-            struct CopyResult: Decodable { let copied: Int }
-            let _: CopyResult = try await APIClient.shared.post(
-                "/nutrition/entries/copy-day",
-                queryItems: [.init(name: "from_date", value: fromDate), .init(name: "to_date", value: dateString)]
-            )
-        } catch { print("[Nutrition] CopyDay: \(error)") }
-        await loadAll()
+        await loadDay()
     }
 
     private func endPhase(_ id: Int) async {
@@ -738,7 +641,7 @@ struct NutritionView: View {
             print("[Phase] End status: \(code)")
             if code == 204 || (200...299).contains(code) {
                 activePhase = nil
-                await loadAll()
+                await loadDay()
             } else {
                 print("[Phase] End failed: \(code)")
             }
@@ -747,19 +650,24 @@ struct NutritionView: View {
 
     private func lookupBarcode(_ barcode: String) async {
         do {
-            let food: FoodSearchResult = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
-            // Auto-log it
-            let body = NutritionEntryBody(
-                name: food.name + (food.brand != nil ? " (\(food.brand!))" : ""),
-                date: dateString,
-                quantity_g: food.serving_size_g ?? 100,
-                calories: (food.calories_per_100g ?? 0) * (food.serving_size_g ?? 100) / 100,
-                protein: (food.protein_per_100g ?? 0) * (food.serving_size_g ?? 100) / 100,
-                carbs: (food.carbs_per_100g ?? 0) * (food.serving_size_g ?? 100) / 100,
-                fat: (food.fat_per_100g ?? 0) * (food.serving_size_g ?? 100) / 100
-            )
-            let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
-            await loadAll()
+            let results: [FoodSearchResult] = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
+            if let food = results.first {
+                // Auto-log it
+                let body = NutritionEntryBody(
+                    name: food.name + (food.brand != nil ? " (\(food.brand!))" : ""),
+                    date: dateString,
+                    quantity_g: 100,
+                    calories: food.calories_per_100g ?? 0,
+                    protein: food.protein_per_100g ?? 0,
+                    carbs: food.carbs_per_100g ?? 0,
+                    fat: food.fat_per_100g ?? 0
+                )
+                let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
+                await loadDay()
+            } else {
+                pendingBarcode = barcode
+                showLabelScanner = true
+            }
         } catch {
             pendingBarcode = barcode
             showLabelScanner = true
@@ -775,10 +683,8 @@ private struct EntriesResponse: Codable {
 }
 
 private struct NutritionEntryBody: Encodable {
-    var food_item_id: Int? = nil
     let name: String
     let date: String
-    var meal: String = "snack"
     let quantity_g: Double
     let calories: Double
     let protein: Double
@@ -795,8 +701,6 @@ struct FoodSearchResult: Codable {
     let protein_per_100g: Double?
     let carbs_per_100g: Double?
     let fat_per_100g: Double?
-    let serving_size_g: Double?
-    let serving_label: String?
 }
 
 // MARK: - Add Food View
@@ -1595,205 +1499,6 @@ struct MacroGoalsSheet: View {
         } catch {
             print("[MacroGoals] Save error: \(error)")
         }
-        saving = false
-    }
-}
-
-// MARK: - Water Tracker Card
-
-struct WaterTrackerCard: View {
-    let summary: WaterSummary
-    let date: String
-    let onLog: () -> Void
-
-    @State private var customAmountText = ""
-    @State private var showCustomInput = false
-
-    private var progress: Double {
-        summary.goal_ml > 0 ? min(summary.total_ml / summary.goal_ml, 1.0) : 0
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("Water", systemImage: "drop.fill")
-                    .font(.caption.bold()).foregroundStyle(.blue)
-                Spacer()
-                Text("\(Int(summary.total_ml)) / \(Int(summary.goal_ml)) ml")
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-            }
-
-            GeometryReader { geo in
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Color.blue.opacity(0.1)).frame(height: 8)
-                    Capsule().fill(Color.blue)
-                        .frame(width: geo.size.width * progress, height: 8)
-                        .animation(.easeInOut(duration: 0.4), value: progress)
-                }
-            }
-            .frame(height: 8)
-
-            HStack(spacing: 8) {
-                ForEach([250, 500, 750], id: \.self) { amount in
-                    Button("+\(amount)ml") {
-                        Task { await logWater(Double(amount)) }
-                    }
-                    .font(.caption.weight(.medium))
-                    .padding(.horizontal, 10).padding(.vertical, 5)
-                    .background(Color.blue.opacity(0.12))
-                    .clipShape(Capsule()).foregroundStyle(.blue)
-                }
-                Spacer()
-                if showCustomInput {
-                    HStack(spacing: 4) {
-                        TextField("ml", text: $customAmountText)
-                            .keyboardType(.numberPad)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 60)
-                        Button("Add") {
-                            if let ml = Double(customAmountText), ml > 0 {
-                                Task { await logWater(ml) }
-                                customAmountText = ""
-                                showCustomInput = false
-                            }
-                        }
-                        .font(.caption.weight(.medium))
-                    }
-                } else {
-                    Button { showCustomInput = true } label: {
-                        Image(systemName: "plus.circle").font(.caption).foregroundStyle(.blue)
-                    }
-                }
-            }
-        }
-        .padding()
-        .background(Color(.secondarySystemGroupedBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 14))
-    }
-
-    private func logWater(_ amount: Double) async {
-        struct WaterBody: Encodable { let date: String; let amount_ml: Double }
-        struct WaterResponse: Decodable { let id: Int }
-        do {
-            let _: WaterResponse = try await APIClient.shared.post("/nutrition/water",
-                body: WaterBody(date: date, amount_ml: amount))
-            onLog()
-        } catch { print("[Water] Log error: \(error)") }
-    }
-}
-
-// MARK: - Edit Entry Sheet
-
-struct EditEntrySheet: View {
-    let entry: NutritionEntry
-    let onSave: () -> Void
-    let onDelete: () -> Void
-
-    @State private var quantityText: String
-    @State private var caloriesText: String
-    @State private var proteinText: String
-    @State private var carbsText: String
-    @State private var fatText: String
-    @State private var selectedMeal: String
-    @State private var saving = false
-    @State private var showDeleteConfirm = false
-    @Environment(\.dismiss) private var dismiss
-
-    private let mealOptions = ["breakfast", "lunch", "dinner", "snack"]
-
-    init(entry: NutritionEntry, onSave: @escaping () -> Void, onDelete: @escaping () -> Void) {
-        self.entry = entry
-        self.onSave = onSave
-        self.onDelete = onDelete
-        _quantityText = State(initialValue: entry.quantity_g.map { "\(Int($0))" } ?? "100")
-        _caloriesText = State(initialValue: entry.calories.map { "\(Int($0))" } ?? "0")
-        _proteinText = State(initialValue: entry.protein.map { "\(Int($0))" } ?? "0")
-        _carbsText = State(initialValue: entry.carbs.map { "\(Int($0))" } ?? "0")
-        _fatText = State(initialValue: entry.fat.map { "\(Int($0))" } ?? "0")
-        _selectedMeal = State(initialValue: entry.meal ?? "snack")
-    }
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    HStack {
-                        Text("Quantity (g)")
-                        Spacer()
-                        TextField("100", text: $quantityText)
-                            .keyboardType(.decimalPad)
-                            .multilineTextAlignment(.trailing).frame(width: 80)
-                    }
-                    Picker("Meal", selection: $selectedMeal) {
-                        ForEach(mealOptions, id: \.self) { Text($0.capitalized).tag($0) }
-                    }
-                } header: { Text(entry.name).textCase(nil) }
-
-                Section("Macros") {
-                    macroRow("Calories", text: $caloriesText, unit: "kcal")
-                    macroRow("Protein", text: $proteinText, unit: "g")
-                    macroRow("Carbs", text: $carbsText, unit: "g")
-                    macroRow("Fat", text: $fatText, unit: "g")
-                }
-
-                Section {
-                    Button(role: .destructive) { showDeleteConfirm = true } label: {
-                        HStack { Spacer(); Text("Delete Entry"); Spacer() }
-                    }
-                }
-            }
-            .navigationTitle("Edit Entry")
-            .navigationBarTitleDisplayMode(.inline)
-            .keyboardDoneButton()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { Task { await save() } }
-                        .disabled(saving).fontWeight(.semibold)
-                }
-            }
-            .confirmationDialog("Delete this entry?", isPresented: $showDeleteConfirm, titleVisibility: .visible) {
-                Button("Delete", role: .destructive) { dismiss(); onDelete() }
-                Button("Cancel", role: .cancel) {}
-            }
-        }
-        .presentationDetents([.medium, .large])
-    }
-
-    private func macroRow(_ label: String, text: Binding<String>, unit: String) -> some View {
-        HStack {
-            Text(label)
-            Spacer()
-            TextField("0", text: text)
-                .keyboardType(.decimalPad)
-                .multilineTextAlignment(.trailing).frame(width: 70)
-            Text(unit).foregroundStyle(.secondary).font(.caption)
-        }
-    }
-
-    private func save() async {
-        saving = true
-        struct UpdateBody: Encodable {
-            let quantity_g: Double?
-            let calories: Double?
-            let protein: Double?
-            let carbs: Double?
-            let fat: Double?
-            let meal: String?
-        }
-        let body = UpdateBody(
-            quantity_g: Double(quantityText),
-            calories: Double(caloriesText),
-            protein: Double(proteinText),
-            carbs: Double(carbsText),
-            fat: Double(fatText),
-            meal: selectedMeal
-        )
-        do {
-            let _: NutritionEntry = try await APIClient.shared.patch("/nutrition/entries/\(entry.id)", body: body)
-            onSave()
-            dismiss()
-        } catch { print("[EditEntry] Save error: \(error)") }
         saving = false
     }
 }

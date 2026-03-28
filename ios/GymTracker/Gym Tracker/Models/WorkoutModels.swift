@@ -195,22 +195,6 @@ struct NutritionEntry: Codable, Identifiable {
     let carbs: Double?
     let fat: Double?
     let quantity_g: Double?
-    let food_item_id: Int?
-    let meal: String?
-
-    init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(Int.self, forKey: .id)
-        name = try c.decode(String.self, forKey: .name)
-        date = try c.decodeIfPresent(String.self, forKey: .date)
-        calories = try c.decodeIfPresent(Double.self, forKey: .calories)
-        protein = try c.decodeIfPresent(Double.self, forKey: .protein)
-        carbs = try c.decodeIfPresent(Double.self, forKey: .carbs)
-        fat = try c.decodeIfPresent(Double.self, forKey: .fat)
-        quantity_g = try c.decodeIfPresent(Double.self, forKey: .quantity_g)
-        food_item_id = try? c.decodeIfPresent(Int.self, forKey: .food_item_id)
-        meal = try? c.decodeIfPresent(String.self, forKey: .meal)
-    }
 }
 
 struct MacroTotals: Codable {
@@ -225,7 +209,6 @@ struct MacroGoals: Codable {
     let protein: Double?
     let carbs: Double?
     let fat: Double?
-    let water_goal_ml: Double?
     // API returns extra fields we can ignore
     let id: Int?
     let effective_from: String?
@@ -237,7 +220,6 @@ struct MacroGoals: Codable {
         self.protein = protein
         self.carbs = carbs
         self.fat = fat
-        self.water_goal_ml = nil
         self.id = nil
         self.effective_from = nil
         self.micronutrient_goals = nil
@@ -249,24 +231,10 @@ struct MacroGoals: Codable {
         protein = try c.decodeIfPresent(Double.self, forKey: .protein)
         carbs = try c.decodeIfPresent(Double.self, forKey: .carbs)
         fat = try c.decodeIfPresent(Double.self, forKey: .fat)
-        water_goal_ml = try c.decodeIfPresent(Double.self, forKey: .water_goal_ml)
         id = try c.decodeIfPresent(Int.self, forKey: .id)
         effective_from = try c.decodeIfPresent(String.self, forKey: .effective_from)
         micronutrient_goals = try c.decodeIfPresent([String: Double].self, forKey: .micronutrient_goals)
     }
-}
-
-struct WaterSummary: Codable {
-    let date: String
-    let total_ml: Double
-    let goal_ml: Double
-    let entries: [WaterEntryItem]
-}
-
-struct WaterEntryItem: Codable, Identifiable {
-    let id: Int
-    let amount_ml: Double
-    let logged_at: String
 }
 
 struct DailySummary: Codable {
@@ -452,4 +420,19 @@ struct RecipeLogBody: Codable {
     let date: String
     let servings: Double
     let meal_type: String
+}
+
+// MARK: - Water Tracking
+
+struct WaterSummary: Codable {
+    let date: String
+    let total_ml: Double
+    let goal_ml: Double
+    let entries: [WaterEntryItem]
+}
+
+struct WaterEntryItem: Codable, Identifiable {
+    let id: Int
+    let amount_ml: Double
+    let logged_at: String
 }
