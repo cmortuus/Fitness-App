@@ -726,6 +726,15 @@ struct NutritionView: View {
         loading = false
     }
 
+    private func loadDay() async {
+        await loadAll()
+    }
+
+    private func loadWater() async {
+        waterSummary = try? await APIClient.shared.get("/nutrition/water",
+            query: [.init(name: "date", value: dateString)])
+    }
+
     private func loadPhase() async {
         activePhase = try? await APIClient.shared.get("/nutrition/phases/active")
     }
@@ -746,7 +755,7 @@ struct NutritionView: View {
                 queryItems: [.init(name: "from_date", value: fromDate), .init(name: "to_date", value: dateString)]
             )
         } catch { print("[Nutrition] CopyDay: \(error)") }
-        await loadDay()
+        await loadAll()
     }
 
     private func endPhase(_ id: Int) async {
