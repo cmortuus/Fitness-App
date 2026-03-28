@@ -668,69 +668,62 @@ struct DashboardView: View {
 
     // MARK: - Data Loading
 
+    private enum DashResult: Sendable {
+        case plans([WorkoutPlan])
+        case sessions([WorkoutSession])
+        case bodyWeight(BodyWeightEntry?)
+        case nutrition(DailySummary?)
+        case insights([DashboardInsight])
+    }
+
     private func loadData() async {
-        // Parallel fetch using TaskGroup — safe because @State is only
-        // written AFTER all tasks complete (no async let runtime bug)
-        do {
-            var plansResult: [WorkoutPlan] = []
-            var sessionsResult: [WorkoutSession] = []
-            var bwResult: BodyWeightEntry? = nil
-            var nsResult: DailySummary? = nil
-            var insResult: [DashboardInsight] = []
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let todayStr = df.string(from: Date())
 
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    plansResult = (try? await APIClient.shared.get("/plans/")) ?? []
-                }
-                group.addTask {
-                    sessionsResult = (try? await APIClient.shared.get("/sessions/",
-                        query: [.init(name: "limit", value: "30")])) ?? []
-                }
-                group.addTask {
-                    let entries: [BodyWeightEntry]? = try? await APIClient.shared.get("/body-weight/",
-                        query: [.init(name: "limit", value: "1")])
-                    bwResult = entries?.first
-                }
-                group.addTask {
-                    let df = DateFormatter()
-                    df.dateFormat = "yyyy-MM-dd"
-                    nsResult = try? await APIClient.shared.get("/nutrition/summary",
-                        query: [.init(name: "date", value: df.string(from: Date()))])
-                }
-                group.addTask {
-                    insResult = (try? await APIClient.shared.get("/progress/insights")) ?? []
-                }
+        let results = await withTaskGroup(of: DashResult.self, returning: [DashResult].self) { group in
+            group.addTask { .plans((try? await APIClient.shared.get("/plans/")) ?? []) }
+            group.addTask { .sessions((try? await APIClient.shared.get("/sessions/", query: [.init(name: "limit", value: "30")])) ?? []) }
+            group.addTask {
+                let entries: [BodyWeightEntry] = (try? await APIClient.shared.get("/body-weight/", query: [.init(name: "limit", value: "1")])) ?? []
+                return .bodyWeight(entries.first)
             }
+            group.addTask { .nutrition(try? await APIClient.shared.get("/nutrition/summary", query: [.init(name: "date", value: todayStr)])) }
+            group.addTask { .insights((try? await APIClient.shared.get("/progress/insights")) ?? []) }
 
-            // All tasks complete — now assign @State on the calling actor
-            plans = plansResult
-            let allSessions = sessionsResult
-            recentSessions = allSessions.filter { $0.status == "completed" }
-            activeSession = allSessions.first { s in
-                s.status == "in_progress" || (s.started_at != nil && s.completed_at == nil)
-            }
-            if let plan = plansResult.first {
-                let planSessions = allSessions.filter {
-                    $0.status == "completed" && $0.workout_plan_id == plan.id
-                }
-                let totalDays = plan.dayCount
-                if totalDays > 0 {
-                    nextDay = (planSessions.count % totalDays) + 1
-                }
-            }
-            streak = calculateStreak(allSessions)
-            weekCount = countThisWeek(allSessions)
-            latestBodyWeight = bwResult
-            nutritionSummary = nsResult
-            insights = insResult
-            loading = false
-        } catch is CancellationError {
-            return
-        } catch {
-            self.error = error.localizedDescription
-            loading = false
-            print("[Dashboard] Load error: \(error)")
+            var collected: [DashResult] = []
+            for await result in group { collected.append(result) }
+            return collected
         }
+
+        // Unpack results and assign @State
+        var allSessions: [WorkoutSession] = []
+        for result in results {
+            switch result {
+            case .plans(let p): plans = p
+            case .sessions(let s): allSessions = s
+            case .bodyWeight(let bw): latestBodyWeight = bw
+            case .nutrition(let ns): nutritionSummary = ns
+            case .insights(let ins): insights = ins
+            }
+        }
+
+        recentSessions = allSessions.filter { $0.status == "completed" }
+        activeSession = allSessions.first { s in
+            s.status == "in_progress" || (s.started_at != nil && s.completed_at == nil)
+        }
+        if let plan = plans.first {
+            let planSessions = allSessions.filter {
+                $0.status == "completed" && $0.workout_plan_id == plan.id
+            }
+            let totalDays = plan.dayCount
+            if totalDays > 0 {
+                nextDay = (planSessions.count % totalDays) + 1
+            }
+        }
+        streak = calculateStreak(allSessions)
+        weekCount = countThisWeek(allSessions)
+        loading = false
     }
 }
 

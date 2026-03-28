@@ -583,49 +583,41 @@ struct ProgressView_: View {
         let startStr = fmt.string(from: startDate)
         let endStr   = fmt.string(from: endDate)
 
-        do {
-            var pts2: [ProgressDataPoint] = []
-            var recs2: [ProgressRecommendation] = []
-            var bw2: [BodyWeightEntry] = []
-            var prs2: [PersonalRecord] = []
-            var vol2: VolumeLandmarksResponse? = nil
+        enum ProgResult: Sendable {
+            case points([ProgressDataPoint])
+            case recs([ProgressRecommendation])
+            case bw([BodyWeightEntry])
+            case prs([PersonalRecord])
+            case vol(VolumeLandmarksResponse?)
+        }
 
-            await withTaskGroup(of: Void.self) { group in
-                group.addTask {
-                    pts2 = (try? await APIClient.shared.get("/progress/",
-                        query: [.init(name: "start_date", value: startStr),
-                                .init(name: "end_date", value: endStr)])) ?? []
-                }
-                group.addTask {
-                    recs2 = (try? await APIClient.shared.get("/progress/recommendations",
-                        query: [.init(name: "days_back", value: "\(timeRange)")])) ?? []
-                }
-                group.addTask {
-                    bw2 = (try? await APIClient.shared.get("/body-weight/",
-                        query: [.init(name: "limit", value: "90")])) ?? []
-                }
-                group.addTask {
-                    prs2 = (try? await APIClient.shared.get("/progress/records")) ?? []
-                }
-                group.addTask {
-                    vol2 = try? await APIClient.shared.get("/progress/volume-landmarks",
-                        query: [.init(name: "days", value: "\(timeRange)")])
-                }
+        let results = await withTaskGroup(of: ProgResult.self, returning: [ProgResult].self) { group in
+            group.addTask { .points((try? await APIClient.shared.get("/progress/", query: [.init(name: "start_date", value: startStr), .init(name: "end_date", value: endStr)])) ?? []) }
+            group.addTask { .recs((try? await APIClient.shared.get("/progress/recommendations", query: [.init(name: "days_back", value: "\(timeRange)")])) ?? []) }
+            group.addTask { .bw((try? await APIClient.shared.get("/body-weight/", query: [.init(name: "limit", value: "90")])) ?? []) }
+            group.addTask { .prs((try? await APIClient.shared.get("/progress/records")) ?? []) }
+            group.addTask { .vol(try? await APIClient.shared.get("/progress/volume-landmarks", query: [.init(name: "days", value: "\(timeRange)")])) }
+
+            var collected: [ProgResult] = []
+            for await r in group { collected.append(r) }
+            return collected
+        }
+
+        var pts2: [ProgressDataPoint] = []
+        for result in results {
+            switch result {
+            case .points(let p): pts2 = p; dataPoints = p
+            case .recs(let r): recommendations = r
+            case .bw(let b): bodyWeights = b
+            case .prs(let p): personalRecords = p
+            case .vol(let v): volumeLandmarks = v?.muscles ?? [:]
             }
+        }
 
-            dataPoints      = pts2
-            recommendations = recs2
-            bodyWeights     = bw2
-            personalRecords = prs2
-            volumeLandmarks = vol2?.muscles ?? [:]
-
-            let names = Set(pts2.map { $0.exercise_name }).sorted()
-            allExerciseNames = names
-            if selectedExercise != "All" && !names.contains(selectedExercise) {
-                selectedExercise = "All"
-            }
-        } catch {
-            print("[Progress] Load error: \(error)")
+        let names = Set(pts2.map { $0.exercise_name }).sorted()
+        allExerciseNames = names
+        if selectedExercise != "All" && !names.contains(selectedExercise) {
+            selectedExercise = "All"
         }
         loading = false
     }
