@@ -643,19 +643,28 @@ struct NutritionView: View {
     // MARK: - Data Loading (fully sequential — no async let)
 
     private func loadAll() async {
-        do {
-            summary = try await APIClient.shared.get("/nutrition/summary",
-                query: [.init(name: "date", value: dateString)])
-        } catch { print("[Nutrition] Summary: \(error)") }
-        do {
-            let response: EntriesResponse = try await APIClient.shared.get("/nutrition/entries",
-                query: [.init(name: "date", value: dateString)])
-            mealEntries = response.meals
-        } catch { print("[Nutrition] Entries: \(error)") }
-        do {
-            waterSummary = try await APIClient.shared.get("/nutrition/water",
-                query: [.init(name: "date", value: dateString)])
-        } catch { print("[Nutrition] Water: \(error)") }
+        var s: DailySummary? = nil
+        var e: EntriesResponse? = nil
+        var w: WaterSummary? = nil
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask {
+                s = try? await APIClient.shared.get("/nutrition/summary",
+                    query: [.init(name: "date", value: self.dateString)])
+            }
+            group.addTask {
+                e = try? await APIClient.shared.get("/nutrition/entries",
+                    query: [.init(name: "date", value: self.dateString)])
+            }
+            group.addTask {
+                w = try? await APIClient.shared.get("/nutrition/water",
+                    query: [.init(name: "date", value: self.dateString)])
+            }
+        }
+
+        summary = s
+        mealEntries = e?.meals ?? [:]
+        waterSummary = w
         loading = false
     }
 
