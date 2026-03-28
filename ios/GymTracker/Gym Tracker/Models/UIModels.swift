@@ -106,6 +106,30 @@ struct UIExercise: Identifiable {
     var note: String?
 }
 
+extension UISet: Equatable {
+    static func == (lhs: UISet, rhs: UISet) -> Bool {
+        lhs.weight == rhs.weight && lhs.reps == rhs.reps &&
+        lhs.repsLeft == rhs.repsLeft && lhs.repsRight == rhs.repsRight &&
+        lhs.partialReps == rhs.partialReps &&
+        lhs.done == rhs.done && lhs.doneLeft == rhs.doneLeft && lhs.doneRight == rhs.doneRight &&
+        lhs.skipped == rhs.skipped && lhs.saving == rhs.saving &&
+        lhs.setType == rhs.setType && lhs.setNumber == rhs.setNumber
+    }
+}
+
+extension UIExercise: Equatable {
+    static func == (lhs: UIExercise, rhs: UIExercise) -> Bool {
+        lhs.id == rhs.id && lhs.name == rhs.name && lhs.sets == rhs.sets &&
+        lhs.groupId == rhs.groupId && lhs.note == rhs.note
+    }
+}
+
+extension DropEntry: Equatable {
+    static func == (lhs: DropEntry, rhs: DropEntry) -> Bool {
+        lhs.weight == rhs.weight && lhs.reps == rhs.reps
+    }
+}
+
 // MARK: - Autoregulation
 
 enum RecoveryRating: String, CaseIterable {
