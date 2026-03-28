@@ -749,7 +749,7 @@ private struct EntriesResponse: Codable {
     let meals: [String: [NutritionEntry]]
 }
 
-private struct NutritionEntryBody: Encodable {
+struct NutritionEntryBody: Encodable {
     var food_item_id: Int? = nil
     let name: String
     let date: String
