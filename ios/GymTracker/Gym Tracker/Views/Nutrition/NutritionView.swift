@@ -20,6 +20,8 @@ struct NutritionView: View {
     @State private var editingEntry: NutritionEntry? = nil
     @State private var showCopyDayConfirm = false
     @State private var fabExpanded = false
+    @State private var copying = false
+    @State private var endingPhase = false
 
     private let meals = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -260,8 +262,12 @@ struct NutritionView: View {
                                 .foregroundStyle(.secondary)
                         }
                         Spacer()
-                        Button("End") { Task { await endPhase(phase.id) } }
-                            .font(.caption2).foregroundStyle(.red.opacity(0.7))
+                        if endingPhase {
+                            ProgressView().controlSize(.mini)
+                        } else {
+                            Button("End") { Task { await endPhase(phase.id) } }
+                                .font(.caption2).foregroundStyle(.red.opacity(0.7))
+                        }
                     }
                     let progress = Double(phase.current_week ?? 1) / Double(phase.duration_weeks ?? 12)
                     GeometryReader { geo in
@@ -683,6 +689,8 @@ struct NutritionView: View {
     }
 
     private func copyPreviousDay() async {
+        copying = true
+        defer { copying = false }
         let yesterday = Calendar.current.date(byAdding: .day, value: -1, to: selectedDate) ?? selectedDate
         let df = DateFormatter()
         df.dateFormat = "yyyy-MM-dd"
@@ -696,6 +704,8 @@ struct NutritionView: View {
     }
 
     private func endPhase(_ id: Int) async {
+        endingPhase = true
+        defer { endingPhase = false }
         do {
             try await APIClient.shared.delete("/nutrition/phases/active")
             activePhase = nil
