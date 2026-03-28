@@ -12,9 +12,8 @@ from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
-from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroCycle, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
 from app.models.user import User
-from app.models.workout import WorkoutSession
 from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
 from app.services.expenditure import compute_adaptive_tdee
 
@@ -565,48 +564,9 @@ async def daily_summary(
             "fat": goal.fat - totals["fat"],
         }
 
-    # Macro cycling: check if active and detect training vs rest day
-    day_type = None
-    cycled_goals = None
-    cycle_result = await db.execute(
-        select(MacroCycle).where(MacroCycle.user_id == user.id, MacroCycle.is_active == True)  # noqa: E712
-    )
-    cycle = cycle_result.scalar_one_or_none()
-    if cycle:
-        # Check if user worked out on this date
-        from sqlalchemy import cast, Date
-        workout_result = await db.execute(
-            select(func.count(WorkoutSession.id)).where(
-                WorkoutSession.user_id == user.id,
-                cast(WorkoutSession.started_at, Date) == target_date,
-                WorkoutSession.completed_at.isnot(None),
-            )
-        )
-        has_workout = (workout_result.scalar() or 0) > 0
-        day_type = "training" if has_workout else "rest"
-        cycled_goals = {
-            "training": {
-                "calories": cycle.training_calories, "protein": cycle.training_protein,
-                "carbs": cycle.training_carbs, "fat": cycle.training_fat,
-            },
-            "rest": {
-                "calories": cycle.rest_calories, "protein": cycle.rest_protein,
-                "carbs": cycle.rest_carbs, "fat": cycle.rest_fat,
-            },
-        }
-        # Override remaining with day-specific targets
-        active = cycled_goals[day_type]
-        remaining = {
-            "calories": active["calories"] - totals["calories"],
-            "protein": active["protein"] - totals["protein"],
-            "carbs": active["carbs"] - totals["carbs"],
-            "fat": active["fat"] - totals["fat"],
-        }
-
     return {
         "date": target_date.isoformat(), "totals": totals, "goals": goals,
         "remaining": remaining, "micronutrient_totals": micro_totals or None,
-        "day_type": day_type, "cycled_goals": cycled_goals,
     }
 
 
