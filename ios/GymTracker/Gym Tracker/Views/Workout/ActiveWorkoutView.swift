@@ -596,7 +596,7 @@ struct ActiveWorkoutView: View {
                     focusedExercise = exercise
                     focusedWeight = newVal
                 }
-            ), format: .number.precision(.fractionLength(1)))
+            ), format: .number)
             .keyboardType(.decimalPad)
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: .infinity)
@@ -701,7 +701,7 @@ struct ActiveWorkoutView: View {
                             focusedExercise = exercise
                             focusedWeight = newVal
                         }
-                    ), format: .number.precision(.fractionLength(1)))
+                    ), format: .number)
                     .keyboardType(.decimalPad)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity)
