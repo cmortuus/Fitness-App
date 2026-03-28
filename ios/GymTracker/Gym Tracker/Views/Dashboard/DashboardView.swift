@@ -669,18 +669,47 @@ struct DashboardView: View {
     // MARK: - Data Loading
 
     private func loadData() async {
+        // Parallel fetch using TaskGroup — safe because @State is only
+        // written AFTER all tasks complete (no async let runtime bug)
         do {
-            // Fully sequential — no async let, no concurrent tasks
-            plans = try await APIClient.shared.get("/plans/")
+            var plansResult: [WorkoutPlan] = []
+            var sessionsResult: [WorkoutSession] = []
+            var bwResult: BodyWeightEntry? = nil
+            var nsResult: DailySummary? = nil
+            var insResult: [DashboardInsight] = []
 
-            let allSessions: [WorkoutSession] = try await APIClient.shared.get("/sessions/",
-                query: [.init(name: "limit", value: "30")])
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    plansResult = (try? await APIClient.shared.get("/plans/")) ?? []
+                }
+                group.addTask {
+                    sessionsResult = (try? await APIClient.shared.get("/sessions/",
+                        query: [.init(name: "limit", value: "30")])) ?? []
+                }
+                group.addTask {
+                    let entries: [BodyWeightEntry]? = try? await APIClient.shared.get("/body-weight/",
+                        query: [.init(name: "limit", value: "1")])
+                    bwResult = entries?.first
+                }
+                group.addTask {
+                    let df = DateFormatter()
+                    df.dateFormat = "yyyy-MM-dd"
+                    nsResult = try? await APIClient.shared.get("/nutrition/summary",
+                        query: [.init(name: "date", value: df.string(from: Date()))])
+                }
+                group.addTask {
+                    insResult = (try? await APIClient.shared.get("/progress/insights")) ?? []
+                }
+            }
+
+            // All tasks complete — now assign @State on the calling actor
+            plans = plansResult
+            let allSessions = sessionsResult
             recentSessions = allSessions.filter { $0.status == "completed" }
             activeSession = allSessions.first { s in
                 s.status == "in_progress" || (s.started_at != nil && s.completed_at == nil)
             }
-
-            if let plan = plans.first {
+            if let plan = plansResult.first {
                 let planSessions = allSessions.filter {
                     $0.status == "completed" && $0.workout_plan_id == plan.id
                 }
@@ -691,22 +720,11 @@ struct DashboardView: View {
             }
             streak = calculateStreak(allSessions)
             weekCount = countThisWeek(allSessions)
-
-            let bwEntries: [BodyWeightEntry] = try await APIClient.shared.get("/body-weight/",
-                query: [.init(name: "limit", value: "1")])
-            latestBodyWeight = bwEntries.first
-
-            let df = DateFormatter()
-            df.dateFormat = "yyyy-MM-dd"
-            nutritionSummary = try? await APIClient.shared.get("/nutrition/summary",
-                query: [.init(name: "date", value: df.string(from: Date()))])
-
-            insights = (try? await APIClient.shared.get("/progress/insights")) ?? []
-
+            latestBodyWeight = bwResult
+            nutritionSummary = nsResult
+            insights = insResult
             loading = false
         } catch is CancellationError {
-            return
-        } catch let error as NSError where error.code == -999 {
             return
         } catch {
             self.error = error.localizedDescription
