@@ -15,7 +15,13 @@ import zipfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 from scripts.seed_food_db.common import base_argparser, batch_insert_foods, get_session_factory, validate_food
 
-DOWNLOAD_URL = "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_branded_food_json_2024-10-01.zip"
+DOWNLOAD_URL = os.environ.get(
+    "USDA_DOWNLOAD_URL",
+    "https://fdc.nal.usda.gov/fdc-datasets/FoodData_Central_branded_food_json_2025-04-01.zip",
+)
+# Note: USDA updates download URLs in April and October each year.
+# If the URL 404s, check https://fdc.nal.usda.gov/download-datasets
+# and set USDA_DOWNLOAD_URL env var to the new URL.
 DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "food_dumps")
 ZIP_FILE = os.path.join(DATA_DIR, "usda_branded.zip")
 JSON_FILE = os.path.join(DATA_DIR, "usda_branded.json")
