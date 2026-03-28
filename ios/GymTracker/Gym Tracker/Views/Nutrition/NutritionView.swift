@@ -695,16 +695,9 @@ struct NutritionView: View {
 
     private func endPhase(_ id: Int) async {
         do {
-            guard let token = await AuthService.shared.accessToken else { return }
-            var req = URLRequest(url: URL(string: "https://lethal.dev/api/nutrition/phases/active")!)
-            req.httpMethod = "DELETE"
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-            let (_, resp) = try await URLSession.shared.data(for: req)
-            let code = (resp as! HTTPURLResponse).statusCode
-            if code == 204 || (200...299).contains(code) {
-                activePhase = nil
-                await loadAll()
-            }
+            try await APIClient.shared.delete("/nutrition/phases/active")
+            activePhase = nil
+            await loadAll()
         } catch { print("[Phase] End error: \(error)") }
     }
 
@@ -714,7 +707,7 @@ struct NutritionView: View {
             let qty = food.serving_size_g ?? 100
             let scale = qty / 100
             let body = NutritionEntryBody(
-                name: food.name + (food.brand != nil ? " (\(food.brand!))" : ""),
+                name: food.name + (food.brand.map { " (\($0))" } ?? ""),
                 date: dateString,
                 quantity_g: qty,
                 calories: (food.calories_per_100g ?? 0) * scale,
@@ -1093,7 +1086,7 @@ struct ServingSizeSheet: View {
         saving = true
         let body = NutritionEntryBody(
             food_item_id: food.id,
-            name: food.name + (food.brand != nil ? " (\(food.brand!))" : ""),
+            name: food.name + (food.brand.map { " (\($0))" } ?? ""),
             date: date,
             quantity_g: quantity,
             calories: cal,
@@ -1500,7 +1493,7 @@ struct AddFoodView: View {
         let qty = Double(manualQty) ?? 100
         let scale = qty / 100
         let body = NutritionEntryBody(
-            name: food.name + (food.brand != nil ? " (\(food.brand!))" : ""),
+            name: food.name + (food.brand.map { " (\($0))" } ?? ""),
             date: date,
             quantity_g: qty,
             calories: (food.calories_per_100g ?? 0) * scale,

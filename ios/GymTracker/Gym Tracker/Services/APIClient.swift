@@ -36,10 +36,15 @@ final class APIClient: Sendable {
         body: (any Encodable)? = nil,
         queryItems: [URLQueryItem]? = nil
     ) async throws -> T {
-        var components = URLComponents(string: "\(baseURL)\(path)")!
+        guard var components = URLComponents(string: "\(baseURL)\(path)") else {
+            throw APIError.httpError(0, "Invalid URL: \(path)")
+        }
         if let queryItems { components.queryItems = queryItems }
+        guard let url = components.url else {
+            throw APIError.httpError(0, "Invalid URL components")
+        }
 
-        var request = URLRequest(url: components.url!)
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -54,7 +59,9 @@ final class APIClient: Sendable {
         }
 
         let (data, response) = try await session.data(for: request)
-        let httpResponse = response as! HTTPURLResponse
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.httpError(0, "Invalid response")
+        }
 
         // Handle 401 — try refresh
         if httpResponse.statusCode == 401 {
@@ -65,7 +72,9 @@ final class APIClient: Sendable {
                     request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
                 }
                 let (retryData, retryResponse) = try await session.data(for: request)
-                let retryHTTP = retryResponse as! HTTPURLResponse
+                guard let retryHTTP = retryResponse as? HTTPURLResponse else {
+                    throw APIError.httpError(0, "Invalid response")
+                }
                 guard (200...299).contains(retryHTTP.statusCode) else {
                     throw APIError.httpError(retryHTTP.statusCode, String(data: retryData, encoding: .utf8))
                 }
@@ -89,10 +98,15 @@ final class APIClient: Sendable {
         body: (any Encodable)? = nil,
         queryItems: [URLQueryItem]? = nil
     ) async throws {
-        var components = URLComponents(string: "\(baseURL)\(path)")!
+        guard var components = URLComponents(string: "\(baseURL)\(path)") else {
+            throw APIError.httpError(0, "Invalid URL: \(path)")
+        }
         if let queryItems { components.queryItems = queryItems }
+        guard let url = components.url else {
+            throw APIError.httpError(0, "Invalid URL components")
+        }
 
-        var request = URLRequest(url: components.url!)
+        var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
@@ -106,7 +120,9 @@ final class APIClient: Sendable {
         }
 
         let (data, response) = try await session.data(for: request)
-        let httpResponse = response as! HTTPURLResponse
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw APIError.httpError(0, "Invalid response")
+        }
 
         // Handle 401 — try refresh
         if httpResponse.statusCode == 401 {
@@ -115,7 +131,9 @@ final class APIClient: Sendable {
                     request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
                 }
                 let (_, retryResponse) = try await session.data(for: request)
-                let retryHttp = retryResponse as! HTTPURLResponse
+                guard let retryHttp = retryResponse as? HTTPURLResponse else {
+                    throw APIError.httpError(0, "Invalid response")
+                }
                 guard (200...299).contains(retryHttp.statusCode) else {
                     throw APIError.httpError(retryHttp.statusCode, nil)
                 }
