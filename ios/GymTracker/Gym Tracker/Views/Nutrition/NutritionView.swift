@@ -728,6 +728,11 @@ struct FoodSearchResult: Codable {
     let serving_label: String?
 }
 
+struct IdentifiedFood: Identifiable {
+    let id = UUID()
+    let food: FoodSearchResult
+}
+
 // MARK: - Water Tracker Card
 
 struct WaterTrackerCard: View {
@@ -855,6 +860,149 @@ struct EditEntrySheet: View {
     }
 }
 
+// MARK: - Serving Size Sheet
+
+struct ServingSizeSheet: View {
+    let food: FoodSearchResult
+    let date: String
+    let onSave: () -> Void
+
+    @State private var servings: Double = 1.0
+    @State private var customGrams: String = ""
+    @State private var useServings = true
+    @State private var saving = false
+    @Environment(\.dismiss) private var dismiss
+
+    private var servingG: Double { food.serving_size_g ?? 100 }
+    private var quantity: Double { useServings ? servings * servingG : (Double(customGrams) ?? servingG) }
+    private var scale: Double { quantity / 100 }
+    private var cal: Double { (food.calories_per_100g ?? 0) * scale }
+    private var pro: Double { (food.protein_per_100g ?? 0) * scale }
+    private var carb: Double { (food.carbs_per_100g ?? 0) * scale }
+    private var fat: Double { (food.fat_per_100g ?? 0) * scale }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 20) {
+                // Food info
+                VStack(spacing: 4) {
+                    Text(food.name).font(.headline)
+                    if let brand = food.brand, !brand.isEmpty {
+                        Text(brand).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.top, 8)
+
+                // Serving toggle
+                Picker("Mode", selection: $useServings) {
+                    Text("Servings").tag(true)
+                    Text("Grams").tag(false)
+                }
+                .pickerStyle(.segmented)
+                .padding(.horizontal)
+
+                if useServings {
+                    VStack(spacing: 8) {
+                        Text(food.serving_label ?? "\(Int(servingG))g serving")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 20) {
+                            Button { if servings > 0.25 { servings -= 0.25 } } label: {
+                                Image(systemName: "minus.circle.fill").font(.title2).foregroundStyle(.secondary)
+                            }
+                            Text(String(format: servings == floor(servings) ? "%.0f" : "%.2g", servings))
+                                .font(.system(size: 40, weight: .bold, design: .rounded))
+                                .monospacedDigit()
+                                .frame(minWidth: 60)
+                            Button { servings += 0.25 } label: {
+                                Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(.blue)
+                            }
+                        }
+                        Text(String(format: "%.0fg total", quantity))
+                            .font(.caption).foregroundStyle(.tertiary)
+                    }
+                } else {
+                    HStack {
+                        TextField("\(Int(servingG))", text: $customGrams)
+                            .font(.system(size: 36, weight: .bold, design: .rounded))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.center)
+                            .frame(width: 120)
+                        Text("g").font(.title3).foregroundStyle(.secondary)
+                    }
+                }
+
+                // Macro preview
+                HStack(spacing: 0) {
+                    macroPreview("Cal", cal, .orange)
+                    macroPreview("P", pro, .blue)
+                    macroPreview("C", carb, .green)
+                    macroPreview("F", fat, .yellow)
+                }
+                .padding(.horizontal)
+
+                Spacer()
+
+                // Log button
+                Button {
+                    Task { await logFood() }
+                } label: {
+                    if saving {
+                        ProgressView().frame(maxWidth: .infinity)
+                    } else {
+                        Text("Add \(Int(cal)) kcal")
+                            .font(.headline)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(saving || quantity <= 0)
+                .padding(.horizontal)
+                .padding(.bottom)
+            }
+            .navigationTitle("Log Food")
+            .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
+            .dismissKeyboardOnTap()
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+            }
+        }
+        .presentationDetents([.medium])
+        .onAppear {
+            customGrams = "\(Int(servingG))"
+        }
+    }
+
+    private func macroPreview(_ label: String, _ value: Double, _ color: Color) -> some View {
+        VStack(spacing: 2) {
+            Text("\(Int(value))").font(.title3.weight(.bold).monospacedDigit()).foregroundStyle(color)
+            Text(label).font(.caption2).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func logFood() async {
+        saving = true
+        let body = NutritionEntryBody(
+            food_item_id: food.id,
+            name: food.name + (food.brand != nil ? " (\(food.brand!))" : ""),
+            date: date,
+            quantity_g: quantity,
+            calories: cal,
+            protein: pro,
+            carbs: carb,
+            fat: fat
+        )
+        do {
+            let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
+            onSave()
+            dismiss()
+        } catch { print("[ServingSize] Log error: \(error)") }
+        saving = false
+    }
+}
+
 // MARK: - Add Food View
 
 struct AddFoodView: View {
@@ -874,6 +1022,7 @@ struct AddFoodView: View {
     @State private var searchTask: Task<Void, Never>? = nil
     @State private var recentEntries: [NutritionEntry] = []
     @State private var loadingRecent = false
+    @State private var selectedFoodWrapper: IdentifiedFood? = nil
 
     // Saved/custom foods
     @State private var savedFoods: [FoodSearchResult] = []
@@ -957,6 +1106,12 @@ struct AddFoodView: View {
                     manualCarbs = scanned.carbs > 0 ? "\(Int(scanned.carbs))" : ""
                     manualFat = scanned.fat > 0 ? "\(Int(scanned.fat))" : ""
                     activeTab = .manual
+                }
+            }
+            .sheet(item: $selectedFoodWrapper) { wrapper in
+                ServingSizeSheet(food: wrapper.food, date: date) {
+                    onSave()
+                    dismiss()
                 }
             }
         }
@@ -1099,7 +1254,7 @@ struct AddFoodView: View {
             } else {
                 List {
                     ForEach(savedFoods, id: \.name) { food in
-                        Button { Task { await logFood(food) } } label: {
+                        Button { selectedFoodWrapper = IdentifiedFood(food: food) } label: {
                             foodRow(food)
                         }
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -1120,7 +1275,7 @@ struct AddFoodView: View {
 
     private func foodList(_ foods: [FoodSearchResult]) -> some View {
         List(foods, id: \.name) { food in
-            Button { Task { await logFood(food) } } label: {
+            Button { selectedFoodWrapper = IdentifiedFood(food: food) } label: {
                 foodRow(food)
             }
         }
@@ -1138,9 +1293,15 @@ struct AddFoodView: View {
                 }
             }
             Spacer()
-            Text("\(Int(food.calories_per_100g ?? 0)) cal/100g")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+            VStack(alignment: .trailing, spacing: 2) {
+                Text("\(Int(food.calories_per_100g ?? 0)) kcal")
+                    .font(.caption.weight(.semibold)).foregroundStyle(.orange)
+                if let label = food.serving_label {
+                    Text(label).font(.caption2).foregroundStyle(.tertiary)
+                } else {
+                    Text("per 100g").font(.caption2).foregroundStyle(.tertiary)
+                }
+            }
         }
     }
 
