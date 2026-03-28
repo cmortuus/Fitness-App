@@ -670,72 +670,47 @@ struct DashboardView: View {
 
     private func loadData() async {
         do {
-            // Fetch all data concurrently
-            async let p: [WorkoutPlan] = APIClient.shared.get("/plans/")
-            async let s: [WorkoutSession] = APIClient.shared.get("/sessions/",
+            // Fully sequential — no async let, no concurrent tasks
+            plans = try await APIClient.shared.get("/plans/")
+
+            let allSessions: [WorkoutSession] = try await APIClient.shared.get("/sessions/",
                 query: [.init(name: "limit", value: "30")])
-            async let bw: BodyWeightEntry? = {
-                let entries: [BodyWeightEntry] = try await APIClient.shared.get("/body-weight/",
-                    query: [.init(name: "limit", value: "1")])
-                return entries.first
-            }()
-            async let ns: DailySummary? = {
-                let df = DateFormatter()
-                df.dateFormat = "yyyy-MM-dd"
-                return try? await APIClient.shared.get("/nutrition/summary",
-                    query: [.init(name: "date", value: df.string(from: Date()))])
-            }()
-            async let ins: [DashboardInsight] = APIClient.shared.get("/progress/insights")
-
-            // Wait for all results before touching @State
-            let plansResult = try await p
-            let allSessions = try await s
-            let bwResult = try await bw
-            let nsResult = try? await ns
-            let insResult = (try? await ins) ?? []
-
-            // Compute derived values from local vars (no @State access)
-            let completedSessions = allSessions.filter { $0.status == "completed" }
-            let activeSessionResult = allSessions.first { s in
+            recentSessions = allSessions.filter { $0.status == "completed" }
+            activeSession = allSessions.first { s in
                 s.status == "in_progress" || (s.started_at != nil && s.completed_at == nil)
             }
-            var nextDayResult = 1
-            if let plan = plansResult.first {
+
+            if let plan = plans.first {
                 let planSessions = allSessions.filter {
                     $0.status == "completed" && $0.workout_plan_id == plan.id
                 }
                 let totalDays = plan.dayCount
                 if totalDays > 0 {
-                    nextDayResult = (planSessions.count % totalDays) + 1
+                    nextDay = (planSessions.count % totalDays) + 1
                 }
             }
-            let streakResult = calculateStreak(allSessions)
-            let weekCountResult = countThisWeek(allSessions)
+            streak = calculateStreak(allSessions)
+            weekCount = countThisWeek(allSessions)
 
-            // Marshal all @State mutations on MainActor atomically
-            await MainActor.run {
-                plans = plansResult
-                recentSessions = completedSessions
-                activeSession = activeSessionResult
-                insights = insResult
-                nextDay = nextDayResult
-                streak = streakResult
-                weekCount = weekCountResult
-                latestBodyWeight = bwResult
-                nutritionSummary = nsResult
-                loading = false
-            }
+            let bwEntries: [BodyWeightEntry] = try await APIClient.shared.get("/body-weight/",
+                query: [.init(name: "limit", value: "1")])
+            latestBodyWeight = bwEntries.first
+
+            let df = DateFormatter()
+            df.dateFormat = "yyyy-MM-dd"
+            nutritionSummary = try? await APIClient.shared.get("/nutrition/summary",
+                query: [.init(name: "date", value: df.string(from: Date()))])
+
+            insights = (try? await APIClient.shared.get("/progress/insights")) ?? []
+
+            loading = false
         } catch is CancellationError {
-            // Task was cancelled (view disappeared or pull-to-refresh restarted) — ignore
             return
         } catch let error as NSError where error.code == -999 {
-            // URLSession cancelled — ignore
             return
         } catch {
-            await MainActor.run {
-                self.error = error.localizedDescription
-                loading = false
-            }
+            self.error = error.localizedDescription
+            loading = false
             print("[Dashboard] Load error: \(error)")
         }
     }

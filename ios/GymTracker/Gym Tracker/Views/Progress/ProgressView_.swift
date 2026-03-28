@@ -584,34 +584,30 @@ struct ProgressView_: View {
         let endStr   = fmt.string(from: endDate)
 
         do {
-            async let pts: [ProgressDataPoint] = APIClient.shared.get("/progress/",
+            // Fully sequential — async let causes Swift runtime crashes
+            let pts2: [ProgressDataPoint] = try await APIClient.shared.get("/progress/",
                 query: [
                     .init(name: "start_date", value: startStr),
                     .init(name: "end_date",   value: endStr),
                 ])
-            async let recs: [ProgressRecommendation] = APIClient.shared.get("/progress/recommendations",
+            let recs2: [ProgressRecommendation] = try await APIClient.shared.get("/progress/recommendations",
                 query: [.init(name: "days_back", value: "\(timeRange)")])
-            async let bw: [BodyWeightEntry] = APIClient.shared.get("/body-weight/",
+            let bw2: [BodyWeightEntry] = try await APIClient.shared.get("/body-weight/",
                 query: [.init(name: "limit", value: "90")])
-            async let prs: [PersonalRecord] = APIClient.shared.get("/progress/records")
-            async let volResponse: VolumeLandmarksResponse = APIClient.shared.get("/progress/volume-landmarks",
+            let prs2: [PersonalRecord] = try await APIClient.shared.get("/progress/records")
+            let vol2: VolumeLandmarksResponse = try await APIClient.shared.get("/progress/volume-landmarks",
                 query: [.init(name: "days", value: "\(timeRange)")])
 
-            let (pts2, recs2, bw2, prs2, vol2) = try await (pts, recs, bw, prs, volResponse)
+            dataPoints      = pts2
+            recommendations = recs2
+            bodyWeights     = bw2
+            personalRecords = prs2
+            volumeLandmarks = vol2.muscles
 
-            await MainActor.run {
-                dataPoints     = pts2
-                recommendations = recs2
-                bodyWeights    = bw2
-                personalRecords = prs2
-                volumeLandmarks = vol2.muscles
-
-                // Build exercise name list for filter menu
-                let names = Set(pts2.map { $0.exercise_name }).sorted()
-                allExerciseNames = names
-                if selectedExercise != "All" && !names.contains(selectedExercise) {
-                    selectedExercise = "All"
-                }
+            let names = Set(pts2.map { $0.exercise_name }).sorted()
+            allExerciseNames = names
+            if selectedExercise != "All" && !names.contains(selectedExercise) {
+                selectedExercise = "All"
             }
         } catch {
             print("[Progress] Load error: \(error)")
