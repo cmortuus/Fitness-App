@@ -486,15 +486,32 @@ struct NutritionView: View {
             }
             .padding(.horizontal, 14).padding(.vertical, 8)
 
-            VStack(spacing: 0) {
+            List {
                 ForEach(entries) { entry in
                     foodRow(entry)
-                    if entry.id != entries.last?.id {
-                        Rectangle().fill(Color.white.opacity(0.04)).frame(height: 1).padding(.leading, 14)
-                    }
+                        .listRowBackground(Color(white: 0.11))
+                        .listRowSeparatorTint(Color.white.opacity(0.04))
+                        .listRowInsets(EdgeInsets())
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                Task { await deleteEntry(entry.id); await loadAll() }
+                            } label: {
+                                Label("Delete", systemImage: "trash")
+                            }
+                        }
+                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                            Button {
+                                Task { await duplicateEntry(entry) }
+                            } label: {
+                                Label("Copy", systemImage: "doc.on.doc")
+                            }
+                            .tint(.blue)
+                        }
                 }
             }
-            .background(Color(white: 0.11))
+            .listStyle(.plain)
+            .scrollDisabled(true)
+            .frame(minHeight: CGFloat(entries.count) * 60)
             .clipShape(RoundedRectangle(cornerRadius: 12))
         }
     }
@@ -643,6 +660,24 @@ struct NutritionView: View {
 
     private func deleteEntry(_ id: Int) async {
         try? await APIClient.shared.delete("/nutrition/entries/\(id)")
+    }
+
+    private func duplicateEntry(_ entry: NutritionEntry) async {
+        let body = NutritionEntryBody(
+            food_item_id: entry.food_item_id,
+            name: entry.name,
+            date: dateString,
+            meal: entry.meal ?? "snack",
+            quantity_g: entry.quantity_g ?? 100,
+            calories: entry.calories ?? 0,
+            protein: entry.protein ?? 0,
+            carbs: entry.carbs ?? 0,
+            fat: entry.fat ?? 0
+        )
+        do {
+            let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
+        } catch { print("[Nutrition] Duplicate error: \(error)") }
+        await loadAll()
     }
 
     private func copyPreviousDay() async {
