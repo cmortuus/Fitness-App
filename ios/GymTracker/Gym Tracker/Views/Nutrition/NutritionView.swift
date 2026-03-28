@@ -812,6 +812,7 @@ struct EditEntrySheet: View {
     @State private var meal: String
     @State private var saving = false
     @State private var confirmDelete = false
+    @State private var errorMessage: String? = nil
     @Environment(\.dismiss) private var dismiss
 
     init(entry: NutritionEntry, onSave: @escaping () -> Void, onDelete: @escaping () -> Void) {
@@ -827,36 +828,107 @@ struct EditEntrySheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section { HStack { Text("Qty (g)"); Spacer(); TextField("100", text: $qty).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 80) }
-                    Picker("Meal", selection: $meal) { ForEach(["breakfast","lunch","dinner","snack"], id: \.self) { Text($0.capitalized).tag($0) } }
-                } header: { Text(entry.name).textCase(nil) }
-                Section("Macros") {
-                    field("Calories", $cal, "kcal"); field("Protein", $pro, "g"); field("Carbs", $carb, "g"); field("Fat", $fat, "g")
+                Section {
+                    HStack {
+                        Text("Quantity (g)")
+                        Spacer()
+                        TextField("100", text: $qty)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 80)
+                    }
+                    Picker("Meal", selection: $meal) {
+                        ForEach(["breakfast", "lunch", "dinner", "snack"], id: \.self) {
+                            Text($0.capitalized).tag($0)
+                        }
+                    }
+                } header: {
+                    Text(entry.name).textCase(nil)
                 }
-                Section { Button(role: .destructive) { confirmDelete = true } label: { HStack { Spacer(); Text("Delete"); Spacer() } } }
+
+                Section("Macros") {
+                    macroField("Calories", text: $cal, unit: "kcal")
+                    macroField("Protein", text: $pro, unit: "g")
+                    macroField("Carbs", text: $carb, unit: "g")
+                    macroField("Fat", text: $fat, unit: "g")
+                }
+
+                if let error = errorMessage {
+                    Section {
+                        Text(error).foregroundStyle(.red).font(.caption)
+                    }
+                }
+
+                Section {
+                    Button(role: .destructive) { confirmDelete = true } label: {
+                        HStack { Spacer(); Text("Delete Entry"); Spacer() }
+                    }
+                }
             }
-            .navigationTitle("Edit Entry").navigationBarTitleDisplayMode(.inline).keyboardDoneButton()
+            .navigationTitle("Edit Entry")
+            .navigationBarTitleDisplayMode(.inline)
+            .keyboardDoneButton()
+            .dismissKeyboardOnTap()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) { Button("Save") { Task { await save() } }.disabled(saving).fontWeight(.semibold) }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Save") { Task { await save() } }
+                        .disabled(saving)
+                        .fontWeight(.semibold)
+                }
             }
-            .confirmationDialog("Delete?", isPresented: $confirmDelete, titleVisibility: .visible) {
+            .confirmationDialog("Delete this entry?", isPresented: $confirmDelete, titleVisibility: .visible) {
                 Button("Delete", role: .destructive) { dismiss(); onDelete() }
+                Button("Cancel", role: .cancel) {}
             }
         }
         .presentationDetents([.medium, .large])
     }
 
-    private func field(_ label: String, _ text: Binding<String>, _ unit: String) -> some View {
-        HStack { Text(label); Spacer(); TextField("0", text: text).keyboardType(.decimalPad).multilineTextAlignment(.trailing).frame(width: 70); Text(unit).font(.caption).foregroundStyle(.secondary) }
+    private func macroField(_ label: String, text: Binding<String>, unit: String) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("0", text: text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 70)
+            Text(unit).font(.caption).foregroundStyle(.secondary)
+        }
     }
 
     private func save() async {
         saving = true
-        struct U: Encodable { let quantity_g: Double?; let calories: Double?; let protein: Double?; let carbs: Double?; let fat: Double?; let meal: String? }
-        let _: NutritionEntry? = try? await APIClient.shared.patch("/nutrition/entries/\(entry.id)",
-            body: U(quantity_g: Double(qty), calories: Double(cal), protein: Double(pro), carbs: Double(carb), fat: Double(fat), meal: meal))
-        onSave(); dismiss(); saving = false
+        errorMessage = nil
+
+        struct UpdateBody: Encodable {
+            let quantity_g: Double?
+            let calories: Double?
+            let protein: Double?
+            let carbs: Double?
+            let fat: Double?
+            let meal: String?
+        }
+
+        do {
+            let body = UpdateBody(
+                quantity_g: Double(qty),
+                calories: Double(cal),
+                protein: Double(pro),
+                carbs: Double(carb),
+                fat: Double(fat),
+                meal: meal
+            )
+            struct PatchResponse: Decodable { let id: Int }
+            let _: PatchResponse = try await APIClient.shared.patch(
+                "/nutrition/entries/\(entry.id)", body: body)
+            onSave()
+            dismiss()
+        } catch {
+            errorMessage = error.localizedDescription
+            print("[EditEntry] Save error: \(error)")
+        }
+        saving = false
     }
 }
 
