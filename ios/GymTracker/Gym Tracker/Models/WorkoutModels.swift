@@ -454,17 +454,3 @@ struct RecipeLogBody: Codable {
     let meal_type: String
 }
 
-// MARK: - Water Tracking
-
-struct WaterSummary: Codable {
-    let date: String
-    let total_ml: Double
-    let goal_ml: Double
-    let entries: [WaterEntryItem]
-}
-
-struct WaterEntryItem: Codable, Identifiable {
-    let id: Int
-    let amount_ml: Double
-    let logged_at: String
-}
