@@ -642,29 +642,31 @@ struct NutritionView: View {
 
     // MARK: - Data Loading (fully sequential — no async let)
 
-    private func loadAll() async {
-        var s: DailySummary? = nil
-        var e: EntriesResponse? = nil
-        var w: WaterSummary? = nil
+    private enum NutrResult: Sendable {
+        case summary(DailySummary?)
+        case entries(EntriesResponse?)
+        case water(WaterSummary?)
+    }
 
-        await withTaskGroup(of: Void.self) { group in
-            group.addTask {
-                s = try? await APIClient.shared.get("/nutrition/summary",
-                    query: [.init(name: "date", value: self.dateString)])
-            }
-            group.addTask {
-                e = try? await APIClient.shared.get("/nutrition/entries",
-                    query: [.init(name: "date", value: self.dateString)])
-            }
-            group.addTask {
-                w = try? await APIClient.shared.get("/nutrition/water",
-                    query: [.init(name: "date", value: self.dateString)])
-            }
+    private func loadAll() async {
+        let ds = dateString
+        let results = await withTaskGroup(of: NutrResult.self, returning: [NutrResult].self) { group in
+            group.addTask { .summary(try? await APIClient.shared.get("/nutrition/summary", query: [.init(name: "date", value: ds)])) }
+            group.addTask { .entries(try? await APIClient.shared.get("/nutrition/entries", query: [.init(name: "date", value: ds)])) }
+            group.addTask { .water(try? await APIClient.shared.get("/nutrition/water", query: [.init(name: "date", value: ds)])) }
+
+            var collected: [NutrResult] = []
+            for await r in group { collected.append(r) }
+            return collected
         }
 
-        summary = s
-        mealEntries = e?.meals ?? [:]
-        waterSummary = w
+        for result in results {
+            switch result {
+            case .summary(let s): summary = s
+            case .entries(let e): mealEntries = e?.meals ?? [:]
+            case .water(let w): waterSummary = w
+            }
+        }
         loading = false
     }
 
