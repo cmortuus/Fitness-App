@@ -712,17 +712,19 @@ struct DashboardView: View {
             let streakResult = calculateStreak(allSessions)
             let weekCountResult = countThisWeek(allSessions)
 
-            // Assign all @State at once on MainActor
-            plans = plansResult
-            recentSessions = completedSessions
-            activeSession = activeSessionResult
-            insights = insResult
-            nextDay = nextDayResult
-            streak = streakResult
-            weekCount = weekCountResult
-            latestBodyWeight = bwResult
-            nutritionSummary = nsResult
-            loading = false
+            // Marshal all @State mutations on MainActor atomically
+            await MainActor.run {
+                plans = plansResult
+                recentSessions = completedSessions
+                activeSession = activeSessionResult
+                insights = insResult
+                nextDay = nextDayResult
+                streak = streakResult
+                weekCount = weekCountResult
+                latestBodyWeight = bwResult
+                nutritionSummary = nsResult
+                loading = false
+            }
         } catch is CancellationError {
             // Task was cancelled (view disappeared or pull-to-refresh restarted) — ignore
             return
@@ -730,9 +732,11 @@ struct DashboardView: View {
             // URLSession cancelled — ignore
             return
         } catch {
-            self.error = error.localizedDescription
+            await MainActor.run {
+                self.error = error.localizedDescription
+                loading = false
+            }
             print("[Dashboard] Load error: \(error)")
-            loading = false
         }
     }
 }
