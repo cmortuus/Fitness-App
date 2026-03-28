@@ -44,7 +44,9 @@ struct NutritionView: View {
                         heroHeader
 
                         if loading {
-                            ProgressView().padding(.top, 60)
+                            ProgressView()
+                                .tint(.white)
+                                .padding(.top, 60)
                         } else {
                             VStack(spacing: 16) {
                                 // Macro bars
