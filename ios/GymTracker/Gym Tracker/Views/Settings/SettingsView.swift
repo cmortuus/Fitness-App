@@ -305,17 +305,21 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                profileSection
-                unitsSection
-                bodyWeightSection
-                progressionSection
-                restTimerSection
-                plateMathSection
-                barsSection
-                machinesSection
-                deloadSection
-                appleHealthSection
-                accountSection
+                Group {
+                    profileSection
+                    unitsSection
+                    bodyWeightSection
+                    progressionSection
+                    restTimerSection
+                }
+                Group {
+                    plateMathSection
+                    barsSection
+                    machinesSection
+                    deloadSection
+                    appleHealthSection
+                    accountSection
+                }
             }
             .navigationTitle("Settings")
             .task { await loadData() }
