@@ -110,6 +110,10 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.legExtensionWeight) private var legExtensionWeight: Double = 0
     @AppStorage(SettingsKey.legCurlWeight) private var legCurlWeight: Double = 0
 
+    // Machine display bases (plate math offset) — loaded from backend settings
+    @State private var displayBases: [String: Double] = [:]
+    @State private var settingsLoaded = false
+
     // Rest timers
     @AppStorage(SettingsKey.upperCompound) private var upperCompound: Int = 180
     @AppStorage(SettingsKey.upperIsolation) private var upperIsolation: Int = 90
@@ -382,23 +386,28 @@ struct SettingsView: View {
     // MARK: - Machines Section
 
     private var machinesSection: some View {
-        Section("Plate-Loaded Machines (\(weightUnit))") {
-            equipmentRow("Smith Machine", lbsValue: $smithWeight)
-            equipmentRow("Leg Press", lbsValue: $legPressWeight)
-            equipmentRow("Hack Squat", lbsValue: $hackSquatWeight)
-            equipmentRow("T-Bar Row", lbsValue: $tBarWeight)
-            equipmentRow("Belt Squat", lbsValue: $beltSquatWeight)
-            equipmentRow("Chest Press", lbsValue: $chestPressWeight)
-            equipmentRow("Shoulder Press", lbsValue: $shoulderPressWeight)
-            equipmentRow("Incline Press", lbsValue: $inclinePressWeight)
-            equipmentRow("Decline Press", lbsValue: $declinePressWeight)
-            equipmentRow("Calf Raise", lbsValue: $calfRaiseWeight)
-            equipmentRow("Seated Row", lbsValue: $seatedRowWeight)
-            equipmentRow("Lat Pulldown", lbsValue: $latPulldownWeight)
-            equipmentRow("Pendulum Squat", lbsValue: $pendulumSquatWeight)
-            equipmentRow("Hip Thrust Machine", lbsValue: $hipThrustWeight)
-            equipmentRow("Leg Extension", lbsValue: $legExtensionWeight)
-            equipmentRow("Leg Curl", lbsValue: $legCurlWeight)
+        Section {
+            machineRow("Smith Machine", machineKey: "smithMachine", weight: $smithWeight)
+            machineRow("Leg Press", machineKey: "legPress", weight: $legPressWeight)
+            machineRow("Hack Squat", machineKey: "hackSquat", weight: $hackSquatWeight)
+            machineRow("T-Bar Row", machineKey: "tBarRow", weight: $tBarWeight)
+            machineRow("Belt Squat", machineKey: "beltSquat", weight: $beltSquatWeight)
+            machineRow("Chest Press", machineKey: "chestPress", weight: $chestPressWeight)
+            machineRow("Shoulder Press", machineKey: "shoulderPress", weight: $shoulderPressWeight)
+            machineRow("Incline Press", machineKey: "inclinePress", weight: $inclinePressWeight)
+            machineRow("Decline Press", machineKey: "declinePress", weight: $declinePressWeight)
+            machineRow("Calf Raise", machineKey: "calfRaise", weight: $calfRaiseWeight)
+            machineRow("Seated Row", machineKey: "seatedRow", weight: $seatedRowWeight)
+            machineRow("Lat Pulldown", machineKey: "latPulldown", weight: $latPulldownWeight)
+            machineRow("Pendulum Squat", machineKey: "pendulumSquat", weight: $pendulumSquatWeight)
+            machineRow("Hip Thrust Machine", machineKey: "hipThrust", weight: $hipThrustWeight)
+            machineRow("Leg Extension", machineKey: "legExtension", weight: $legExtensionWeight)
+            machineRow("Leg Curl", machineKey: "legCurl", weight: $legCurlWeight)
+        } header: {
+            Text("Plate-Loaded Machines (\(weightUnit))")
+        } footer: {
+            Text("Sled/carriage = actual weight for tracking. Plate math base = weight subtracted for plate calculations (e.g., set to 0 to count all weight as plates).")
+                .font(.caption2)
         }
     }
 
@@ -595,6 +604,50 @@ struct SettingsView: View {
         }
     }
 
+    private func machineRow(_ label: String, machineKey: String, weight: Binding<Double>) -> some View {
+        let weightDisplay = Binding<Double>(
+            get: { weightUnit == "kg" ? weight.wrappedValue * 0.453592 : weight.wrappedValue },
+            set: { weight.wrappedValue = weightUnit == "kg" ? $0 / 0.453592 : $0 }
+        )
+        let baseVal = displayBases[machineKey] ?? weight.wrappedValue
+        let baseDisplay = Binding<Double>(
+            get: { weightUnit == "kg" ? baseVal * 0.453592 : baseVal },
+            set: { saveDisplayBase(machine: machineKey, value: weightUnit == "kg" ? $0 / 0.453592 : $0) }
+        )
+
+        return VStack(spacing: 6) {
+            HStack {
+                Text(label).font(.subheadline)
+                Spacer()
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sled weight").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        TextField("0", value: weightDisplay, format: .number.precision(.fractionLength(1)))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 55)
+                        Text(weightUnit).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Plate math base").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        TextField("0", value: baseDisplay, format: .number.precision(.fractionLength(1)))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 55)
+                        Text(weightUnit).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     private func restRow(_ label: String, value: Binding<Int>) -> some View {
         HStack {
             Text(label)
@@ -655,8 +708,48 @@ struct SettingsView: View {
         }
         loadingWeighIns = false
 
+        // Load settings from backend (source of truth)
+        await loadSettings()
+
         HealthKitManager.shared.checkAuthorization()
         healthKitAuthorized = HealthKitManager.shared.isAuthorized
+    }
+
+    private struct RemoteSettings: Codable {
+        var machineWeights: [String: Double]?
+    }
+
+    private func loadSettings() async {
+        do {
+            let settings: RemoteSettings = try await APIClient.shared.get("/auth/settings")
+            if let mw = settings.machineWeights {
+                var bases: [String: Double] = [:]
+                for (key, val) in mw where key.hasSuffix("_displayBase") {
+                    let machineKey = String(key.dropLast("_displayBase".count))
+                    bases[machineKey] = val
+                }
+                displayBases = bases
+            }
+        } catch {
+            print("[Settings] Load remote settings: \(error)")
+        }
+        settingsLoaded = true
+    }
+
+    private func saveDisplayBase(machine: String, value: Double) {
+        displayBases[machine] = value
+        Task {
+            do {
+                // Load current, merge, save
+                var settings: RemoteSettings = (try? await APIClient.shared.get("/auth/settings")) ?? RemoteSettings()
+                var mw = settings.machineWeights ?? [:]
+                mw["\(machine)_displayBase"] = value
+                settings.machineWeights = mw
+                let _: RemoteSettings = try await APIClient.shared.put("/auth/settings", body: settings)
+            } catch {
+                print("[Settings] Save displayBase: \(error)")
+            }
+        }
     }
 
     private func saveWeighIn() async {
