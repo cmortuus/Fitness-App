@@ -68,6 +68,7 @@ struct NutritionView: View {
                 }
                 .background(Color.black)
                 .ignoresSafeArea(edges: .top)
+                .dismissKeyboardOnTap()
 
                 // FAB
                 expandableFAB
@@ -870,6 +871,9 @@ struct AddFoodView: View {
     @State private var showScanner = false
     @State private var showLabelScanner = false
     @State private var pendingBarcode: String? = nil
+    @State private var searchTask: Task<Void, Never>? = nil
+    @State private var recentEntries: [NutritionEntry] = []
+    @State private var loadingRecent = false
 
     // Saved/custom foods
     @State private var savedFoods: [FoodSearchResult] = []
@@ -917,6 +921,8 @@ struct AddFoodView: View {
             .navigationTitle("Add Food")
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
+            .dismissKeyboardOnTap()
+            .task { await loadRecent() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -964,9 +970,16 @@ struct AddFoodView: View {
                 Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
                 TextField("Search foods...", text: $searchQuery)
                     .textFieldStyle(.plain)
-                    .onSubmit { Task { await search() } }
+                    .autocorrectionDisabled()
+                    .onChange(of: searchQuery) { _, newValue in
+                        debouncedSearch(newValue)
+                    }
                 if !searchQuery.isEmpty {
-                    Button { searchQuery = ""; searchResults = [] } label: {
+                    Button {
+                        searchQuery = ""
+                        searchResults = []
+                        searchTask?.cancel()
+                    } label: {
                         Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
                 }
@@ -986,16 +999,64 @@ struct AddFoodView: View {
                 }
                 .padding(.top, 60)
                 Spacer()
-            } else if searchResults.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "text.magnifyingglass").font(.system(size: 40)).foregroundStyle(.tertiary)
-                    Text("Search for a food or scan a barcode").font(.subheadline).foregroundStyle(.secondary)
+            } else if searchQuery.isEmpty {
+                // Preloaded: recent foods
+                if loadingRecent {
+                    ProgressView().padding(.top, 40)
+                    Spacer()
+                } else if recentEntries.isEmpty {
+                    VStack(spacing: 12) {
+                        Image(systemName: "text.magnifyingglass").font(.system(size: 40)).foregroundStyle(.tertiary)
+                        Text("Search for a food or scan a barcode").font(.subheadline).foregroundStyle(.secondary)
+                    }
+                    .padding(.top, 60)
+                    Spacer()
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("RECENT").font(.caption2.weight(.semibold)).tracking(0.8)
+                            .foregroundStyle(.secondary).padding(.horizontal)
+                        List(recentEntries) { entry in
+                            Button {
+                                Task { await relogEntry(entry) }
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(entry.name).font(.subheadline).foregroundStyle(.primary)
+                                        HStack(spacing: 4) {
+                                            if let cal = entry.calories {
+                                                Text("\(Int(cal)) kcal").font(.caption2).foregroundStyle(.orange)
+                                            }
+                                            if let q = entry.quantity_g, q > 0 {
+                                                Text("\(Int(q))g").font(.caption2).foregroundStyle(.tertiary)
+                                            }
+                                        }
+                                    }
+                                    Spacer()
+                                    Image(systemName: "plus.circle").foregroundStyle(.blue)
+                                }
+                            }
+                        }
+                        .listStyle(.plain)
+                    }
                 }
-                .padding(.top, 60)
-                Spacer()
             } else {
                 foodList(searchResults)
             }
+        }
+    }
+
+    private func debouncedSearch(_ query: String) {
+        searchTask?.cancel()
+        let trimmed = query.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            searchResults = []
+            searching = false
+            return
+        }
+        searchTask = Task {
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            await search()
         }
     }
 
@@ -1139,6 +1200,32 @@ struct AddFoodView: View {
                 query: [.init(name: "q", value: searchQuery)])
         } catch { print("[Food] Search: \(error)") }
         searching = false
+    }
+
+    private func loadRecent() async {
+        loadingRecent = true
+        do {
+            recentEntries = try await APIClient.shared.get("/nutrition/entries/recent")
+        } catch { print("[Food] Recent: \(error)") }
+        loadingRecent = false
+    }
+
+    private func relogEntry(_ entry: NutritionEntry) async {
+        let body = NutritionEntryBody(
+            food_item_id: entry.food_item_id,
+            name: entry.name,
+            date: date,
+            quantity_g: entry.quantity_g ?? 100,
+            calories: entry.calories ?? 0,
+            protein: entry.protein ?? 0,
+            carbs: entry.carbs ?? 0,
+            fat: entry.fat ?? 0
+        )
+        do {
+            let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
+            onSave()
+            dismiss()
+        } catch { print("[Food] Relog: \(error)") }
     }
 
     private func logFood(_ food: FoodSearchResult) async {

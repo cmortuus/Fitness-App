@@ -250,4 +250,11 @@ extension View {
             }
         }
     }
+
+    /// Dismiss keyboard when tapping outside text fields
+    func dismissKeyboardOnTap() -> some View {
+        simultaneousGesture(
+            TapGesture().onEnded { hideKeyboard() }
+        )
+    }
 }
