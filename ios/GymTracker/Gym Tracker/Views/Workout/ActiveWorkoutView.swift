@@ -613,6 +613,18 @@ struct ActiveWorkoutView: View {
             .frame(maxWidth: .infinity)
             .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
 
+            // Partial reps (only for standard_partials set type)
+            if set.setType == .standardPartials {
+                TextField("+partial", value: Binding(
+                    get: { exercises[exIdx].sets[sIdx].partialReps },
+                    set: { exercises[exIdx].sets[sIdx].partialReps = $0 }
+                ), format: .number)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 60)
+                .disabled(set.done || set.skipped)
+            }
+
             // Action buttons
             if set.done {
                 Button(action: { undoSet(exIdx: exIdx, sIdx: sIdx) }) {
@@ -1078,6 +1090,12 @@ struct ActiveWorkoutView: View {
             : (set.reps ?? 0)
         let weightKg = toKg(set.weight ?? 0)
 
+        // Build sub_sets for partials (same format as web frontend)
+        var subSets: [SubSet]? = nil
+        if set.setType == .standardPartials, let partials = set.partialReps, partials > 0 {
+            subSets = [SubSet(weight_kg: weightKg, reps: partials, type: "partial")]
+        }
+
         do {
             let _: ExerciseSet = try await APIClient.shared.patch(
                 "/sessions/\(sessionId)/sets/\(backendId)",
@@ -1089,7 +1107,7 @@ struct ActiveWorkoutView: View {
                     reps_right: exercise.isUnilateral ? set.repsRight : nil,
                     notes: nil,
                     set_type: set.setType.rawValue != "standard" ? set.setType.rawValue : nil,
-                    sub_sets: nil,
+                    sub_sets: subSets,
                     draft_weight_kg: nil, draft_reps: nil
                 )
             )
