@@ -324,31 +324,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .task { await loadData() }
             .keyboardDoneButton()
-            .onChange(of: weightUnit) { _, _ in settingsDidChange() }
-            .onChange(of: heightUnit) { _, _ in settingsDidChange() }
-            .onChange(of: heightInches) { _, _ in settingsDidChange() }
-            .onChange(of: sex) { _, _ in settingsDidChange() }
-            .onChange(of: age) { _, _ in settingsDidChange() }
-            .onChange(of: progressionStyle) { _, _ in settingsDidChange() }
-            .onChange(of: maxWarmupSets) { _, _ in settingsDidChange() }
-            .onChange(of: showPlateMath) { _, _ in settingsDidChange() }
-            .onChange(of: barbellWeight) { _, _ in settingsDidChange() }
-            .onChange(of: ezBarWeight) { _, _ in settingsDidChange() }
-            .onChange(of: rackableEZBarWeight) { _, _ in settingsDidChange() }
-            .onChange(of: ssbWeight) { _, _ in settingsDidChange() }
-            .onChange(of: trapBarWeight) { _, _ in settingsDidChange() }
-            .onChange(of: smithWeight) { _, _ in settingsDidChange() }
-            .onChange(of: legPressWeight) { _, _ in settingsDidChange() }
-            .onChange(of: hackSquatWeight) { _, _ in settingsDidChange() }
-            .onChange(of: tBarWeight) { _, _ in settingsDidChange() }
-            .onChange(of: beltSquatWeight) { _, _ in settingsDidChange() }
-            .onChange(of: upperCompound) { _, _ in settingsDidChange() }
-            .onChange(of: upperIsolation) { _, _ in settingsDidChange() }
-            .onChange(of: lowerCompound) { _, _ in settingsDidChange() }
-            .onChange(of: lowerIsolation) { _, _ in settingsDidChange() }
-            .onChange(of: deloadWeightPct) { _, _ in settingsDidChange() }
-            .onChange(of: deloadVolumePct) { _, _ in settingsDidChange() }
-            .onChange(of: deloadSessions) { _, _ in settingsDidChange() }
+            .onDisappear { Task { await SettingsSync.saveToDB() } }
             .sheet(isPresented: $showWeighIn) {
                 weighInSheet
             }
@@ -942,10 +918,6 @@ struct SettingsView: View {
         SettingsSync.scheduleSave()
     }
 
-    /// Called whenever any @AppStorage value changes
-    private func settingsDidChange() {
-        SettingsSync.scheduleSave()
-    }
 
     private func saveWeighIn() async {
         guard let w = newWeight else { return }
