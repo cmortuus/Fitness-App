@@ -5,15 +5,15 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            NutritionView()
+            HomeView()
                 .tabItem {
-                    Label("Nutrition", systemImage: "fork.knife")
+                    Label("Home", systemImage: "house.fill")
                 }
                 .tag(0)
 
-            ActivityView()
+            NutritionView()
                 .tabItem {
-                    Label("Activity", systemImage: "figure.run")
+                    Label("Log", systemImage: "plus.circle.fill")
                 }
                 .tag(1)
 
@@ -23,6 +23,6 @@ struct MainTabView: View {
                 }
                 .tag(2)
         }
-        .tint(.blue)
+        .tint(Color(red: 0.004, green: 0.439, blue: 0.725)) // MacroFactor blue
     }
 }
