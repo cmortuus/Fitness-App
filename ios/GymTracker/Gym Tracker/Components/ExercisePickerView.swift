@@ -18,7 +18,7 @@ struct ExercisePickerView: View {
     let equipments = ["All", "Barbell", "DB", "Cable", "Machine", "BW", "Smith"]
 
     private var filtered: [Exercise] {
-        allExercises.filter { ex in
+        var results = allExercises.filter { ex in
             let matchesSearch = search.isEmpty ||
                 (ex.display_name ?? "").localizedCaseInsensitiveContains(search) ||
                 (ex.muscle_group ?? "").localizedCaseInsensitiveContains(search)
@@ -30,6 +30,21 @@ struct ExercisePickerView: View {
                 (ex.equipment_type ?? "").localizedCaseInsensitiveContains(equipFilter)
             return matchesSearch && matchesRegion && matchesType && matchesEquip
         }
+
+        // When swapping, rank by muscle group match (×2) + type match (×1)
+        if swapMode, let swap = swapExercise {
+            let swapMuscle = swap.muscleGroup.lowercased()
+            let swapType = swap.category.lowercased()
+            results.sort { a, b in
+                let aMusc = (a.muscle_group ?? "").lowercased() == swapMuscle ? 2 : 0
+                let aType = (a.category ?? "").lowercased() == swapType ? 1 : 0
+                let bMusc = (b.muscle_group ?? "").lowercased() == swapMuscle ? 2 : 0
+                let bType = (b.category ?? "").lowercased() == swapType ? 1 : 0
+                return (aMusc + aType) > (bMusc + bType)
+            }
+        }
+
+        return Array(results.prefix(50))
     }
 
     var body: some View {
