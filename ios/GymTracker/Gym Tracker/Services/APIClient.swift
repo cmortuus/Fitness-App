@@ -39,7 +39,8 @@ final class APIClient: Sendable {
         _ method: String,
         path: String,
         body: (any Encodable)? = nil,
-        queryItems: [URLQueryItem]? = nil
+        queryItems: [URLQueryItem]? = nil,
+        skipAuth: Bool = false
     ) async throws -> T {
         guard var components = URLComponents(string: "\(baseURL)\(path)") else {
             throw APIError.httpError(0, "Invalid URL: \(path)")
@@ -54,9 +55,11 @@ final class APIClient: Sendable {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
 
         // Attach auth token (access MainActor property)
-        let token = await AuthService.shared.accessToken
-        if let token {
-            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        if !skipAuth {
+            let token = await AuthService.shared.accessToken
+            if let token {
+                request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            }
         }
 
         if let body {
@@ -68,8 +71,8 @@ final class APIClient: Sendable {
             throw APIError.httpError(0, "Invalid response")
         }
 
-        // Handle 401 — try refresh
-        if httpResponse.statusCode == 401 {
+        // Handle 401 — try refresh (but NOT for auth endpoints to prevent infinite loop)
+        if httpResponse.statusCode == 401 && !skipAuth && !path.hasPrefix("/auth/") {
             let refreshed = await AuthService.shared.refreshTokens()
             if refreshed {
                 let newToken = await AuthService.shared.accessToken
@@ -129,8 +132,8 @@ final class APIClient: Sendable {
             throw APIError.httpError(0, "Invalid response")
         }
 
-        // Handle 401 — try refresh
-        if httpResponse.statusCode == 401 {
+        // Handle 401 — try refresh (skip for auth endpoints to prevent infinite loop)
+        if httpResponse.statusCode == 401 && !path.hasPrefix("/auth/") {
             if await AuthService.shared.refreshTokens() {
                 if let newToken = await AuthService.shared.accessToken {
                     request.setValue("Bearer \(newToken)", forHTTPHeaderField: "Authorization")
