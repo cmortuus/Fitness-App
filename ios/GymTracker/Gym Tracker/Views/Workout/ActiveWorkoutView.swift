@@ -18,6 +18,7 @@ struct ActiveWorkoutView: View {
     @State private var elapsed = 0
     @State private var clockTimer: Timer?
     @State private var clockPaused = false
+    @State private var draftTimer: Timer?
 
     // Rest timer
     @State private var restActive = false
@@ -214,7 +215,40 @@ struct ActiveWorkoutView: View {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     ForEach(exercises.indices, id: \.self) { exIdx in
+                        // Superset grouping indicator
+                        if let gid = exercises[exIdx].groupId, exIdx > 0,
+                           exercises[exIdx - 1].groupId == gid {
+                            HStack {
+                                Rectangle().fill(AppColors.primary.opacity(0.3)).frame(height: 1)
+                                Text("SUPERSET")
+                                    .font(.caption2.bold())
+                                    .tracking(1)
+                                    .foregroundStyle(AppColors.primary)
+                                Rectangle().fill(AppColors.primary.opacity(0.3)).frame(height: 1)
+                            }
+                            .padding(.horizontal)
+                            .padding(.vertical, -4)
+                        }
+
                         exerciseCard(exIdx: exIdx)
+
+                        // "Link as superset" button between exercises
+                        if exIdx < exercises.count - 1 {
+                            let currentGrouped = exercises[exIdx].groupId != nil
+                            let nextGrouped = exercises[exIdx + 1].groupId != nil
+                            let sameGroup = exercises[exIdx].groupId != nil && exercises[exIdx].groupId == exercises[exIdx + 1].groupId
+                            if !sameGroup {
+                                Button {
+                                    linkSuperset(exIdx: exIdx)
+                                } label: {
+                                    Label(currentGrouped || nextGrouped ? "Add to superset" : "Link as superset",
+                                          systemImage: "link")
+                                        .font(.caption2)
+                                        .foregroundStyle(AppColors.primary.opacity(0.6))
+                                }
+                                .frame(maxWidth: .infinity)
+                            }
+                        }
                     }
 
                     // Add exercise button
@@ -449,12 +483,34 @@ struct ActiveWorkoutView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
 
+                // Unlink from superset
+                if exercise.groupId != nil {
+                    Button(action: { unlinkSuperset(exIdx: exIdx) }) {
+                        Image(systemName: "link.badge.plus")
+                            .font(.caption)
+                            .foregroundStyle(AppColors.primary)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.mini)
+                }
+
                 Button(role: .destructive, action: { removeExercise(exIdx) }) {
                     Image(systemName: "trash")
                         .font(.caption)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.mini)
+            }
+
+            // Assisted exercise net load (#469)
+            if exercise.isAssisted {
+                let bodyWt = UserDefaults.standard.double(forKey: SettingsKey.lastBodyWeightKg)
+                if bodyWt > 0 {
+                    let dispBW = weightUnit == "lbs" ? bodyWt * 2.20462 : bodyWt
+                    Text("Assisted — body weight: \(Int(dispBW)) \(weightUnit)")
+                        .font(.caption2)
+                        .foregroundStyle(.cyan)
+                }
             }
 
             // Notes
@@ -482,6 +538,18 @@ struct ActiveWorkoutView: View {
             // Set rows
             ForEach(exercises[exIdx].sets.indices, id: \.self) { sIdx in
                 setRow(exIdx: exIdx, sIdx: sIdx)
+
+                // Deviation warning (#466)
+                if let w = exercises[exIdx].sets[sIdx].weight,
+                   let init_w = exercises[exIdx].sets[sIdx].initWeight,
+                   init_w > 0, !exercises[exIdx].sets[sIdx].done,
+                   abs(w - init_w) / init_w > 0.20 {
+                    Text("⚠️ \(Int(abs(w - init_w) / init_w * 100))% \(w > init_w ? "above" : "below") planned weight")
+                        .font(.caption2)
+                        .foregroundStyle(.orange)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                }
             }
 
             // Add/remove set + warmup buttons
@@ -1121,9 +1189,11 @@ struct ActiveWorkoutView: View {
             // PR check
             checkForPR(exercise: exercise, set: set, effectiveReps: effectiveReps)
 
-            // Start rest timer
-            let duration = currentRestDurations.duration(for: exercise)
-            startRest(seconds: duration)
+            // Start rest timer (supersets: only rest when all group exercises caught up)
+            if shouldStartRest(for: exercise) {
+                let duration = currentRestDurations.duration(for: exercise)
+                startRest(seconds: duration)
+            }
 
             // Autoregulation: recovery prompt (first set of new muscle group)
             if !recoveryAskedMuscles.contains(exercise.muscleGroup) {
@@ -1416,6 +1486,32 @@ struct ActiveWorkoutView: View {
         clockTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
             if !clockPaused { elapsed += 1 }
         }
+        // Draft auto-save every 5 seconds (#467)
+        draftTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            Task { await saveDrafts() }
+        }
+    }
+
+    private func saveDrafts() async {
+        guard let sid = sessionId else { return }
+        for exercise in exercises {
+            for set in exercise.sets where !set.done && !set.skipped {
+                guard let bid = set.backendId else { continue }
+                let w = set.weight ?? 0
+                let r = set.reps ?? 0
+                if w > 0 || r > 0 {
+                    struct Draft: Encodable {
+                        let draft_weight_kg: Double?
+                        let draft_reps: Int?
+                    }
+                    let draftW = weightUnit == "lbs" ? w * 0.453592 : w
+                    let _: ExerciseSet? = try? await APIClient.shared.patch(
+                        "/sessions/\(sid)/sets/\(bid)",
+                        body: Draft(draft_weight_kg: w > 0 ? draftW : nil, draft_reps: r > 0 ? r : nil)
+                    )
+                }
+            }
+        }
     }
 
     private func startRest(seconds: Int) {
@@ -1448,9 +1544,37 @@ struct ActiveWorkoutView: View {
         restActive = false
     }
 
+    // MARK: - Superset Management (#464)
+
+    private func linkSuperset(exIdx: Int) {
+        guard exIdx < exercises.count - 1 else { return }
+        let existingGroup = exercises[exIdx].groupId ?? exercises[exIdx + 1].groupId ?? UUID().uuidString
+        exercises[exIdx].groupId = existingGroup
+        exercises[exIdx + 1].groupId = existingGroup
+    }
+
+    private func unlinkSuperset(exIdx: Int) {
+        exercises[exIdx].groupId = nil
+    }
+
+    /// Check if all exercises in a superset group have completed the same number of sets
+    private func isGroupCaughtUp(groupId: String) -> Bool {
+        let grouped = exercises.filter { $0.groupId == groupId }
+        guard grouped.count > 1 else { return true }
+        let completedCounts = grouped.map { ex in ex.sets.filter { $0.done || $0.skipped }.count }
+        return completedCounts.allSatisfy { $0 == completedCounts.first }
+    }
+
+    /// Should rest timer start after completing a set?
+    private func shouldStartRest(for exercise: UIExercise) -> Bool {
+        guard let gid = exercise.groupId else { return true } // not grouped → always rest
+        return isGroupCaughtUp(groupId: gid) // grouped → only rest when all caught up
+    }
+
     private func stopTimers() {
         clockTimer?.invalidate()
         restTimer?.invalidate()
+        draftTimer?.invalidate()
     }
 
     private func playChime() {
