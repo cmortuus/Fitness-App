@@ -386,6 +386,9 @@ private struct PlanDayLinkRow: View {
                     Text("exercises")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
+                    Text("~\(day.estimatedMinutes)m")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
                 }
             }
             .padding(.vertical, 5)

@@ -44,6 +44,18 @@ struct PlanDay: Codable, Identifiable {
     let day_number: Int
     let day_name: String
     let exercises: [PlanExerciseEntry]
+
+    /// Estimated workout duration in minutes (matching web's estimateDayMinutes)
+    var estimatedMinutes: Int {
+        let avgSetDuration = 40.0 // seconds per set
+        var totalSeconds = 0.0
+        for ex in exercises {
+            let sets = Double(ex.sets ?? 3)
+            let rest = Double(ex.rest_seconds ?? 90)
+            totalSeconds += sets * avgSetDuration + max(sets - 1, 0) * rest
+        }
+        return max(Int(totalSeconds / 60), 1)
+    }
 }
 
 struct WorkoutPlan: Codable, Identifiable {
