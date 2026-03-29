@@ -67,7 +67,7 @@ struct WorkoutSummaryView: View {
                     StatBox(label: "~kcal", value: "\(estimatedCalories)")
                 }
 
-                // PRs
+                // PRs — amber styling matching web
                 if !prs.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("🏆 Personal Records")
@@ -84,8 +84,12 @@ struct WorkoutSummaryView: View {
                         }
                     }
                     .padding()
-                    .background(.ultraThinMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .background(Color.orange.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(Color.orange.opacity(0.2), lineWidth: 1)
+                    )
                 }
 
                 // Exercise breakdown
@@ -289,14 +293,18 @@ struct StatBox: View {
     var body: some View {
         VStack(spacing: 4) {
             Text(value)
-                .font(.title2.bold())
+                .font(.title2.bold().monospacedDigit())
             Text(label)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding()
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(AppColors.zinc900)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(AppColors.zinc800, lineWidth: 1)
+        )
     }
 }

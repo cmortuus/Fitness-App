@@ -530,16 +530,13 @@ struct ActiveWorkoutView: View {
             }
         }
         .padding()
-        .background(
-            allSetsDone
-                ? Color.green.opacity(0.06)
-                : Color(.systemGray6).opacity(0.5)
-        )
+        .background(AppColors.zinc900)
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .strokeBorder(allSetsDone ? Color.green.opacity(0.3) : Color.clear, lineWidth: 1)
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(allSetsDone ? Color.green.opacity(0.3) : AppColors.zinc800, lineWidth: 1)
         )
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .opacity(allSetsDone ? 0.6 : 1.0)
         .animation(.easeInOut(duration: 0.3), value: allSetsDone)
     }
 
