@@ -554,6 +554,23 @@ struct AlcoholCalculatorView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Quick Presets") {
+                    HStack(spacing: 8) {
+                        Button("🍺 Beer") {
+                            drinkType = .beer; volumeText = "12"; volumeUnit = .oz
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        Button("🍷 Wine") {
+                            drinkType = .wine; volumeText = "5"; volumeUnit = .oz
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                        Button("🥃 Spirit") {
+                            drinkType = .spirits; volumeText = "1.5"; volumeUnit = .oz
+                        }
+                        .buttonStyle(.bordered).controlSize(.small)
+                    }
+                }
+
                 Section("Drink Type") {
                     Picker("Type", selection: $drinkType) {
                         ForEach(DrinkType.allCases) { type in

@@ -360,6 +360,18 @@ struct SettingsView: View {
             }
 
             heightRow
+
+            // Activity level (#481)
+            Picker("Activity Level", selection: Binding(
+                get: { UserDefaults.standard.double(forKey: "activityLevel") },
+                set: { UserDefaults.standard.set($0, forKey: "activityLevel") }
+            )) {
+                Text("Sedentary (1.0)").tag(1.0)
+                Text("Lightly Active (1.2)").tag(1.2)
+                Text("Moderate (1.4)").tag(1.4)
+                Text("Active (1.6)").tag(1.6)
+                Text("Very Active (1.8)").tag(1.8)
+            }
         }
     }
 

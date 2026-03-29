@@ -391,6 +391,17 @@ struct ActiveWorkoutView: View {
                     Text(exercise.name)
                         .font(.headline)
                         .foregroundStyle(allSetsDone ? .green : .primary)
+                        .contextMenu {
+                            // Custom rest timer (#470)
+                            Menu("Rest Timer") {
+                                ForEach([30, 60, 90, 120, 150, 180, 240, 300], id: \.self) { secs in
+                                    Button("\(secs / 60):\(String(format: "%02d", secs % 60))") {
+                                        exercises[exIdx].customRestSeconds = secs
+                                    }
+                                }
+                                Button("Default") { exercises[exIdx].customRestSeconds = nil }
+                            }
+                        }
                     HStack(spacing: 6) {
                         if !exercise.muscleGroup.isEmpty {
                             Text(exercise.muscleGroup)
