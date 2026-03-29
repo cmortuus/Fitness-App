@@ -176,8 +176,11 @@ struct WorkoutSummaryView: View {
 
                 // Share + Home buttons
                 HStack(spacing: 16) {
-                    ShareLink(item: summaryText) {
-                        Label("Share", systemImage: "square.and.arrow.up")
+                    // Image share (#468)
+                    Button {
+                        shareAsImage()
+                    } label: {
+                        Label("Share Image", systemImage: "photo")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.bordered)
@@ -283,6 +286,37 @@ struct WorkoutSummaryView: View {
         }
         let suffix = groups.count > 2 ? " …" : ""
         return parts.joined(separator: ", ") + suffix
+    }
+
+    @MainActor
+    private func shareAsImage() {
+        let renderer = ImageRenderer(content:
+            VStack(spacing: 12) {
+                Text("🎉 Workout Complete!").font(.title2.bold())
+                Text(workoutName).font(.headline)
+                HStack(spacing: 16) {
+                    VStack { Text("\(totalSets)").font(.title3.bold()); Text("Sets").font(.caption) }
+                    VStack { Text(formatDuration(duration)).font(.title3.bold()); Text("Duration").font(.caption) }
+                    VStack { Text(formatVolume(totalVolume)).font(.title3.bold()); Text("Volume").font(.caption) }
+                }
+                if !prs.isEmpty {
+                    Text("🏆 \(prs.count) PR\(prs.count > 1 ? "s" : "")!").font(.subheadline.bold()).foregroundStyle(.yellow)
+                }
+                Text("GymTracker").font(.caption2).foregroundStyle(.secondary)
+            }
+            .padding(24)
+            .background(AppColors.zinc900)
+            .frame(width: 350)
+        )
+        renderer.scale = 3.0
+
+        if let image = renderer.uiImage {
+            let activityVC = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+               let root = windowScene.windows.first?.rootViewController {
+                root.present(activityVC, animated: true)
+            }
+        }
     }
 }
 

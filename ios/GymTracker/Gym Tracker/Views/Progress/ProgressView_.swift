@@ -219,21 +219,49 @@ struct ProgressView_: View {
     }
 
     private var bodyWeightLineChart: some View {
-        Chart(bodyWeights.reversed()) { entry in
-            LineMark(
-                x: .value("Date", String(entry.recorded_at?.prefix(10) ?? "")),
-                y: .value("Weight", displayWeight(entry.weight_kg))
-            )
-            .interpolationMethod(.catmullRom)
-            .foregroundStyle(.blue)
-            PointMark(
-                x: .value("Date", String(entry.recorded_at?.prefix(10) ?? "")),
-                y: .value("Weight", displayWeight(entry.weight_kg))
-            )
-            .foregroundStyle(.blue)
-            .symbolSize(30)
+        let entries = bodyWeights.reversed()
+        let hasBodyFat = entries.contains { $0.body_fat_pct != nil }
+
+        return Chart {
+            ForEach(Array(entries), id: \.id) { entry in
+                let dateStr = String(entry.recorded_at?.prefix(10) ?? "")
+                let weight = displayWeight(entry.weight_kg)
+
+                // Total weight line
+                LineMark(x: .value("Date", dateStr), y: .value("Weight", weight))
+                    .interpolationMethod(.catmullRom)
+                    .foregroundStyle(.blue)
+                PointMark(x: .value("Date", dateStr), y: .value("Weight", weight))
+                    .foregroundStyle(.blue)
+                    .symbolSize(30)
+
+                // Lean mass line (#473)
+                if let bf = entry.body_fat_pct {
+                    let lean = displayWeight(entry.weight_kg * (1 - bf / 100))
+                    LineMark(x: .value("Date", dateStr), y: .value("Lean", lean))
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(.green)
+                    PointMark(x: .value("Date", dateStr), y: .value("Lean", lean))
+                        .foregroundStyle(.green)
+                        .symbolSize(20)
+
+                    // Fat mass line
+                    let fat = displayWeight(entry.weight_kg * bf / 100)
+                    LineMark(x: .value("Date", dateStr), y: .value("Fat", fat))
+                        .interpolationMethod(.catmullRom)
+                        .foregroundStyle(.orange)
+                    PointMark(x: .value("Date", dateStr), y: .value("Fat", fat))
+                        .foregroundStyle(.orange)
+                        .symbolSize(20)
+                }
+            }
         }
         .chartYAxisLabel(weightUnit)
+        .chartForegroundStyleScale([
+            "Weight": .blue,
+            "Lean": .green,
+            "Fat": .orange,
+        ])
         .frame(height: 220)
     }
 
