@@ -72,7 +72,6 @@ struct NutritionView: View {
                 }
                 .background(AppColors.zinc950)
                 .ignoresSafeArea(edges: .top)
-                .dismissKeyboardOnTap()
 
                 // FAB
                 expandableFAB
@@ -929,7 +928,6 @@ struct EditEntrySheet: View {
             .navigationTitle("Edit Entry")
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
-            .dismissKeyboardOnTap()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {
@@ -1096,7 +1094,6 @@ struct ServingSizeSheet: View {
             .navigationTitle("Log Food")
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
-            .dismissKeyboardOnTap()
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
             }

@@ -676,8 +676,8 @@ struct ActiveWorkoutView: View {
             .keyboardType(.decimalPad)
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: .infinity)
-            .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
             .onTapGesture { focusedExercise = exercise; focusedWeight = set.weight }
+            .disabled(set.done || set.skipped || set.setType == .myoRepMatch)
 
             // Reps
             TextField("reps", value: Binding(
