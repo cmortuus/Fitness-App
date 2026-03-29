@@ -289,7 +289,7 @@ class NutritionEntryCreate(BaseModel):
     name: str
     date: date
     meal: MealType = MealType.SNACK
-    quantity_g: float = Field(gt=0)
+    quantity_g: float = Field(ge=0)  # ge=0 to allow alcohol/quick-add entries with 0g
     calories: float = Field(ge=0)
     protein: float = Field(ge=0)
     carbs: float = Field(ge=0)
@@ -298,7 +298,7 @@ class NutritionEntryCreate(BaseModel):
 
 
 class NutritionEntryUpdate(BaseModel):
-    quantity_g: float | None = Field(default=None, gt=0)
+    quantity_g: float | None = Field(default=None, ge=0)
     calories: float | None = Field(default=None, ge=0)
     protein: float | None = Field(default=None, ge=0)
     carbs: float | None = Field(default=None, ge=0)

@@ -7,7 +7,7 @@ struct AddFoodView: View {
     let onSave: () -> Void
     @Environment(\.dismiss) var dismiss
 
-    enum Tab { case search, saved, manual }
+    enum Tab { case search, manual }
     @State private var activeTab: Tab = .search
 
     @State private var searchQuery = ""
@@ -42,24 +42,16 @@ struct AddFoodView: View {
                 // Tab segmented control
                 Picker("Tab", selection: $activeTab) {
                     Text("Search").tag(Tab.search)
-                    Text("My Foods").tag(Tab.saved)
                     Text("Manual").tag(Tab.manual)
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
-                .onChange(of: activeTab) { _, tab in
-                    if tab == .saved && savedFoods.isEmpty {
-                        Task { await loadSavedFoods() }
-                    }
-                }
 
                 switch activeTab {
                 case .search:
                     searchTab
-                case .saved:
-                    savedTab
                 case .manual:
                     manualEntryForm
                 }
@@ -68,7 +60,7 @@ struct AddFoodView: View {
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
             .dismissKeyboardOnTap()
-            .task { await loadRecent() }
+            .task { await loadRecent(); await loadSavedFoods() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
@@ -152,45 +144,65 @@ struct AddFoodView: View {
                 .padding(.top, 60)
                 Spacer()
             } else if searchQuery.isEmpty {
-                // Preloaded: recent foods
-                if loadingRecent {
-                    ProgressView().padding(.top, 40)
-                    Spacer()
-                } else if recentEntries.isEmpty {
-                    VStack(spacing: 12) {
-                        Image(systemName: "text.magnifyingglass").font(.system(size: 40)).foregroundStyle(.tertiary)
-                        Text("Search for a food or scan a barcode").font(.subheadline).foregroundStyle(.secondary)
-                    }
-                    .padding(.top, 60)
-                    Spacer()
-                } else {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("RECENT").font(.caption2.weight(.semibold)).tracking(0.8)
-                            .foregroundStyle(.secondary).padding(.horizontal)
-                        List(recentEntries) { entry in
-                            Button {
-                                Task { await relogEntry(entry) }
-                            } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(entry.name).font(.subheadline).foregroundStyle(.primary)
-                                        HStack(spacing: 4) {
-                                            if let cal = entry.calories {
-                                                Text("\(Int(cal)) kcal").font(.caption2).foregroundStyle(.orange)
-                                            }
-                                            if let q = entry.quantity_g, q > 0 {
-                                                Text("\(Int(q))g").font(.caption2).foregroundStyle(.tertiary)
+                // Combined: recent + saved foods (#495)
+                List {
+                    if !recentEntries.isEmpty {
+                        Section {
+                            ForEach(recentEntries) { entry in
+                                Button { Task { await relogEntry(entry) } } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(entry.name).font(.subheadline).foregroundStyle(.primary)
+                                            HStack(spacing: 4) {
+                                                if let cal = entry.calories {
+                                                    Text("\(Int(cal)) kcal").font(.caption2).foregroundStyle(.orange)
+                                                }
+                                                if let q = entry.quantity_g, q > 0 {
+                                                    Text("\(Int(q))g").font(.caption2).foregroundStyle(.tertiary)
+                                                }
                                             }
                                         }
+                                        Spacer()
+                                        Image(systemName: "plus.circle").foregroundStyle(.blue)
                                     }
-                                    Spacer()
-                                    Image(systemName: "plus.circle").foregroundStyle(.blue)
                                 }
                             }
+                        } header: {
+                            Text("RECENT").font(.caption2.weight(.semibold)).tracking(0.8)
                         }
-                        .listStyle(.plain)
+                    }
+
+                    if !savedFoods.isEmpty {
+                        Section {
+                            ForEach(savedFoods, id: \.name) { food in
+                                Button { selectedFoodWrapper = IdentifiedFood(food: food) } label: {
+                                    foodRow(food)
+                                }
+                                .swipeActions(edge: .trailing) {
+                                    if let foodId = food.id {
+                                        Button(role: .destructive) {
+                                            Task { await deleteCustomFood(id: foodId) }
+                                        } label: { Label("Delete", systemImage: "trash") }
+                                    }
+                                }
+                            }
+                        } header: {
+                            Text("MY FOODS").font(.caption2.weight(.semibold)).tracking(0.8)
+                        }
+                    }
+
+                    if recentEntries.isEmpty && savedFoods.isEmpty && !loadingRecent && !loadingSaved {
+                        Section {
+                            VStack(spacing: 12) {
+                                Image(systemName: "text.magnifyingglass").font(.system(size: 40)).foregroundStyle(.tertiary)
+                                Text("Search for a food or scan a barcode").font(.subheadline).foregroundStyle(.secondary)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 40)
+                        }
                     }
                 }
+                .listStyle(.plain)
             } else {
                 foodList(searchResults)
             }
