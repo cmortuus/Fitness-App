@@ -77,11 +77,46 @@ def serialize_goal(goal: MacroGoal) -> dict:
 # ── Food search (proxy) ──────────────────────────────────────────────────────
 
 @router.get("/search")
-async def search(q: str = "", page: int = 1) -> list[dict]:
-    """Search Open Food Facts + USDA for foods matching a query."""
+async def search(
+    q: str = "",
+    page: int = 1,
+    user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+) -> list[dict]:
+    """Search local food DB first, then external APIs if needed."""
     if not q.strip():
         return []
-    return await search_foods(q.strip(), page=page)
+
+    query = q.strip()
+    results: list[dict] = []
+
+    # Search local DB first (imported + community + custom foods)
+    if db and user:
+        local_result = await db.execute(
+            select(FoodItem)
+            .where(
+                FoodItem.name.ilike(f"%{query}%"),
+                (FoodItem.source != "pending") | (FoodItem.user_id == user.id),
+            )
+            .order_by(
+                desc(FoodItem.source == "custom"),
+                desc(FoodItem.source == "community"),
+            )
+            .limit(15)
+        )
+        local_foods = local_result.scalars().all()
+        results.extend([serialize_food_item(f) for f in local_foods])
+
+    # Only hit external APIs if local results are sparse
+    if len(results) < 5:
+        external = await search_foods(query, page=page)
+        # Deduplicate against local results by name
+        local_names = {r["name"].lower() for r in results}
+        for item in external:
+            if item["name"].lower() not in local_names:
+                results.append(item)
+
+    return results[:25]
 
 
 @router.get("/barcode/{code}")
