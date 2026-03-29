@@ -1,4 +1,5 @@
 import SwiftUI
+import Charts
 
 // MARK: - Dashboard Widget Identifiers
 
@@ -143,7 +144,10 @@ struct DashboardView: View {
                             nutritionSnapshot(ns)
                         }
 
-                        // 10. Inline 1RM Calculator (#476)
+                        // 10. Week Volume Chart (#477)
+                        weekVolumeChart
+
+                        // 11. Inline 1RM Calculator (#476)
                         inlineCalculator
                     }
                     .padding(.horizontal)
@@ -341,6 +345,47 @@ struct DashboardView: View {
                         .foregroundStyle(AppColors.primary)
                 }
             }
+
+    // MARK: - Week Volume Chart (#477)
+
+    private var weekVolumeChart: some View {
+        let cal = Calendar.current
+        let today = Date()
+        let days = (0..<7).map { cal.date(byAdding: .day, value: -6 + $0, to: today)! }
+        let df = DateFormatter()
+        df.dateFormat = "yyyy-MM-dd"
+        let dayLabels = DateFormatter()
+        dayLabels.dateFormat = "E"
+
+        struct DayVolume: Identifiable {
+            let id: String
+            let label: String
+            let volume: Double
+        }
+
+        let data: [DayVolume] = days.map { day in
+            let dateStr = df.string(from: day)
+            let vol = recentSessions
+                .filter { $0.date == dateStr && $0.status == "completed" }
+                .compactMap(\.total_volume_kg)
+                .reduce(0, +)
+            let dispVol = weightUnit == "lbs" ? vol * 2.20462 : vol
+            return DayVolume(id: dateStr, label: dayLabels.string(from: day), volume: dispVol)
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("This Week")
+                .font(.subheadline.bold())
+            Chart(data) { day in
+                BarMark(
+                    x: .value("Day", day.label),
+                    y: .value("Volume", day.volume)
+                )
+                .foregroundStyle(AppColors.primary.gradient)
+                .cornerRadius(4)
+            }
+            .chartYAxisLabel(weightUnit)
+            .frame(height: 120)
         }
         .padding()
         .background(AppColors.zinc900)
