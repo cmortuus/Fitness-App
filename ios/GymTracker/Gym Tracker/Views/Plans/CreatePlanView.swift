@@ -205,40 +205,69 @@ struct CreatePlanView: View {
 
     @ViewBuilder
     private func exerciseRow(day: CreatePlanDay, ex: Binding<CreatePlanExercise>) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(ex.wrappedValue.exercise.display_name ?? "Exercise")
                 .font(.subheadline.bold())
+                .lineLimit(2)
 
-            HStack(spacing: 16) {
+            // Sets / Reps / Rest in a grid layout
+            HStack(spacing: 0) {
                 // Sets
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(spacing: 4) {
                     Text("Sets").font(.caption2).foregroundStyle(.secondary)
-                    Stepper("\(ex.wrappedValue.sets)", value: ex.sets, in: 1...20)
-                        .fixedSize()
+                    HStack(spacing: 4) {
+                        Button { if ex.wrappedValue.sets > 1 { ex.sets.wrappedValue -= 1 } } label: {
+                            Image(systemName: "minus").font(.caption2)
+                        }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                        Text("\(ex.wrappedValue.sets)")
+                            .font(.subheadline.bold().monospacedDigit())
+                            .frame(width: 24)
+                        Button { if ex.wrappedValue.sets < 20 { ex.sets.wrappedValue += 1 } } label: {
+                            Image(systemName: "plus").font(.caption2)
+                        }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                    }
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity)
 
                 // Reps
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(spacing: 4) {
                     Text("Reps").font(.caption2).foregroundStyle(.secondary)
-                    Stepper("\(ex.wrappedValue.reps)", value: ex.reps, in: 1...50)
-                        .fixedSize()
+                    HStack(spacing: 4) {
+                        Button { if ex.wrappedValue.reps > 1 { ex.reps.wrappedValue -= 1 } } label: {
+                            Image(systemName: "minus").font(.caption2)
+                        }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                        Text("\(ex.wrappedValue.reps)")
+                            .font(.subheadline.bold().monospacedDigit())
+                            .frame(width: 24)
+                        Button { if ex.wrappedValue.reps < 50 { ex.reps.wrappedValue += 1 } } label: {
+                            Image(systemName: "plus").font(.caption2)
+                        }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                    }
                 }
-
-                Spacer()
+                .frame(maxWidth: .infinity)
 
                 // Rest
-                VStack(alignment: .leading, spacing: 2) {
+                VStack(spacing: 4) {
                     Text("Rest").font(.caption2).foregroundStyle(.secondary)
-                    Stepper(formatRest(ex.wrappedValue.restSeconds),
-                            value: Binding(
-                                get: { ex.wrappedValue.restSeconds / 30 },
-                                set: { ex.restSeconds.wrappedValue = $0 * 30 }
-                            ),
-                            in: 1...20)
-                    .fixedSize()
+                    HStack(spacing: 4) {
+                        Button { if ex.wrappedValue.restSeconds > 30 { ex.restSeconds.wrappedValue -= 30 } } label: {
+                            Image(systemName: "minus").font(.caption2)
+                        }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                        Text(formatRest(ex.wrappedValue.restSeconds))
+                            .font(.caption.bold().monospacedDigit())
+                            .frame(width: 40)
+                        Button { if ex.wrappedValue.restSeconds < 600 { ex.restSeconds.wrappedValue += 30 } } label: {
+                            Image(systemName: "plus").font(.caption2)
+                        }
+                        .buttonStyle(.bordered).controlSize(.mini)
+                    }
                 }
+                .frame(maxWidth: .infinity)
             }
 
             // Starting weight (optional)
