@@ -158,6 +158,19 @@ struct DashboardView: View {
             .background(AppColors.zinc950)
             .navigationTitle("GymTracker")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        withAnimation(.spring(duration: 0.3)) {
+                            if isEditing { saveWidgetConfig() }
+                            isEditing.toggle()
+                        }
+                    } label: {
+                        Image(systemName: isEditing ? "checkmark.circle.fill" : "square.grid.2x2")
+                            .foregroundStyle(isEditing ? .green : AppColors.primary)
+                    }
+                }
+            }
             .task {
                 loadWidgetConfig()
                 await loadData()
