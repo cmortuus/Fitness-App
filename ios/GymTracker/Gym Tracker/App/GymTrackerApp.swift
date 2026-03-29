@@ -13,6 +13,7 @@ struct GymTrackerApp: App {
                             // Fire-and-forget — don't block app launch
                             Task { await SettingsSync.loadFromDB() }
                             Task { await HealthKitManager.shared.syncBodyWeightOnLaunch() }
+                            Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
                         }
                 } else {
                     LoginView()

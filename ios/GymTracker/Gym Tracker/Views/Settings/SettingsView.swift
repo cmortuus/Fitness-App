@@ -308,6 +308,7 @@ struct SettingsView: View {
                 profileSection
                 unitsSection
                 bodyWeightSection
+                workoutSyncSection
                 appleHealthSection
                 accountSection
             }
@@ -616,6 +617,35 @@ struct SettingsView: View {
 
     @State private var importingWeight = false
     @State private var importedWeight: String? = nil
+
+    // MARK: - Workout Sync Section
+
+    private var workoutSyncSection: some View {
+        Section {
+            Toggle("Sync workouts to Apple Health",
+                   isOn: Binding(
+                    get: { WorkoutSyncService.shared.isSyncEnabled },
+                    set: { WorkoutSyncService.shared.isSyncEnabled = $0 }
+                   ))
+
+            if let lastSync = WorkoutSyncService.shared.lastSyncDate {
+                HStack {
+                    Text("Last synced")
+                    Spacer()
+                    Text(lastSync, style: .relative)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button("Sync Now") {
+                Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
+            }
+        } header: {
+            Text("Workout Sync")
+        } footer: {
+            Text("Workouts logged in the web app will appear in Apple Health.")
+        }
+    }
 
     @ViewBuilder
     private var appleHealthSection: some View {
