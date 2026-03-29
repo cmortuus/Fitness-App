@@ -319,11 +319,12 @@
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
   }
 
-  // Workout clock
+  // Workout clock — only starts on first set completion
   let startedAt = $state<number>(0);
   let elapsed = $state(0);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
   let clockPaused = $state(false);
+  let clockStarted = $state(false);
   let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
@@ -657,15 +658,21 @@
         });
       }
 
-      startedAt = Date.now();
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
+      // Clock starts on first set completion, not here (#524)
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
       loading = false;
     }
+  }
+
+  function startClockIfNeeded() {
+    if (clockStarted) return;
+    clockStarted = true;
+    startedAt = Date.now();
+    clockInterval = setInterval(() => {
+      elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
   }
 
   async function startFreeSession() {
@@ -690,10 +697,7 @@
       workoutName = sess.name ?? 'Workout';
       currentSession.set(sess);
 
-      startedAt = Date.now();
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
+      // Clock starts on first set completion, not here (#524)
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
@@ -1032,6 +1036,7 @@
 
       set.reps = effectiveReps; // sync reps field for drop-off calc
       set.done = true;
+      startClockIfNeeded(); // Start timer on first set completion (#524)
 
       // Sync myo match sets with set 1's final values
       syncMyoMatchSets(ex);
