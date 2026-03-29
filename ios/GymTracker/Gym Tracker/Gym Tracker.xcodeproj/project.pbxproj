@@ -25,6 +25,7 @@
 		ED0743D7120761BE71E43BC9 /* User.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB3B68C9796226457EB5FFBB /* User.swift */; };
 		B4D2A1E3F7C8095A6E312B4F /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E1B5D2A8F40967B1D24A3E /* HealthKitManager.swift */; };
 		F1A2B3C4D5E607182930A1B2 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B3C4D5E60718293041B2C3 /* ActivityView.swift */; };
+		A3B4C5D6E7F80829304152B3 /* WorkoutSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +47,7 @@
 		BB3B68C9796226457EB5FFBB /* User.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = User.swift; sourceTree = "<group>"; };
 		F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
 		C3E1B5D2A8F40967B1D24A3E /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
+		B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSyncService.swift; sourceTree = "<group>"; };
 		D2B3C4D5E60718293041B2C3 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -110,6 +112,7 @@
 				B1B1C2D75D1D61271F652CC3 /* APIClient.swift */,
 				A910EA63C2883868E6403D36 /* AuthService.swift */,
 				C3E1B5D2A8F40967B1D24A3E /* HealthKitManager.swift */,
+				B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -256,6 +259,7 @@
 				78C114B6D4824EBAAEA6283E /* WorkoutModels.swift in Sources */,
 				B4D2A1E3F7C8095A6E312B4F /* HealthKitManager.swift in Sources */,
 				F1A2B3C4D5E607182930A1B2 /* ActivityView.swift in Sources */,
+				A3B4C5D6E7F80829304152B3 /* WorkoutSyncService.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
