@@ -75,6 +75,18 @@ struct DashboardView: View {
         return df.string(from: Date())
     }
 
+    // Computed stats
+    private var weeklySets: Int {
+        recentSessions.compactMap(\.total_sets).reduce(0, +)
+    }
+    private var weeklyVolume: Double {
+        let vol = recentSessions.compactMap(\.total_volume_kg).reduce(0, +)
+        return weightUnit == "lbs" ? vol * 2.20462 : vol
+    }
+    private var weeklyVolumeFormatted: String {
+        weeklyVolume >= 1000 ? String(format: "%.1fk", weeklyVolume / 1000) : "\(Int(weeklyVolume))"
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -89,49 +101,51 @@ struct DashboardView: View {
                     }
                     .padding(.top, 40)
                 } else {
-                    VStack(spacing: 16) {
-                        // Greeting is always first, not reorderable
-                        greetingHeader
+                    VStack(spacing: 20) {
+                        // 1. Quick Stats Bar (4 columns)
+                        quickStatsBar
 
-                        // Active workout resume banner
+                        // 2. Next Workout Card
+                        if let plan = plans.first {
+                            nextWorkoutHero(plan: plan)
+                        }
+
+                        // 3. Active Workout Banner (if in progress)
                         if let session = activeSession {
                             activeWorkoutBanner(session)
                         }
 
-                        if isEditing {
-                            editModeHeader
+                        // 4. Manage Plans Row
+                        managePlansRow
+
+                        // 5. This Week Calendar
+                        weekCalendar
+
+                        // 6. Training Log
+                        trainingLogSection
+
+                        // 7. Insights
+                        if !insights.isEmpty {
+                            insightsSection
                         }
 
-                        // Reorderable widgets
-                        ForEach(widgetOrder) { widget in
-                            if !hiddenWidgets.contains(widget.rawValue) {
-                                widgetView(for: widget)
-                                    .overlay(alignment: .topTrailing) {
-                                        if isEditing {
-                                            editOverlay(for: widget)
-                                        }
-                                    }
-                                    .opacity(isEditing ? Double(0.9) : Double(1.0))
-                            }
+                        // 8. Nutrition
+                        if let ns = nutritionSummary {
+                            nutritionSnapshot(ns)
                         }
                     }
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, 8)
+                    .padding(.bottom, 80)
                 }
             }
-            .navigationTitle("Training")
+            .background(AppColors.zinc950)
+            .navigationTitle("")
             .toolbar {
-                ToolbarItem(placement: .primaryAction) {
-                    Button {
-                        withAnimation(.spring(duration: 0.3)) {
-                            if isEditing {
-                                saveWidgetConfig()
-                            }
-                            isEditing.toggle()
-                        }
-                    } label: {
-                        Image(systemName: isEditing ? "checkmark.circle.fill" : "square.grid.2x2")
-                            .foregroundStyle(isEditing ? .green : .blue)
-                    }
+                ToolbarItem(placement: .topBarLeading) {
+                    Text("GymTracker")
+                        .font(.title2.bold())
+                        .foregroundStyle(AppColors.primary)
                 }
             }
             .task {
@@ -140,6 +154,211 @@ struct DashboardView: View {
             }
             .refreshable { await loadData() }
         }
+    }
+
+    // MARK: - Quick Stats Bar
+
+    private var quickStatsBar: some View {
+        HStack(spacing: 8) {
+            statBox(value: "\(weekCount)", label: "workouts", color: AppColors.primary)
+            statBox(value: "\(weeklySets)", label: "sets", color: .green)
+            statBox(value: weeklyVolumeFormatted, label: weightUnit, color: AppColors.accent)
+            statBox(value: "\(streak)", label: "streak", color: .yellow)
+        }
+    }
+
+    private func statBox(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.title2.bold().monospacedDigit())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(AppColors.zinc500)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 12)
+        .background(AppColors.zinc900)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(AppColors.zinc800, lineWidth: 1)
+        )
+    }
+
+    // MARK: - Next Workout Hero
+
+    private func nextWorkoutHero(plan: WorkoutPlan) -> some View {
+        let day = plan.days?[safe: nextDay - 1]
+        let dayName = day?.day_name ?? "Day \(nextDay)"
+        let exerciseCount = day?.exercises.count ?? 0
+
+        return NavigationLink {
+            ActiveWorkoutView(planId: plan.id, planName: plan.name, dayNumber: nextDay)
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("NEXT · \(plan.name.uppercased())")
+                        .font(.caption2.bold())
+                        .tracking(1.2)
+                        .foregroundStyle(AppColors.primary)
+
+                    Text(dayName)
+                        .font(.title.bold())
+                        .foregroundStyle(.white)
+
+                    HStack(spacing: 8) {
+                        Text("Week \(plan.current_week ?? 1)")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppColors.primary.opacity(0.15))
+                            .foregroundStyle(AppColors.primary)
+                            .clipShape(Capsule())
+                            .overlay(Capsule().strokeBorder(AppColors.primary.opacity(0.3), lineWidth: 1))
+
+                        Text("Day \(nextDay)")
+                            .font(.caption2.bold())
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(AppColors.zinc800)
+                            .foregroundStyle(AppColors.zinc300)
+                            .clipShape(Capsule())
+
+                        Text("\(exerciseCount) exercises")
+                            .font(.caption2)
+                            .foregroundStyle(AppColors.zinc500)
+                    }
+                }
+
+                Spacer()
+
+                Text("🏋️")
+                    .font(.system(size: 28))
+                    .frame(width: 56, height: 56)
+                    .background(AppColors.primary.opacity(0.15))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .strokeBorder(AppColors.primary.opacity(0.3), lineWidth: 1)
+                    )
+            }
+            .padding()
+            .background(
+                LinearGradient(
+                    colors: [AppColors.primary.opacity(0.12), .clear],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(AppColors.primary.opacity(0.25), lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Manage Plans Row
+
+    private var managePlansRow: some View {
+        NavigationLink {
+            PlansView()
+        } label: {
+            HStack(spacing: 12) {
+                Text("📋")
+                    .font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Manage Plans")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(AppColors.zinc300)
+                    Text("Create, edit, and archive workout plans")
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.zinc500)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.zinc600)
+            }
+            .padding()
+            .background(AppColors.zinc900)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(AppColors.zinc800, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Training Log Section
+
+    private var trainingLogSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Training Log")
+                    .font(.headline)
+                Spacer()
+                NavigationLink {
+                    WorkoutHistoryView()
+                } label: {
+                    Text("Full Calendar →")
+                        .font(.caption)
+                        .foregroundStyle(AppColors.primary)
+                }
+            }
+
+            // 3 stat boxes
+            HStack(spacing: 8) {
+                logStatBox(value: "\(streak)", label: "Day Streak", color: AppColors.primary)
+                logStatBox(value: "\(weekCount)", label: "This Week", color: .green)
+                logStatBox(value: "\(weeklyVolumeFormatted)", label: "\(weightUnit) this wk", color: .yellow)
+            }
+
+            // Recent sessions
+            VStack(spacing: 0) {
+                ForEach(recentSessions.prefix(5)) { session in
+                    HStack {
+                        Text(session.name ?? "Workout")
+                            .font(.subheadline)
+                            .foregroundStyle(.primary)
+                            .lineLimit(1)
+                        Spacer()
+                        Text(session.date ?? "")
+                            .font(.caption)
+                            .foregroundStyle(AppColors.zinc500)
+                    }
+                    .padding(.vertical, 8)
+                    if session.id != recentSessions.prefix(5).last?.id {
+                        Divider().background(AppColors.zinc800)
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(AppColors.zinc900)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(AppColors.zinc800, lineWidth: 1)
+        )
+    }
+
+    private func logStatBox(value: String, label: String, color: Color) -> some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.title3.bold().monospacedDigit())
+                .foregroundStyle(color)
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(AppColors.zinc500)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(AppColors.zinc800.opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 
     // MARK: - Edit Mode
@@ -319,10 +538,14 @@ struct DashboardView: View {
             }
             .padding()
             .background(
-                LinearGradient(colors: [.orange, .red],
+                LinearGradient(colors: [AppColors.primary.opacity(0.2), AppColors.primary.opacity(0.05)],
                                startPoint: .leading, endPoint: .trailing)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(AppColors.primary.opacity(0.3), lineWidth: 1)
+            )
         }
     }
 
