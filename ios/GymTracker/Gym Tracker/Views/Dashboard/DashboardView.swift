@@ -723,6 +723,21 @@ struct DashboardView: View {
         }
         streak = calculateStreak(allSessions)
         weekCount = countThisWeek(allSessions)
+
+        // If ALL data is empty, API might be failing — check auth
+        if plans.isEmpty && allSessions.isEmpty && latestBodyWeight == nil && nutritionSummary == nil {
+            // Try a simple auth check
+            do {
+                let _: [WorkoutPlan] = try await APIClient.shared.get("/plans/")
+            } catch {
+                if case APIError.unauthorized = error {
+                    await AuthService.shared.logout()
+                    return
+                }
+                self.error = "Unable to connect. Pull down to retry."
+            }
+        }
+
         loading = false
     }
 }
