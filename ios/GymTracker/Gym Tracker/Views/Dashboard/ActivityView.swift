@@ -54,7 +54,7 @@ struct ActivityView: View {
                 Chart(bodyWeights.suffix(30).reversed(), id: \.id) { entry in
                     let w = weightUnit == "lbs" ? entry.weight_kg * 2.20462 : entry.weight_kg
                     LineMark(
-                        x: .value("Date", entry.recorded_at),
+                        x: .value("Date", entry.recorded_at ?? ""),
                         y: .value("Weight", w)
                     )
                     .foregroundStyle(AppColors.primary.gradient)

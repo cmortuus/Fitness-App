@@ -25,7 +25,11 @@ class WorkoutSyncService {
     /// Fetch recent completed sessions and sync unsynced ones to HealthKit
     func syncRecentWorkouts() async {
         guard isSyncEnabled else { return }
-        guard HealthKitManager.shared.isAuthorized || await HealthKitManager.shared.requestAuthorization() else { return }
+        var authorized = HealthKitManager.shared.isAuthorized
+        if !authorized {
+            authorized = await HealthKitManager.shared.requestAuthorization()
+        }
+        guard authorized else { return }
 
         do {
             // Fetch recent completed sessions
