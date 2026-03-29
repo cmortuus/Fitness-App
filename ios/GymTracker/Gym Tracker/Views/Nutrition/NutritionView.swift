@@ -70,7 +70,7 @@ struct NutritionView: View {
                         Spacer(minLength: 90)
                     }
                 }
-                .background(Color.black)
+                .background(AppColors.zinc950)
                 .ignoresSafeArea(edges: .top)
                 .dismissKeyboardOnTap()
 
@@ -198,7 +198,7 @@ struct NutritionView: View {
         }
         .background(
             LinearGradient(
-                colors: [Color(white: 0.12), Color.black],
+                colors: [AppColors.zinc900, AppColors.zinc950],
                 startPoint: .top,
                 endPoint: .bottom
             )
@@ -300,7 +300,7 @@ struct NutritionView: View {
                     }
                 }
                 .padding(14)
-                .background(Color(white: 0.11))
+                .background(AppColors.zinc900)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             } else {
@@ -312,7 +312,7 @@ struct NutritionView: View {
                         Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                     }
                     .padding(14)
-                    .background(Color(white: 0.11))
+                    .background(AppColors.zinc900)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
                 .padding(.horizontal)
@@ -338,7 +338,7 @@ struct NutritionView: View {
                     Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(14)
-                .background(Color(white: 0.11))
+                .background(AppColors.zinc900)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
             }
             .padding(.horizontal)
@@ -408,14 +408,14 @@ struct NutritionView: View {
                                         .font(.caption2.weight(.semibold).monospacedDigit())
                                 }
                                 .padding(.vertical, 5).padding(.horizontal, 8)
-                                .background(Color(white: 0.08))
+                                .background(AppColors.zinc800)
                                 .clipShape(RoundedRectangle(cornerRadius: 6))
                             }
                         }
                     }
                 }
                 .padding(14)
-                .background(Color(white: 0.11))
+                .background(AppColors.zinc900)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             }
@@ -461,7 +461,7 @@ struct NutritionView: View {
                 }
                 .padding(.vertical, 32)
                 .frame(maxWidth: .infinity)
-                .background(Color(white: 0.11))
+                .background(AppColors.zinc900)
                 .clipShape(RoundedRectangle(cornerRadius: 12))
                 .padding(.horizontal)
             } else {
@@ -503,7 +503,7 @@ struct NutritionView: View {
             List {
                 ForEach(entries) { entry in
                     foodRow(entry)
-                        .listRowBackground(Color(white: 0.11))
+                        .listRowBackground(AppColors.zinc900)
                         .listRowSeparatorTint(Color.white.opacity(0.04))
                         .listRowInsets(EdgeInsets())
                         .swipeActions(edge: .trailing, allowsFullSwipe: true) {
@@ -845,7 +845,7 @@ struct WaterTrackerCard: View {
             }
         }
         .padding(12)
-        .background(Color(white: 0.11))
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 

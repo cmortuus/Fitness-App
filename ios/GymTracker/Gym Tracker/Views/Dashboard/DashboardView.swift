@@ -168,7 +168,7 @@ struct DashboardView: View {
                             }
                             .padding(.horizontal, 12).padding(.vertical, 6)
                             .background(Color(.tertiarySystemGroupedBackground))
-                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
                         }
                         .buttonStyle(.plain)
                     }
@@ -212,8 +212,8 @@ struct DashboardView: View {
             }
         }
         .padding(6)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(AppColors.zinc900)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .padding(4)
     }
 
@@ -407,7 +407,7 @@ struct DashboardView: View {
             }
         }
         .padding(.vertical, 8)
-        .background(.ultraThinMaterial)
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -446,7 +446,7 @@ struct DashboardView: View {
             }
         }
         .padding()
-        .background(.ultraThinMaterial)
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -522,7 +522,7 @@ struct DashboardView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.ultraThinMaterial)
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -601,7 +601,7 @@ struct DashboardView: View {
             }
         }
         .padding()
-        .background(.ultraThinMaterial)
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -618,7 +618,7 @@ struct DashboardView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
-        .background(.ultraThinMaterial)
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
@@ -772,7 +772,7 @@ struct NextWorkoutCard: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding()
-        .background(.ultraThinMaterial)
+        .background(AppColors.zinc900)
         .clipShape(RoundedRectangle(cornerRadius: 16))
     }
 }
