@@ -218,7 +218,7 @@ struct AddFoodView: View {
             return
         }
         searchTask = Task {
-            try? await Task.sleep(for: .milliseconds(300))
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled else { return }
             await search()
         }
