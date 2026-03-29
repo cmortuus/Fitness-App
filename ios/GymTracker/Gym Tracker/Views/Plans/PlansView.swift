@@ -130,12 +130,12 @@ struct PlansView: View {
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                             Spacer()
-                            Text("Draft")
-                                .font(.caption2.bold())
-                                .padding(.horizontal, 6).padding(.vertical, 2)
-                                .background(Color.yellow.opacity(0.2))
-                                .foregroundStyle(.yellow)
-                                .clipShape(Capsule())
+                            Button("Publish") {
+                                Task { await publishDraft(plan) }
+                            }
+                            .font(.caption.bold())
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
                         }
                         .swipeActions(edge: .trailing) {
                             Button(role: .destructive) {
@@ -237,6 +237,15 @@ struct PlansView: View {
             await loadPlans()
             showMessage("\"\(plan.name)\" archived")
         } catch {}
+    }
+
+    private func publishDraft(_ plan: WorkoutPlan) async {
+        struct PublishBody: Encodable { let is_draft: Bool }
+        do {
+            let _: WorkoutPlan = try await APIClient.shared.put("/plans/\(plan.id)", body: PublishBody(is_draft: false))
+            await loadPlans()
+            showMessage("\"\(plan.name)\" published")
+        } catch { print("[Plans] Publish draft: \(error)") }
     }
 
     private func reusePlan(_ plan: WorkoutPlan) async {
