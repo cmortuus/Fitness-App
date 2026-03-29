@@ -358,6 +358,12 @@ struct DashboardView: View {
                         .foregroundStyle(AppColors.primary)
                 }
             }
+        }
+        .padding()
+        .background(AppColors.zinc900)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(AppColors.zinc800, lineWidth: 1))
+    }
 
     // MARK: - Week Volume Chart (#477)
 
