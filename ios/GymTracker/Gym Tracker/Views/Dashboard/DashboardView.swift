@@ -140,14 +140,8 @@ struct DashboardView: View {
                 }
             }
             .background(AppColors.zinc950)
-            .navigationTitle("")
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
-                    Text("GymTracker")
-                        .font(.title2.bold())
-                        .foregroundStyle(AppColors.primary)
-                }
-            }
+            .navigationTitle("GymTracker")
+            .navigationBarTitleDisplayMode(.large)
             .task {
                 loadWidgetConfig()
                 await loadData()
