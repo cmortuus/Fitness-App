@@ -37,6 +37,7 @@
 		F3A8C2E1D0B94756A1E28C3F /* CreatePlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B9E4D2C7F30856B2D41E9A /* CreatePlanView.swift */; };
 		FA2C8D3E41B076925EC1DA40 /* WorkoutHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D9F4B2E1C3A87056B4E29F17 /* WorkoutHistoryView.swift */; };
 		B4D2A1E3F7C8095A6E312B4F /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E1B5D2A8F40967B1D24A3E /* HealthKitManager.swift */; };
+		E1F2A3B4C5D60718E2F3A4B5 /* CompareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D5E6F70829F3A4B5C6 /* CompareView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -67,6 +68,7 @@
 		C8B2A471E5D3F9062A81B7F3 /* PlansView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlansView.swift; sourceTree = "<group>"; };
 		D7B4AB917F38FCBA4B921C35 /* WorkoutSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSummaryView.swift; sourceTree = "<group>"; };
 		D9F4B2E1C3A87056B4E29F17 /* WorkoutHistoryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutHistoryView.swift; sourceTree = "<group>"; };
+		A2B3C4D5E6F70829F3A4B5C6 /* CompareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompareView.swift; sourceTree = "<group>"; };
 		E8A2F5C31B74D906A5382B10 /* CalculatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalculatorView.swift; sourceTree = "<group>"; };
 		F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
 		F2A9D0C4E7B36851A024F38B /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
@@ -174,6 +176,7 @@
 			children = (
 				6CC10BDD71FDEA1E6C7F6203 /* DashboardView.swift */,
 				D9F4B2E1C3A87056B4E29F17 /* WorkoutHistoryView.swift */,
+				A2B3C4D5E6F70829F3A4B5C6 /* CompareView.swift */,
 				F2A9D0C4E7B36851A024F38B /* CalendarView.swift */,
 			);
 			path = Dashboard;
@@ -299,6 +302,7 @@
 				ED0743D7120761BE71E43BC9 /* User.swift in Sources */,
 				78C114B6D4824EBAAEA6283E /* WorkoutModels.swift in Sources */,
 				FA2C8D3E41B076925EC1DA40 /* WorkoutHistoryView.swift in Sources */,
+				E1F2A3B4C5D60718E2F3A4B5 /* CompareView.swift in Sources */,
 				2F5828744938EE27CC292544 /* WorkoutSummaryView.swift in Sources */,
 				B3F1A2C9E4D507831AB6EC02 /* TemplatesView.swift in Sources */,
 				C4E8B1A3F5D207490E16B28A /* CalendarView.swift in Sources */,
