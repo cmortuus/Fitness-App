@@ -16,6 +16,12 @@ struct GymTrackerApp: App {
                         }
                 } else {
                     LoginView()
+                        .task {
+                            // AUTO-LOGIN FOR UI TESTING — REMOVE BEFORE SHIPPING
+                            #if DEBUG
+                            try? await auth.login(username: "claude_test", password: "TestPass123")
+                            #endif
+                        }
                 }
             }
             .environment(auth)

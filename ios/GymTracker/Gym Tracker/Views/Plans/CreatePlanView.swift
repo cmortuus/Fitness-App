@@ -150,6 +150,11 @@ struct CreatePlanView: View {
                     ForEach($day.exercises) { $ex in
                         exerciseRow(day: day, ex: $ex)
                     }
+                    .onMove { from, to in
+                        if let idx = days.firstIndex(where: { $0.id == day.id }) {
+                            days[idx].exercises.move(fromOffsets: from, toOffset: to)
+                        }
+                    }
                     .onDelete { offsets in
                         if let idx = days.firstIndex(where: { $0.id == day.id }) {
                             days[idx].exercises.remove(atOffsets: offsets)
