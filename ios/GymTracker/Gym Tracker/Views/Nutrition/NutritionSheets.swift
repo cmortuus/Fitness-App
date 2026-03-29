@@ -175,7 +175,7 @@ struct AddFoodView: View {
                     if !savedFoods.isEmpty {
                         Section {
                             ForEach(savedFoods, id: \.name) { food in
-                                Button { selectedFoodWrapper = IdentifiedFood(food: food) } label: {
+                                Button { Task { await quickLogFood(food) } } label: {
                                     foodRow(food)
                                 }
                                 .swipeActions(edge: .trailing) {
@@ -284,11 +284,39 @@ struct AddFoodView: View {
 
     private func foodList(_ foods: [FoodSearchResult]) -> some View {
         List(foods, id: \.name) { food in
-            Button { selectedFoodWrapper = IdentifiedFood(food: food) } label: {
+            Button {
+                // Quick-log at default serving (1 tap)
+                Task { await quickLogFood(food) }
+            } label: {
                 foodRow(food)
+            }
+            .contextMenu {
+                Button("Customize Serving") {
+                    selectedFoodWrapper = IdentifiedFood(food: food)
+                }
             }
         }
         .listStyle(.plain)
+    }
+
+    private func quickLogFood(_ food: FoodSearchResult) async {
+        let qty = food.serving_size_g ?? 100
+        let scale = qty / 100
+        let body = NutritionEntryBody(
+            food_item_id: food.id,
+            name: food.name + (food.brand.map { " (\($0))" } ?? ""),
+            date: date,
+            quantity_g: qty,
+            calories: (food.calories_per_100g ?? 0) * scale,
+            protein: (food.protein_per_100g ?? 0) * scale,
+            carbs: (food.carbs_per_100g ?? 0) * scale,
+            fat: (food.fat_per_100g ?? 0) * scale
+        )
+        do {
+            let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
+            onSave()
+            dismiss()
+        } catch { print("[Food] QuickLog: \(error)") }
     }
 
     private func foodRow(_ food: FoodSearchResult) -> some View {
