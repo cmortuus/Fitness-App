@@ -59,7 +59,6 @@ struct AddFoodView: View {
             .navigationTitle("Add Food")
             .navigationBarTitleDisplayMode(.inline)
             .keyboardDoneButton()
-            .dismissKeyboardOnTap()
             .task { await loadRecent(); await loadSavedFoods() }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
