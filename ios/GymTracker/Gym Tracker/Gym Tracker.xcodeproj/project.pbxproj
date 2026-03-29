@@ -26,6 +26,7 @@
 		B4D2A1E3F7C8095A6E312B4F /* HealthKitManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E1B5D2A8F40967B1D24A3E /* HealthKitManager.swift */; };
 		F1A2B3C4D5E607182930A1B2 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B3C4D5E60718293041B2C3 /* ActivityView.swift */; };
 		A3B4C5D6E7F80829304152B3 /* WorkoutSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */; };
+		C5D6E7F8091A2B3C4D5E6F70 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E7F8091A2B3C4D5E6F7081 /* HomeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -48,6 +49,7 @@
 		F1C8B7A2E3D5094B6A823F1D /* RecipesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecipesView.swift; sourceTree = "<group>"; };
 		C3E1B5D2A8F40967B1D24A3E /* HealthKitManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HealthKitManager.swift; sourceTree = "<group>"; };
 		B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSyncService.swift; sourceTree = "<group>"; };
+		D6E7F8091A2B3C4D5E6F7081 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D2B3C4D5E60718293041B2C3 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -94,8 +96,17 @@
 				ABD7DC76BE66E3B089DE94B5 /* Progress */,
 				64BCF953578D8803B7CB19C0 /* Settings */,
 				DF30F744403371E808DBA33A /* Workout */,
+				E7F8091A2B3C4D5E6F708192 /* Home */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		E7F8091A2B3C4D5E6F708192 /* Home */ = {
+			isa = PBXGroup;
+			children = (
+				D6E7F8091A2B3C4D5E6F7081 /* HomeView.swift */,
+			);
+			path = Home;
 			sourceTree = "<group>";
 		};
 		64BCF953578D8803B7CB19C0 /* Settings */ = {
@@ -260,6 +271,7 @@
 				B4D2A1E3F7C8095A6E312B4F /* HealthKitManager.swift in Sources */,
 				F1A2B3C4D5E607182930A1B2 /* ActivityView.swift in Sources */,
 				A3B4C5D6E7F80829304152B3 /* WorkoutSyncService.swift in Sources */,
+				C5D6E7F8091A2B3C4D5E6F70 /* HomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
