@@ -57,6 +57,10 @@ struct DashboardView: View {
     @State private var activeSession: WorkoutSession? = nil
     private var hasActiveSession: Bool { activeSession != nil }
 
+    // 1RM calculator
+    @State private var calcWeight: Double? = nil
+    @State private var calcReps: Int? = nil
+
     // Widget ordering & visibility
     @State private var widgetOrder: [DashboardWidget] = DashboardWidget.allCases
     @State private var hiddenWidgets: Set<String> = []
@@ -124,15 +128,23 @@ struct DashboardView: View {
                         // 6. Training Log
                         trainingLogSection
 
-                        // 7. Insights
+                        // 7. Repeat Last Workout (#475)
+                        if let lastSession = recentSessions.first {
+                            repeatLastWorkoutButton(lastSession)
+                        }
+
+                        // 8. Insights
                         if !insights.isEmpty {
                             insightsSection
                         }
 
-                        // 8. Nutrition
+                        // 9. Nutrition
                         if let ns = nutritionSummary {
                             nutritionSnapshot(ns)
                         }
+
+                        // 10. Inline 1RM Calculator (#476)
+                        inlineCalculator
                     }
                     .padding(.horizontal)
                     .padding(.top, 8)
@@ -255,6 +267,86 @@ struct DashboardView: View {
     }
 
     // MARK: - Manage Plans Row
+
+    // MARK: - Repeat Last Workout (#475)
+
+    private func repeatLastWorkoutButton(_ session: WorkoutSession) -> some View {
+        NavigationLink {
+            ActiveWorkoutView(
+                planId: session.workout_plan_id,
+                planName: session.name ?? "Workout",
+                dayNumber: session.day_number ?? 1
+            )
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.title3)
+                    .foregroundStyle(AppColors.primary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Repeat Last Workout")
+                        .font(.subheadline.bold())
+                        .foregroundStyle(AppColors.zinc300)
+                    Text(session.name ?? "Workout")
+                        .font(.caption2)
+                        .foregroundStyle(AppColors.zinc500)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(AppColors.zinc600)
+            }
+            .padding()
+            .background(AppColors.zinc900)
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(AppColors.zinc800, lineWidth: 1)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - 1RM Calculator (#476)
+
+    private var inlineCalculator: some View {
+        let oneRM: Double? = {
+            guard let w = calcWeight, let r = calcReps, w > 0, r > 0 else { return nil }
+            return w * (1 + Double(r) / 30)
+        }()
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("1RM Calculator")
+                .font(.subheadline.bold())
+            HStack(spacing: 12) {
+                HStack {
+                    TextField("Weight", value: $calcWeight, format: .number)
+                        .keyboardType(.decimalPad)
+                        .textFieldStyle(.roundedBorder)
+                    Text(weightUnit).font(.caption).foregroundStyle(AppColors.zinc500)
+                }
+                HStack {
+                    TextField("Reps", value: $calcReps, format: .number)
+                        .keyboardType(.numberPad)
+                        .textFieldStyle(.roundedBorder)
+                    Text("reps").font(.caption).foregroundStyle(AppColors.zinc500)
+                }
+            }
+            if let rm = oneRM {
+                HStack {
+                    Text("Estimated 1RM:")
+                        .font(.subheadline)
+                        .foregroundStyle(AppColors.zinc400)
+                    Text("\(Int(rm)) \(weightUnit)")
+                        .font(.title3.bold().monospacedDigit())
+                        .foregroundStyle(AppColors.primary)
+                }
+            }
+        }
+        .padding()
+        .background(AppColors.zinc900)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(AppColors.zinc800, lineWidth: 1))
+    }
 
     private var managePlansRow: some View {
         NavigationLink {
