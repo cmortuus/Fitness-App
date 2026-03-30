@@ -208,7 +208,14 @@ function createSettingsStore() {
         const remote = await getSettings();
         if (remote && Object.keys(remote).length > 0) {
           const merged = deepMergeSettings(remote);
+          // Preserve local dashboard widget config — it may be newer than DB (#537)
           if (typeof localStorage !== 'undefined') {
+            try {
+              const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
+              if (local.dashboardWidgets && local.dashboardWidgets.length > 0) {
+                merged.dashboardWidgets = local.dashboardWidgets;
+              }
+            } catch { /* use remote */ }
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
           }
           set(merged);
