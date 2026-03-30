@@ -450,8 +450,17 @@ struct AddFoodView: View {
         let qty = Double(manualQty) ?? 100
         let cal = Double(manualCal) ?? 0
         let pro = Double(manualProtein) ?? 0
-        let carb = Double(manualCarbs) ?? 0
-        let fat = Double(manualFat) ?? 0
+        var carb = Double(manualCarbs) ?? 0
+        var fat = Double(manualFat) ?? 0
+
+        // Auto-calc carbs/fat if not specified (#536)
+        // Equal caloric split: fats=9cal/g, carbs=4cal/g
+        if carb == 0 && fat == 0 && cal > 0 {
+            let remainingCal = max(cal - (pro * 4), 0)
+            let halfCal = remainingCal / 2
+            carb = round(halfCal / 4)   // 4 cal per gram of carbs
+            fat = round(halfCal / 9)    // 9 cal per gram of fat
+        }
 
         do {
             // Optionally save to custom food library first
