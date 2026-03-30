@@ -319,13 +319,9 @@
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
   }
 
-  // Workout clock — only starts on first set completion
-  let startedAt = $state<number>(0);
-  let elapsed = $state(0);
+  // Preserve the first-completed-set time for resume / export only.
+  let startedAt = $state<number | null>(null);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
-  let clockPaused = $state(false);
-  let clockStarted = $state(false);
-  let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
@@ -675,12 +671,8 @@
   }
 
   function startClockIfNeeded() {
-    if (clockStarted) return;
-    clockStarted = true;
+    if (startedAt !== null) return;
     startedAt = Date.now();
-    clockInterval = setInterval(() => {
-      elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
   }
 
   async function startFreeSession() {
@@ -723,17 +715,11 @@
       hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
 
-      // Restore elapsed time from when the session started.
-      // Use parseUtcMs so the naive datetime from the backend is treated as UTC.
       if (sess.started_at) {
         startedAt = parseUtcMs(sess.started_at);
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       } else {
-        startedAt = Date.now();
+        startedAt = null;
       }
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
 
       // Group sets by exercise, preserving insertion order
       const exerciseOrder: number[] = [];
@@ -853,15 +839,6 @@
     if (!ts) return Date.now();
     const hasOffset = ts.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(ts);
     return new Date(hasOffset ? ts : ts + 'Z').getTime();
-  }
-
-  function formatClock(s: number) {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-      : `${m}:${String(sec).padStart(2, '0')}`;
   }
 
   function formatRest(s: number) {
@@ -1363,11 +1340,8 @@
 
   function resetTimerIfNoDoneSets() {
     const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
-    if (!anyDone && clockStarted) {
-      clockStarted = false;
-      elapsed = 0;
-      startedAt = 0;
-      if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+    if (!anyDone) {
+      startedAt = null;
     }
   }
 
@@ -1702,7 +1676,7 @@
     prs = detectPRs();
     // Write workout to HealthKit (no-op on web/PWA)
     writeWorkout({
-      startDate: new Date(Date.now() - elapsed * 1000),
+      startDate: new Date(startedAt ?? Date.now()),
       endDate: new Date(),
       workoutName: workoutName,
     }).catch(() => {}); // fire and forget
@@ -1816,10 +1790,6 @@
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
     goto('/');
-  }
-
-  function blurNumericInputOnWheel(event: WheelEvent) {
-    (event.currentTarget as HTMLInputElement | null)?.blur();
   }
 
   // ─── Conflict state (existing in-progress session blocks starting a new one) ──
@@ -2069,18 +2039,18 @@
 
   </div>
 
-<!-- ─── Conflict: existing in-progress session ────────────────────────── -->
+<!-- ─── Conflict: existing active session ─────────────────────────────── -->
 {:else if conflictSession}
   <div class="flex items-center justify-center flex-1 p-4">
     <div class="card max-w-md w-full text-center space-y-4">
       <div class="text-amber-400 text-4xl">⚠️</div>
-      <h2 class="text-xl font-semibold">Workout already in progress</h2>
+      <h2 class="text-xl font-semibold">Resume active workout?</h2>
       <p class="text-zinc-400 text-sm">
         <span class="text-white font-medium">{conflictSession.name}</span> is still active.
         Do you want to continue it or abandon it and start a new one?
       </p>
       <div class="flex flex-col gap-3 pt-1">
-        <button onclick={continueExisting} class="btn-primary w-full">▶ Continue Existing Workout</button>
+        <button onclick={continueExisting} class="btn-primary w-full">▶ Continue Workout</button>
         <button
           onclick={abandonAndRetry}
           class="w-full px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors text-sm font-medium"
@@ -2112,14 +2082,10 @@
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-2 gap-4 mb-6">
         <div class="bg-zinc-900 rounded-lg p-3 text-center">
           <p class="text-2xl font-bold text-primary-400">{summaryDoneSets}</p>
           <p class="text-xs text-zinc-400 mt-0.5">Sets done</p>
-        </div>
-        <div class="bg-zinc-900 rounded-lg p-3 text-center">
-          <p class="text-2xl font-bold text-primary-400">{formatClock(elapsed)}</p>
-          <p class="text-xs text-zinc-400 mt-0.5">Duration</p>
         </div>
         <div class="bg-zinc-900 rounded-lg p-3 text-center">
           <p class="text-2xl font-bold text-primary-400">{Math.round(summaryVolumeLbs).toLocaleString()}</p>
@@ -2207,23 +2173,6 @@
         <div class="flex-1 min-w-0">
           <h1 class="text-sm font-semibold truncate text-zinc-200">{workoutName}</h1>
           <div class="flex items-center gap-3 mt-0.5">
-            <button
-              onclick={() => {
-                if (clockPaused) {
-                  // Resume: add pause duration to offset
-                  pauseOffset += Date.now() - (startedAt + (elapsed * 1000) + pauseOffset);
-                  clockInterval = setInterval(() => {
-                    elapsed = Math.max(0, Math.floor((Date.now() - startedAt - pauseOffset) / 1000));
-                  }, 1000);
-                } else {
-                  // Pause: stop the clock
-                  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-                }
-                clockPaused = !clockPaused;
-              }}
-              class="text-base font-mono font-bold {clockPaused ? 'text-amber-400 animate-pulse' : 'text-primary-400'}"
-              title={clockPaused ? 'Resume timer' : 'Pause timer'}
-            >{formatClock(elapsed)}{clockPaused ? ' ⏸' : ''}</button>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
           </div>
         </div>
@@ -2457,7 +2406,6 @@
                             class="set-input"
                             onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
                             onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
-                            onwheel|preventDefault={blurNumericInputOnWheel}
                           />
                           {#if side === 'left'}
                             {#if isAssistedEx && set.weightLbs !== null}
@@ -2501,7 +2449,6 @@
                           disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min="0"
                           placeholder={side === 'left' ? 'L' : 'R'}
                           class="set-input"
-                          onwheel|preventDefault={blurNumericInputOnWheel}
                         />
 
                         <!-- Complete/Skip buttons (per-side) -->
@@ -2556,8 +2503,8 @@
                     {#each set.drops as drop, di}
                       <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
                         <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
-                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" onwheel|preventDefault={blurNumericInputOnWheel} />
-                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" onwheel|preventDefault={blurNumericInputOnWheel} />
+                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
+                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
                       </div>
                     {/each}
                     <button onclick={() => { set.drops = [...set.drops, { weightLbs: null, reps: null }]; uiExercises = [...uiExercises]; }}
@@ -2638,7 +2585,6 @@
                         class="set-input"
                         onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
                         onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
-                        onwheel|preventDefault={blurNumericInputOnWheel}
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
@@ -2679,7 +2625,6 @@
                         }}
                         disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
                         class="set-input"
-                        onwheel|preventDefault={blurNumericInputOnWheel}
                       />
                       {#if set.setType === 'standard_partials'}
                         <input
@@ -2691,7 +2636,6 @@
                           }}
                           disabled={set.done} min="0" placeholder="partials"
                           class="set-input !text-teal-400 !border-teal-500/30 text-xs"
-                          onwheel|preventDefault={blurNumericInputOnWheel}
                         />
                       {/if}
                     </div>
@@ -2754,8 +2698,8 @@
                     {#each set.drops as drop, di}
                       <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
                         <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
-                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" onwheel|preventDefault={blurNumericInputOnWheel} />
-                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" onwheel|preventDefault={blurNumericInputOnWheel} />
+                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
+                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
                       </div>
                     {/each}
                     <button onclick={() => { set.drops = [...set.drops, { weightLbs: null, reps: null }]; uiExercises = [...uiExercises]; }}
