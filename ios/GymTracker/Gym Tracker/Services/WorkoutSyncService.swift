@@ -44,6 +44,13 @@ class WorkoutSyncService {
         set { UserDefaults.standard.set(newValue, forKey: "healthkit_workout_sync_enabled") }
     }
 
+    /// Clear all synced state so every workout re-syncs on next launch
+    func resetSyncState() {
+        syncedIds = []
+        UserDefaults.standard.removeObject(forKey: "healthkit_last_sync")
+        print("[WorkoutSync] Reset sync state — all workouts will re-sync")
+    }
+
     /// Fetch recent completed sessions and sync unsynced ones to HealthKit
     func syncRecentWorkouts() async {
         guard isSyncEnabled else {
@@ -108,11 +115,10 @@ class WorkoutSyncService {
 
         let duration = end.timeIntervalSince(start)
         let totalSets = session.total_sets ?? 0
-        let bodyWeightKg = UserDefaults.standard.double(forKey: SettingsKey.lastBodyWeightKg)
+        let bodyWeightKg = max(UserDefaults.standard.double(forKey: SettingsKey.lastBodyWeightKg), 75.0)
 
-        // Simple calorie estimation: avg MET 5.0 for strength training
-        let hours = duration / 3600.0
-        let calories = max(1, 5.0 * max(bodyWeightKg, 75.0) * hours)
+        let result = estimateCalories(session: session, bodyWeightKg: bodyWeightKg)
+        let calories = result.total
         print("[WorkoutSync] Writing session \(session.id) '\(session.name ?? "Workout")' to HealthKit start=\(start) end=\(end) durationSeconds=\(Int(duration)) sets=\(totalSets) calories=\(Int(calories))")
 
         return await HealthKitManager.shared.writeWorkoutFromAPI(
@@ -124,6 +130,106 @@ class WorkoutSyncService {
             totalSets: totalSets,
             totalVolume: session.total_volume_kg ?? 0
         )
+    }
+
+    // MARK: - Calorie Estimation
+
+    /// MET value for a set based on exercise metadata
+    private func metForSet(_ set: ExerciseSet) -> Double {
+        let isCompound = set.movement_type == "compound"
+        let equipType = set.equipment_type ?? "other"
+        let freeWeight = ["barbell", "dumbbell", "kettlebell"].contains(equipType)
+        let plateLoaded = equipType == "plate_loaded"
+        let isWarmup = set.set_type == "warmup"
+
+        let baseMET: Double
+        if set.movement_type == nil {
+            // No metadata — fallback
+            baseMET = 5.0
+        } else if isCompound {
+            if freeWeight { baseMET = 6.0 }
+            else if plateLoaded { baseMET = 5.5 }
+            else { baseMET = 5.0 }
+        } else {
+            // Isolation
+            if freeWeight { baseMET = 4.0 }
+            else { baseMET = 3.5 }
+        }
+
+        return isWarmup ? baseMET * 0.6 : baseMET
+    }
+
+    /// Seconds per rep based on movement type
+    private func secsPerRep(isCompound: Bool) -> Double {
+        isCompound ? 3.0 : 2.0
+    }
+
+    /// Estimate calories for a workout session using per-set MET calculations
+    func estimateCalories(session: WorkoutSession, bodyWeightKg: Double) -> (total: Double, active: Double, rest: Double, epoc: Double) {
+        let sets = (session.sets ?? []).filter {
+            ($0.actual_reps ?? 0) > 0 && $0.skipped_at == nil
+        }
+
+        // Parse session duration
+        let sessionDuration: Double // seconds
+        if let startStr = session.started_at, let endStr = session.completed_at,
+           let start = Self.parseAPITimestamp(startStr), let end = Self.parseAPITimestamp(endStr) {
+            sessionDuration = min(end.timeIntervalSince(start), 3 * 3600) // cap 3 hours
+        } else {
+            // Fallback: estimate from set count
+            sessionDuration = Double(max(sets.count, 1)) * 120 // ~2 min per set avg
+        }
+        let clampedDuration = max(sessionDuration, 300) // min 5 minutes
+
+        guard !sets.isEmpty else {
+            // No set data — fall back to flat MET 5.0
+            let hours = clampedDuration / 3600.0
+            let total = max(1, 5.0 * bodyWeightKg * hours)
+            return (total, total, 0, 0)
+        }
+
+        // Active calories: sum per-set MET × bodyWeight × setDuration
+        var totalActiveSeconds: Double = 0
+        var activeCalories: Double = 0
+        var compoundSets = 0
+        var isolationSets = 0
+
+        for set in sets {
+            let reps = Double(set.actual_reps ?? 0)
+            let isCompound = set.movement_type == "compound"
+            let setDuration = reps * secsPerRep(isCompound: isCompound)
+            let met = metForSet(set)
+
+            activeCalories += met * bodyWeightKg * (setDuration / 3600.0)
+            totalActiveSeconds += setDuration
+
+            if isCompound { compoundSets += 1 } else { isolationSets += 1 }
+        }
+
+        // Rest calories: resting MET 1.2 for time between sets
+        let restSeconds = max(clampedDuration - totalActiveSeconds, 0)
+        let restCalories = 1.2 * bodyWeightKg * (restSeconds / 3600.0)
+
+        // EPOC bonus based on session intensity (volume / minutes)
+        let totalMinutes = clampedDuration / 60.0
+        let volumeKg = session.total_volume_kg ?? 0
+        let intensityPerMin = totalMinutes > 0 ? volumeKg / totalMinutes : 0
+        let epocMultiplier: Double
+        if intensityPerMin > 60 { epocMultiplier = 0.15 }
+        else if intensityPerMin > 30 { epocMultiplier = 0.10 }
+        else { epocMultiplier = 0.06 }
+        let epocCalories = activeCalories * epocMultiplier
+
+        let total = max(1.0, activeCalories + restCalories + epocCalories)
+
+        print("[WorkoutSync] Calorie breakdown for session \(session.id): "
+            + "active=\(Int(activeCalories)) rest=\(Int(restCalories)) "
+            + "epoc=\(Int(epocCalories)) total=\(Int(total)) "
+            + "compound=\(compoundSets) isolation=\(isolationSets) "
+            + "activeTime=\(Int(totalActiveSeconds))s restTime=\(Int(restSeconds))s "
+            + "intensity=\(Int(intensityPerMin))kg/min")
+
+        return (total, activeCalories, restCalories, epocCalories)
     }
 
     private static func parseAPITimestamp(_ value: String) -> Date? {

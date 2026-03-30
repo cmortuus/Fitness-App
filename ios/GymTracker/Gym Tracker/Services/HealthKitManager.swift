@@ -290,4 +290,42 @@ final class HealthKitManager: @unchecked Sendable {
             return false
         }
     }
+
+    /// Delete all GymTracker-created workouts from HealthKit
+    func deleteAllGymTrackerWorkouts() async -> Int {
+        guard canWriteWorkouts else {
+            print("[HealthKit] Cannot delete workouts — no write authorization")
+            return 0
+        }
+
+        let workoutType = HKObjectType.workoutType()
+        let predicate = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyWorkoutBrandName, allowedValues: ["GymTracker"])
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: workoutType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { [weak self] _, samples, error in
+                guard let self, let workouts = samples as? [HKWorkout], error == nil else {
+                    print("[HealthKit] Error querying workouts for deletion: \(error?.localizedDescription ?? "unknown")")
+                    continuation.resume(returning: 0)
+                    return
+                }
+
+                print("[HealthKit] Found \(workouts.count) GymTracker workouts to delete")
+                guard !workouts.isEmpty else {
+                    continuation.resume(returning: 0)
+                    return
+                }
+
+                let objects = Set(workouts as [HKObject])
+                self.store.delete(objects) { success, deleteError in
+                    if success {
+                        print("[HealthKit] Deleted \(workouts.count) workouts")
+                    } else {
+                        print("[HealthKit] Error deleting workouts: \(deleteError?.localizedDescription ?? "unknown")")
+                    }
+                    continuation.resume(returning: success ? workouts.count : 0)
+                }
+            }
+            store.execute(query)
+        }
+    }
 }
