@@ -662,6 +662,15 @@ struct SettingsView: View {
             Button("Sync Now") {
                 Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
             }
+
+            Button("Delete & Re-Sync All Workouts", role: .destructive) {
+                Task {
+                    let deleted = await HealthKitManager.shared.deleteAllGymTrackerWorkouts()
+                    WorkoutSyncService.shared.resetSyncState()
+                    print("[Settings] Deleted \(deleted) workouts from HealthKit, reset sync state")
+                    await WorkoutSyncService.shared.syncRecentWorkouts()
+                }
+            }
         } header: {
             Text("Workout Sync")
         } footer: {

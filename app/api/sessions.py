@@ -53,6 +53,21 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
             if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
             else None
         ),
+        "movement_type": (
+            exercise_set.exercise.movement_type
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
+        "body_region": (
+            exercise_set.exercise.body_region
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
+        "equipment_type": (
+            exercise_set.exercise.equipment_type
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
         "set_number": exercise_set.set_number,
         "planned_reps": exercise_set.planned_reps,
         "planned_reps_left": exercise_set.planned_reps_left,

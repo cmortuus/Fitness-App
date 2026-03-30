@@ -61,6 +61,9 @@ struct ExerciseSet: Codable, Identifiable {
     let completed_at: String?
     let skipped_at: String?
     let set_type: String?
+    let movement_type: String?    // "compound" or "isolation"
+    let body_region: String?       // "upper", "lower", "full_body"
+    let equipment_type: String?    // "barbell", "dumbbell", "cable", "machine", etc.
     let sub_sets: [SubSet]?
     let draft_weight_kg: Double?
     let draft_reps: Int?
