@@ -51,6 +51,7 @@ export interface AppSettings {
   weightUnit: 'lbs' | 'kg';
   heightUnit: 'in' | 'ft' | 'cm';
   progressionStyle: 'rep' | 'weight';
+  branchPreference: 'main' | 'dev';
   profile: UserProfile;
   machineWeights: MachineWeights;
   maxWarmupSets: number;
@@ -73,6 +74,7 @@ const defaultSettings: AppSettings = {
   weightUnit: 'lbs',
   heightUnit: 'ft',
   progressionStyle: 'rep',
+  branchPreference: 'main',
   profile: {
     age: null,
     sex: null,
@@ -167,6 +169,11 @@ function loadSettings(): AppSettings {
   }
 }
 
+function hasSettingValue(value: unknown): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return value !== undefined && value !== null;
+}
+
 // Debounce timer for DB saves
 let dbSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -208,17 +215,31 @@ function createSettingsStore() {
         const remote = await getSettings();
         if (remote && Object.keys(remote).length > 0) {
           const merged = deepMergeSettings(remote);
-          // Preserve local dashboard widget config — it may be newer than DB (#537)
+          let shouldBackfillRemote = false;
+
           if (typeof localStorage !== 'undefined') {
             try {
               const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-              if (local.dashboardWidgets && local.dashboardWidgets.length > 0) {
+              if (!hasSettingValue(remote.dashboardWidgets) && hasSettingValue(local.dashboardWidgets)) {
                 merged.dashboardWidgets = local.dashboardWidgets;
+                shouldBackfillRemote = true;
+              }
+              if (!hasSettingValue(remote.branchPreference) && hasSettingValue(local.branchPreference)) {
+                merged.branchPreference = local.branchPreference;
+                shouldBackfillRemote = true;
               }
             } catch { /* use remote */ }
             localStorage.setItem(SETTINGS_KEY, JSON.stringify(merged));
           }
+
           set(merged);
+
+          if (shouldBackfillRemote) {
+            try {
+              const { saveSettings } = await import('$lib/api');
+              await saveSettings(merged);
+            } catch { /* offline — local copy stays authoritative until next save */ }
+          }
         }
       } catch { /* not logged in or offline — use localStorage */ }
     },
