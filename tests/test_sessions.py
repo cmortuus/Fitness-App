@@ -286,6 +286,8 @@ class TestSessionLifecycle:
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
         sess1 = await start_session_from_plan(client, plan["id"])
+        complete = await client.post(f"/api/sessions/{sess1['id']}/complete")
+        assert complete.status_code == 200
         sess2 = await start_session_from_plan(client, plan["id"])
 
         # Try to delete sess1's set via sess2's endpoint
