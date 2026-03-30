@@ -198,6 +198,12 @@ class PlannedExercise(BaseModel):
     notes: str | None = None
 
 
+class PlanRirOverrides(BaseModel):
+    plan: int | None = None
+    muscles: dict[str, int] = Field(default_factory=dict)
+    exercises: dict[str, int] = Field(default_factory=dict)
+
+
 class PlannedDay(BaseModel):
     day_number: int
     day_name: str
@@ -224,6 +230,7 @@ class WorkoutPlanCreate(BaseModel):
     days: list[PlannedDay] = []
     auto_progression: bool = True
     is_draft: bool = False
+    rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
 
 
 class WorkoutPlanResponse(BaseModel):
@@ -235,6 +242,7 @@ class WorkoutPlanResponse(BaseModel):
     current_week: int
     number_of_days: int
     days: list[PlannedDay]
+    rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
     auto_progression: bool
     is_draft: bool = False
     is_archived: bool = False

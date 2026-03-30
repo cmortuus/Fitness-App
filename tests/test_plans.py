@@ -93,6 +93,25 @@ class TestPlansCRUD:
         data = r.json()
         assert data["is_archived"] is True
 
+    async def test_update_plan_rir_overrides(self, client: AsyncClient):
+        """PUT /plans/{id}/rir-overrides persists whole-plan, muscle, and exercise overrides."""
+        ex = await create_exercise(client, primary_muscles=["quadriceps"], secondary_muscles=["glutes"])
+        plan = await create_plan(client, ex["id"])
+
+        r = await client.put(
+            f"/api/plans/{plan['id']}/rir-overrides",
+            json={
+                "plan": 2,
+                "muscles": {"quadriceps": 3},
+                "exercises": {str(ex["id"]): 1},
+            },
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["rir_overrides"]["plan"] == 2
+        assert data["rir_overrides"]["muscles"]["quadriceps"] == 3
+        assert data["rir_overrides"]["exercises"][str(ex["id"])] == 1
+
     async def test_next_workout_defaults_to_first_day(self, client: AsyncClient):
         """GET /plans/next-workout returns day 1 when nothing is completed yet."""
         ex = await create_exercise(client)

@@ -243,6 +243,12 @@ export interface PlannedExercise {
   group_type?: 'superset' | 'circuit' | null;
 }
 
+export interface PlanRirOverrides {
+  plan: number | null;
+  muscles: Record<string, number>;
+  exercises: Record<string, number>;
+}
+
 export interface PlannedDay {
   day_number: number;
   day_name: string;
@@ -258,6 +264,7 @@ export interface WorkoutPlan {
   current_week: number;
   number_of_days: number;
   days: PlannedDay[];
+  rir_overrides: PlanRirOverrides;
   auto_progression: boolean;
   min_technique_score: number;
   is_draft: boolean;
@@ -560,6 +567,11 @@ export async function updatePlan(planId: number, data: {
   is_draft?: boolean;
 }): Promise<WorkoutPlan> {
   const response = await api.put(`/plans/${planId}`, data);
+  return response.data;
+}
+
+export async function updatePlanRirOverrides(planId: number, overrides: PlanRirOverrides): Promise<WorkoutPlan> {
+  const response = await api.put(`/plans/${planId}/rir-overrides`, overrides);
   return response.data;
 }
 

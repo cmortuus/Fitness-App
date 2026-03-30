@@ -26,6 +26,40 @@ class TestSessionLifecycle:
         assert "id" in data
         assert len(data["sets"]) == 3
 
+    async def test_create_session_from_plan_respects_exercise_rir_override(self, client: AsyncClient):
+        """Exercise RIR override should back off the programmed load for the next session."""
+        ex = await create_exercise(client, primary_muscles=["quadriceps"])
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+        set_id = sess["sets"][0]["id"]
+
+        r1 = await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 100.0,
+                "actual_reps": 8,
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert r1.status_code == 200
+        complete_r = await client.post(f"/api/sessions/{sess['id']}/complete")
+        assert complete_r.status_code == 200
+
+        rir_r = await client.put(
+            f"/api/plans/{plan['id']}/rir-overrides",
+            json={"plan": None, "muscles": {}, "exercises": {str(ex["id"]): 2}},
+        )
+        assert rir_r.status_code == 200, rir_r.text
+
+        next_r = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
+        )
+        assert next_r.status_code == 201, next_r.text
+        next_set = next_r.json()["sets"][0]
+        assert next_set["planned_reps"] == 8
+        assert next_set["planned_weight_kg"] == 95.0
+
     async def test_start_session(self, client: AsyncClient):
         """POST /sessions/{id}/start transitions status to in_progress."""
         ex = await create_exercise(client)
