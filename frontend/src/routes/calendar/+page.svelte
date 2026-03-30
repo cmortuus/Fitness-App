@@ -1,7 +1,6 @@
-  <script lang="ts">
+<script lang="ts">
   import { onMount } from 'svelte';
   import { getSessions } from '$lib/api';
-  import { localDateString } from '$lib/date';
   import { settings } from '$lib/stores';
 
   const KG_TO_LBS = 2.20462;
@@ -65,7 +64,7 @@
     }
   });
 
-  function isoDate(d: Date) { return localDateString(d); }
+  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -153,13 +152,6 @@
     });
   }
 
-  function duration(s: Session): string {
-    if (!s.started_at || !s.completed_at) return '';
-    const ms = new Date(s.completed_at).getTime() - new Date(s.started_at).getTime();
-    const mins = Math.round(ms / 60000);
-    if (mins < 60) return `${mins}m`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  }
 </script>
 
 <div class="space-y-4 max-w-lg mx-auto">
@@ -291,9 +283,6 @@
                   <div class="w-2 h-2 rounded-full" style="background-color: {guessColor(s.name)}"></div>
                   <p class="font-medium text-sm">{s.name ?? 'Workout'}</p>
                 </div>
-                {#if duration(s)}
-                  <span class="text-xs text-zinc-500">{duration(s)}</span>
-                {/if}
               </div>
               <div class="flex gap-4 mt-1.5 text-xs text-zinc-400">
                 <span>{s.total_sets} sets</span>
