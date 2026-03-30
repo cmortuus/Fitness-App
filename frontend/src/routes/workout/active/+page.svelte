@@ -349,10 +349,23 @@
     return false;
   }
 
-  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+  function isNamedOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
     const n = exercise.name?.toLowerCase() ?? '';
-    return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
+    const d = (exercise.display_name ?? '').toLowerCase();
+    return (
+      n.includes('t_bar') ||
+      n.includes('t-bar') ||
+      n.includes('t bar') ||
+      d.includes('t-bar') ||
+      d.includes('t bar') ||
+      n.includes('landmine') ||
+      d.includes('landmine')
+    );
+  }
+
+  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+    return isNamedOneSidedPlateExercise(exercise);
   }
 
   // Derived: plate banner data for the currently focused weight input
@@ -395,7 +408,7 @@
       if (n.includes('smith')) key = 'smithMachine';
       else if (n.includes('leg_press') || n.includes('leg press')) key = 'legPress';
       else if (n.includes('hack_squat') || n.includes('hack squat')) key = 'hackSquat';
-      else if (n.includes('t_bar') || n.includes('t-bar')) key = 'tBarRow';
+      else if (isNamedOneSidedPlateExercise(exercise)) key = 'tBarRow';
       else if (n.includes('belt_squat') || n.includes('belt squat')) key = 'beltSquat';
       // Use display base for plate math if configured, otherwise actual weight
       return mw[`${key}_displayBase`] ?? mw[key] ?? defaultBar;
