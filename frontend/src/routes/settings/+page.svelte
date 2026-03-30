@@ -855,7 +855,7 @@
 
   <!-- ── Developer ────────────────────────────────────────────────────── -->
   {#if typeof document !== 'undefined'}
-    {@const onDev = document.cookie.includes('gymtracker_branch=dev')}
+    {@const onDev = $settings.branchPreference === 'dev'}
     <div class="card space-y-3">
       <h3 class="text-lg font-semibold">Developer</h3>
       <div class="flex items-center justify-between">
@@ -867,7 +867,7 @@
         </div>
         <button
           onclick={() => {
-            const switchingToDev = !document.cookie.includes('gymtracker_branch=dev');
+            const switchingToDev = $settings.branchPreference !== 'dev';
             if (switchingToDev) {
               document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
             } else {
