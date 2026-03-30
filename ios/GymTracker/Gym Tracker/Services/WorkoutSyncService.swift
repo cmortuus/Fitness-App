@@ -18,7 +18,13 @@ class WorkoutSyncService {
     }
 
     var isSyncEnabled: Bool {
-        get { UserDefaults.standard.bool(forKey: "healthkit_workout_sync_enabled") }
+        get {
+            let defaults = UserDefaults.standard
+            if defaults.object(forKey: "healthkit_workout_sync_enabled") == nil {
+                return true
+            }
+            return defaults.bool(forKey: "healthkit_workout_sync_enabled")
+        }
         set { UserDefaults.standard.set(newValue, forKey: "healthkit_workout_sync_enabled") }
     }
 

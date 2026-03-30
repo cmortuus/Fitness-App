@@ -1038,6 +1038,10 @@ struct SettingsView: View {
         Task {
             let success = await HealthKitManager.shared.requestAuthorization()
             healthKitAuthorized = success
+            if success {
+                WorkoutSyncService.shared.isSyncEnabled = true
+                await WorkoutSyncService.shared.syncRecentWorkouts()
+            }
         }
     }
 }

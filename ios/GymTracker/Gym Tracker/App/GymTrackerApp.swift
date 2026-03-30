@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct GymTrackerApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var auth = AuthService.shared
 
     var body: some Scene {
@@ -13,6 +14,10 @@ struct GymTrackerApp: App {
                             // Fire-and-forget — don't block app launch
                             Task { await SettingsSync.loadFromDB() }
                             Task { await HealthKitManager.shared.syncBodyWeightOnLaunch() }
+                            Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
+                        }
+                        .onChange(of: scenePhase) { _, newPhase in
+                            guard newPhase == .active else { return }
                             Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
                         }
                 } else {
