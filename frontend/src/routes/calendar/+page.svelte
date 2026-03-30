@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getSessions } from '$lib/api';
+  import { localDateString } from '$lib/date';
   import { settings } from '$lib/stores';
 
   const KG_TO_LBS = 2.20462;
@@ -42,7 +43,7 @@
     for (let i = 0; i < 7; i++) {
       const curr = new Date(start);
       curr.setDate(start.getDate() + i);
-      dates.push(isoDate(curr));
+      dates.push(localDateString(curr));
     }
     return dates;
   }
@@ -64,7 +65,6 @@
     }
   });
 
-  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -83,7 +83,7 @@
     new Date(calYear, calMonth, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   );
 
-  let todayStr = isoDate(today);
+  let todayStr = localDateString(today);
 
   function prevMonth() {
     if (calMonth === 0) { calMonth = 11; calYear--; }
@@ -135,11 +135,11 @@
     let count = 0;
     const d = new Date();
     // Check if worked out today
-    if (!dates.has(isoDate(d))) {
+    if (!dates.has(localDateString(d))) {
       d.setDate(d.getDate() - 1);
-      if (!dates.has(isoDate(d))) return 0;
+      if (!dates.has(localDateString(d))) return 0;
     }
-    while (dates.has(isoDate(d))) {
+    while (dates.has(localDateString(d))) {
       count++;
       d.setDate(d.getDate() - 1);
     }

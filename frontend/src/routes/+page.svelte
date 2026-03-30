@@ -3,6 +3,7 @@
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import type { DashboardWidget } from '$lib/stores';
   import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, saveSettings } from '$lib/api';
+  import { localDateString } from '$lib/date';
   import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
 
   const KG_TO_LBS = 2.20462;
@@ -53,7 +54,7 @@
   let calMonth     = $state(today.getMonth());
   let selectedDay  = $state<string | null>(null);
 
-  const todayStr   = isoDate(today);
+  const todayStr   = localDateString(today);
   const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
   onMount(async () => {
@@ -61,7 +62,7 @@
       const [sessions, plans, nutrition, insightData] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
-        getDailySummary(new Date().toISOString().slice(0, 10)).catch(() => null),
+        getDailySummary(localDateString()).catch(() => null),
         getInsights().catch(() => []),
       ]);
       allSessions = sessions;
@@ -129,7 +130,6 @@
   }
 
   // ── Calendar helpers ───────────────────────────────────────────────────
-  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -149,7 +149,7 @@
       const d = new Date();
       d.setDate(d.getDate() - i);
       days.push({
-        key: isoDate(d),
+        key: localDateString(d),
         label: d.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: d.getDate(),
         isToday: i === 0,
@@ -180,7 +180,7 @@
   // ── Quick stats ────────────────────────────────────────────────────────
   let weeklyVolume = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekStr = isoDate(weekAgo);
+    const weekStr = localDateString(weekAgo);
     return allSessions
       .filter(s => s.date >= weekStr && s.status === 'completed')
       .reduce((sum, s) => sum + volDisplay(s.total_volume_kg ?? 0), 0);
@@ -188,7 +188,7 @@
 
   let weeklyWorkouts = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    return allSessions.filter(s => s.date >= isoDate(weekAgo) && s.status === 'completed').length;
+    return allSessions.filter(s => s.date >= localDateString(weekAgo) && s.status === 'completed').length;
   })());
 
   // Streak: consecutive completed sessions without a skip/miss
@@ -207,7 +207,7 @@
 
   let weeklySets = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekStr = isoDate(weekAgo);
+    const weekStr = localDateString(weekAgo);
     const weekSessions = allSessions.filter(s => s.date >= weekStr && s.status === 'completed');
     const planned = weekSessions.reduce((sum, s) => sum + (s.total_sets || 0), 0);
     const completed = weekSessions.reduce((sum, s) =>
