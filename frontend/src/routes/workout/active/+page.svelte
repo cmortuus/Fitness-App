@@ -582,6 +582,7 @@
             }
             conflictSession = existing;
             conflictRetry = () => startFromPlan(planId, dayNumber);
+            conflictRequestedName = `${plan.name} - ${day.day_name}`;
             loading = false;
             return;
           }
@@ -601,6 +602,7 @@
           if (inProgress) {
             conflictSession = await getSession(inProgress.id);
             conflictRetry = () => startFromPlan(planId, dayNumber);
+            conflictRequestedName = `${plan.name} - ${day.day_name}`;
             loading = false;
             return;
           }
@@ -1820,6 +1822,7 @@
   // ─── Conflict state (existing in-progress session blocks starting a new one) ──
   let conflictSession = $state<WorkoutSession | null>(null);
   let conflictRetry = $state<(() => Promise<void>) | null>(null); // re-run after abandoning
+  let conflictRequestedName = $state<string | null>(null);
 
   async function handleConflict(err: any, retry: () => Promise<void>) {
     // Prefer the structured session_id from the 409 response body; fall back
@@ -1844,6 +1847,7 @@
     const sess = conflictSession;
     conflictSession = null;
     conflictRetry = null;
+    conflictRequestedName = null;
     // Ensure the store is set so resumeSession() can look up the ID
     if (sess) currentSession.set(sess);
     await resumeSession();
@@ -1863,7 +1867,15 @@
     conflictSession = null;
     const retry = conflictRetry;
     conflictRetry = null;
+    conflictRequestedName = null;
     if (retry) await retry();
+  }
+
+  function keepRequestedPlanned() {
+    conflictSession = null;
+    conflictRetry = null;
+    conflictRequestedName = null;
+    goto('/');
   }
 
   // ─── Exercise notes toggle ────────────────────────────────────────────────
@@ -2069,19 +2081,35 @@
   <div class="flex items-center justify-center flex-1 p-4">
     <div class="card max-w-md w-full text-center space-y-4">
       <div class="text-amber-400 text-4xl">⚠️</div>
-      <h2 class="text-xl font-semibold">Resume active workout?</h2>
+      <h2 class="text-xl font-semibold">Workout conflict</h2>
       <p class="text-zinc-400 text-sm">
-        <span class="text-white font-medium">{conflictSession.name}</span> is still active.
-        Do you want to continue it or abandon it and start a new one?
+        You tried to start
+        <span class="text-white font-medium">{conflictRequestedName ?? 'a new workout'}</span>,
+        but another session is already in progress.
       </p>
+      <div class="grid gap-3 text-left">
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Requested workout</p>
+          <p class="text-sm font-medium text-white">{conflictRequestedName ?? 'New workout'}</p>
+          <p class="text-xs text-zinc-500 mt-1">This will stay planned unless you explicitly replace the active session.</p>
+        </div>
+        <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-amber-400/80 mb-1">Active workout</p>
+          <p class="text-sm font-medium text-white">{conflictSession.name}</p>
+          <p class="text-xs text-zinc-500 mt-1">Status: in progress</p>
+        </div>
+      </div>
       <div class="flex flex-col gap-3 pt-1">
-        <button onclick={continueExisting} class="btn-primary w-full">▶ Continue Workout</button>
+        <button onclick={continueExisting} class="btn-primary w-full">▶ Resume Active Workout</button>
         <button
           onclick={abandonAndRetry}
           class="w-full px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors text-sm font-medium"
-        >🗑 Abandon & Start New</button>
+        >🗑 Abandon Active & Start Requested Workout</button>
+        <button
+          onclick={keepRequestedPlanned}
+          class="w-full px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors text-sm font-medium"
+        >Keep Requested Workout Planned</button>
       </div>
-      <a href="/plans" class="block text-xs text-zinc-500 hover:text-zinc-300 transition-colors">← Back to Plans</a>
     </div>
   </div>
 
