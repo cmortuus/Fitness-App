@@ -8,7 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession,
+    saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -616,6 +616,48 @@
   let recentExercises = $state<Exercise[]>([]);
   // Swap mode: when set, the modal replaces this exercise instead of adding
   let swapTargetUiId = $state<string | null>(null);
+  let showCustomExerciseModal = $state(false);
+  let customExerciseDisplayName = $state('');
+  let customMovementType = $state<'compound' | 'isolation'>('compound');
+  let customBodyRegion = $state<'upper' | 'lower' | 'full_body'>('upper');
+  let customPrimaryMuscles = $state<string[]>([]);
+  let customSecondaryMuscles = $state<string[]>([]);
+
+  const muscleGroups = [
+    { value: 'chest', label: 'Chest' },
+    { value: 'lats', label: 'Lats' },
+    { value: 'upper_back', label: 'Upper Back' },
+    { value: 'mid_back', label: 'Mid Back' },
+    { value: 'lower_back', label: 'Lower Back' },
+    { value: 'shoulders', label: 'Shoulders' },
+    { value: 'traps', label: 'Traps' },
+    { value: 'biceps', label: 'Biceps' },
+    { value: 'triceps', label: 'Triceps' },
+    { value: 'forearms', label: 'Forearms' },
+    { value: 'quadriceps', label: 'Quadriceps' },
+    { value: 'hamstrings', label: 'Hamstrings' },
+    { value: 'glutes', label: 'Glutes' },
+    { value: 'calves', label: 'Calves' },
+    { value: 'abs', label: 'Abs' },
+    { value: 'core', label: 'Core' },
+    { value: 'obliques', label: 'Obliques' },
+    { value: 'neck', label: 'Neck' },
+    { value: 'front_delts', label: 'Front Delts' },
+    { value: 'side_delts', label: 'Side Delts' },
+    { value: 'rear_delts', label: 'Rear Delts' },
+    { value: 'adductors', label: 'Adductors' },
+  ];
+
+  const movementTypes = [
+    { value: 'compound', label: 'Compound' },
+    { value: 'isolation', label: 'Isolation' },
+  ] as const;
+
+  const bodyRegions = [
+    { value: 'upper', label: 'Upper Body' },
+    { value: 'lower', label: 'Lower Body' },
+    { value: 'full_body', label: 'Full Body' },
+  ] as const;
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(async () => {
@@ -1772,6 +1814,54 @@
     // Wait for Svelte to flush DOM updates, then focus immediately — no setTimeout needed
     await tick();
     searchInputEl?.focus();
+  }
+
+  function resetCustomExerciseForm(prefill = '') {
+    customExerciseDisplayName = prefill;
+    customMovementType = 'compound';
+    customBodyRegion = 'upper';
+    customPrimaryMuscles = [];
+    customSecondaryMuscles = [];
+  }
+
+  function openCustomExerciseModal(prefill = searchQuery.trim()) {
+    resetCustomExerciseForm(prefill);
+    showCustomExerciseModal = true;
+  }
+
+  function closeCustomExerciseModal() {
+    showCustomExerciseModal = false;
+  }
+
+  async function createCustomExerciseForWorkout() {
+    const rawName = customExerciseDisplayName.trim();
+    if (!rawName) return;
+    if (customPrimaryMuscles.length === 0) {
+      alert('Please select at least one primary muscle group');
+      return;
+    }
+
+    const capitalizedDisplayName = rawName.replace(/\b\w/g, c => c.toUpperCase());
+    const systemName = capitalizedDisplayName
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, '_');
+
+    try {
+      const newExercise = await createExercise({
+        name: systemName,
+        display_name: capitalizedDisplayName,
+        movement_type: customMovementType,
+        body_region: customBodyRegion,
+        primary_muscles: customPrimaryMuscles,
+        secondary_muscles: customSecondaryMuscles,
+      });
+      allExercises = await getExercises();
+      pickingExercise = newExercise;
+      showCustomExerciseModal = false;
+    } catch (error) {
+      alert('Failed to create exercise: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
   }
 
   function confirmAdd() {
@@ -3149,7 +3239,17 @@
             Add Exercise
           {/if}
         </h3>
-        <button onclick={() => { showAddModal = false; swapTargetUiId = null; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        <div class="flex items-center gap-3">
+          {#if !pickingExercise}
+            <button
+              onclick={() => openCustomExerciseModal()}
+              class="w-8 h-8 rounded-full bg-primary-600 hover:bg-primary-500 text-white text-lg leading-none flex items-center justify-center"
+              aria-label="Create custom exercise"
+              title="Create custom exercise"
+            >+</button>
+          {/if}
+          <button onclick={() => { showAddModal = false; swapTargetUiId = null; showCustomExerciseModal = false; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        </div>
       </div>
 
       {#if !pickingExercise}
@@ -3221,9 +3321,25 @@
                 </div>
               {/if}
             </button>
-          {:else}
-            <p class="text-zinc-500 text-sm text-center py-8">No exercises found</p>
           {/each}
+
+          <button
+            onclick={() => openCustomExerciseModal()}
+            class="w-full text-left px-3 py-3 rounded-lg border border-dashed border-primary-500/40 bg-primary-500/5 hover:bg-primary-500/10 transition-colors mt-1"
+          >
+            <div class="text-sm font-medium text-primary-300">Create custom exercise</div>
+            <div class="text-xs text-zinc-500 mt-0.5">
+              {#if searchQuery.trim()}
+                Add “{searchQuery.trim()}” if it is missing from the list
+              {:else}
+                Add a new exercise without leaving the workout
+              {/if}
+            </div>
+          </button>
+
+          {#if filteredExercises.length === 0}
+            <p class="text-zinc-500 text-sm text-center py-6">No exercises found</p>
+          {/if}
         </div>
 
       {:else}
@@ -3251,6 +3367,97 @@
           <button onclick={confirmAdd} class="btn-primary flex-1">{swapTargetUiId ? 'Swap Exercise' : 'Add to Workout'}</button>
         </div>
       {/if}
+    </div>
+  </div>
+{/if}
+
+{#if showCustomExerciseModal}
+  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+    <div class="bg-zinc-900 w-full max-w-md rounded-2xl border border-white/8 shadow-2xl max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-white/5">
+        <h4 class="text-lg font-semibold">Create Custom Exercise</h4>
+        <button onclick={closeCustomExerciseModal} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <div>
+          <label class="label">Exercise Name *</label>
+          <input
+            type="text"
+            bind:value={customExerciseDisplayName}
+            class="input"
+            placeholder="e.g. Incline Dumbbell Press"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Movement Type</label>
+            <select bind:value={customMovementType} class="input">
+              {#each movementTypes as type}
+                <option value={type.value}>{type.label}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label class="label">Body Region</label>
+            <select bind:value={customBodyRegion} class="input">
+              {#each bodyRegions as region}
+                <option value={region.value}>{region.label}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Primary Muscle Groups *</label>
+          <div class="flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => {
+                  customPrimaryMuscles = customPrimaryMuscles.includes(muscle.value)
+                    ? customPrimaryMuscles.filter(m => m !== muscle.value)
+                    : [...customPrimaryMuscles, muscle.value];
+                }}
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customPrimaryMuscles.includes(muscle.value) ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Secondary Muscle Groups</label>
+          <div class="flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => {
+                  customSecondaryMuscles = customSecondaryMuscles.includes(muscle.value)
+                    ? customSecondaryMuscles.filter(m => m !== muscle.value)
+                    : [...customSecondaryMuscles, muscle.value];
+                }}
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customSecondaryMuscles.includes(muscle.value) ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 px-4 py-4 border-t border-white/5">
+        <button onclick={closeCustomExerciseModal} class="btn-secondary">Cancel</button>
+        <button
+          onclick={createCustomExerciseForWorkout}
+          class="btn-primary"
+          disabled={!customExerciseDisplayName.trim()}
+        >
+          Create Exercise
+        </button>
+      </div>
     </div>
   </div>
 {/if}
