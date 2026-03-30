@@ -1897,6 +1897,15 @@
       set.done = false;
       set.doneLeft = false;
       set.doneRight = false;
+
+      // If no sets are done anymore, reset timer (#528)
+      const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
+      if (!anyDone && clockStarted) {
+        clockStarted = false;
+        elapsed = 0;
+        startedAt = 0;
+        if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+      }
     } catch (e) {
       console.error('Failed to uncomplete set:', e);
     } finally {
@@ -2205,23 +2214,7 @@
           </div>
         </div>
 
-        {#if showCancelConfirm}
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-xs text-zinc-400 hidden sm:block">Cancel workout?</span>
-            <button onclick={cancelWorkout} disabled={cancelling}
-                    class="px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50">
-              {cancelling ? 'Cancelling…' : 'Yes, cancel'}
-            </button>
-            <button onclick={() => showCancelConfirm = false}
-                    class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-xl transition-colors">
-              Keep going
-            </button>
-          </div>
-        {:else}
-          <button onclick={() => showCancelConfirm = true}
-                  class="shrink-0 w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
-                  title="Cancel workout">✕</button>
-        {/if}
+        <!-- Cancel button removed (#528) — discard via menu if needed -->
       </div>
     </header>
 
