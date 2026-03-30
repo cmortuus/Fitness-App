@@ -315,14 +315,15 @@ final class HealthKitManager: @unchecked Sendable {
                     return
                 }
 
-                let objects = Set(workouts as [HKObject])
-                self.store.delete(objects) { success, deleteError in
-                    if success {
+                Task {
+                    do {
+                        try await self.store.delete(workouts)
                         print("[HealthKit] Deleted \(workouts.count) workouts")
-                    } else {
-                        print("[HealthKit] Error deleting workouts: \(deleteError?.localizedDescription ?? "unknown")")
+                        continuation.resume(returning: workouts.count)
+                    } catch {
+                        print("[HealthKit] Error deleting workouts: \(error.localizedDescription)")
+                        continuation.resume(returning: 0)
                     }
-                    continuation.resume(returning: success ? workouts.count : 0)
                 }
             }
             store.execute(query)
