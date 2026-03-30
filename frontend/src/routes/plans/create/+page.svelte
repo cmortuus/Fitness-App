@@ -1,7 +1,7 @@
 <script lang="ts">  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { exercises } from '$lib/stores';
-  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise } from '$lib/api';
+  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise } from '$lib/api';
   import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutTemplate } from '$lib/api';
 
   // Plan basic info
@@ -909,33 +909,9 @@
             </div>
           {/if}
 
-          <div class="flex justify-between gap-3">
-            <button
-              onclick={async () => {
-                if (!configuringExercise?.exercise) return;
-                if (!confirm(`Delete "${configuringExercise.exercise.display_name}"? This cannot be undone.`)) return;
-                try {
-                  await deleteExercise(configuringExercise.exercise.id);
-                  const [exercisesData, groupedData] = await Promise.all([
-                    getExercises(),
-                    getExercisesGrouped(),
-                  ]);
-                  exercises.set(exercisesData);
-                  allExercises = exercisesData;
-                  groupedExercises = groupedData;
-                  closeExerciseSelector();
-                } catch (error) {
-                  alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
-                }
-              }}
-              class="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-500 transition-colors text-sm"
-            >
-              Delete Exercise
-            </button>
-            <div class="flex gap-3">
-              <button onclick={() => configuringExercise = null} class="btn-secondary">Back</button>
-              <button onclick={addExerciseToDay} class="btn-primary">Add to Day</button>
-            </div>
+          <div class="flex justify-end gap-3">
+            <button onclick={() => configuringExercise = null} class="btn-secondary">Back</button>
+            <button onclick={addExerciseToDay} class="btn-primary">Add to Day</button>
           </div>
         </div>
       {:else}
@@ -987,41 +963,15 @@
               {:else}
                 <div class="space-y-1 max-h-64 overflow-y-auto">
                   {#each searchResults as exercise}
-                    <div class="flex items-center justify-between gap-2">
-                      <button
-                        onclick={() => selectExercise(exercise)}
-                        class="flex-1 text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
-                      >
-                        <div class="flex items-center justify-between">
-                          <span class="font-medium">{exercise.display_name}</span>
-                          <span class="text-xs text-zinc-400">{exercise.primary_muscles[0] || 'other'}</span>
-                        </div>
-                      </button>
-                      <button
-                        onclick={async (e) => {
-                          e.stopPropagation();
-                          if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
-                          try {
-                            await deleteExercise(exercise.id);
-                            // Refresh exercises list
-                            const [exercisesData, groupedData] = await Promise.all([
-                              getExercises(),
-                              getExercisesGrouped(),
-                            ]);
-                            exercises.set(exercisesData);
-                            allExercises = exercisesData;
-                            groupedExercises = groupedData;
-                            handleSearch(); // Re-run search
-                          } catch (error) {
-                            alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
-                          }
-                        }}
-                        class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors"
-                        title="Delete exercise"
-                      >
-                        🗑️
-                      </button>
-                    </div>
+                    <button
+                      onclick={() => selectExercise(exercise)}
+                      class="w-full text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
+                    >
+                      <div class="flex items-center justify-between">
+                        <span class="font-medium">{exercise.display_name}</span>
+                        <span class="text-xs text-zinc-400">{exercise.primary_muscles[0] || 'other'}</span>
+                      </div>
+                    </button>
                   {/each}
                 </div>
               {/if}
@@ -1035,39 +985,15 @@
                   <h5 class="text-sm font-medium text-zinc-400 mb-2">Recently Used</h5>
                   <div class="space-y-1 max-h-40 overflow-y-auto">
                     {#each recentExercises as exercise}
-                      <div class="flex items-center justify-between gap-2">
-                        <button
-                          onclick={() => selectExercise(exercise)}
-                          class="flex-1 text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
-                        >
-                          <div class="flex items-center justify-between">
-                            <span class="font-medium">{exercise.display_name}</span>
-                            <span class="text-xs text-zinc-400">Used {exercise.usage_count} times</span>
-                          </div>
-                        </button>
-                        <button
-                          onclick={async (e) => {
-                            e.stopPropagation();
-                            if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
-                            try {
-                              await deleteExercise(exercise.id);
-                              const [exercisesData, groupedData] = await Promise.all([
-                                getExercises(),
-                                getExercisesGrouped(),
-                              ]);
-                              exercises.set(exercisesData);
-                              allExercises = exercisesData;
-                              groupedExercises = groupedData;
-                            } catch (error) {
-                              alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
-                            }
-                          }}
-                          class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors"
-                          title="Delete exercise"
-                        >
-                          🗑️
-                        </button>
-                      </div>
+                      <button
+                        onclick={() => selectExercise(exercise)}
+                        class="w-full text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
+                      >
+                        <div class="flex items-center justify-between">
+                          <span class="font-medium">{exercise.display_name}</span>
+                          <span class="text-xs text-zinc-400">Used {exercise.usage_count} times</span>
+                        </div>
+                      </button>
                     {/each}
                   </div>
                 </div>
@@ -1096,36 +1022,12 @@
                         {#if expandedMuscleGroups[muscle]}
                           <div class="space-y-1 px-3 py-2 bg-zinc-900">
                             {#each muscleExercises as exercise}
-                              <div class="flex items-center justify-between gap-2">
-                                <button
-                                  onclick={() => selectExercise(exercise)}
-                                  class="flex-1 text-left px-3 py-1.5 rounded hover:bg-zinc-800 transition-colors text-sm"
-                                >
-                                  {exercise.display_name}
-                                </button>
-                                <button
-                                  onclick={async (e) => {
-                                    e.stopPropagation();
-                                    if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
-                                    try {
-                                      await deleteExercise(exercise.id);
-                                      const [exercisesData, groupedData] = await Promise.all([
-                                        getExercises(),
-                                        getExercisesGrouped(),
-                                      ]);
-                                      exercises.set(exercisesData);
-                                      allExercises = exercisesData;
-                                      groupedExercises = groupedData;
-                                    } catch (error) {
-                                      alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
-                                    }
-                                  }}
-                                  class="px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors text-sm"
-                                  title="Delete exercise"
-                                >
-                                  🗑️
-                                </button>
-                              </div>
+                              <button
+                                onclick={() => selectExercise(exercise)}
+                                class="w-full text-left px-3 py-1.5 rounded hover:bg-zinc-800 transition-colors text-sm"
+                              >
+                                {exercise.display_name}
+                              </button>
                             {/each}
                           </div>
                         {/if}
