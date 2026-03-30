@@ -1202,7 +1202,7 @@
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (!ex) return;
     const set = ex.sets.find(s => s.localId === localId);
-    if (!set || set.done) return;
+    if (!set) return;
 
     if (set.backendId !== null) {
       try { await deleteSet(sessionId, set.backendId); } catch { /* ignore */ }
@@ -1211,6 +1211,9 @@
     ex.sets = ex.sets.filter(s => s.localId !== localId);
     ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
     uiExercises = [...uiExercises];
+
+    // Reset timer if no sets are done anymore
+    resetTimerIfNoDoneSets();
   }
 
   function addSetRow(exUiId: string) {
@@ -1353,6 +1356,19 @@
       await Promise.allSettled(backendIds.map(id => deleteSet(sessionId!, id)));
     }
     uiExercises = uiExercises.filter(e => e.uiId !== exUiId);
+
+    // Reset timer if no sets are done anymore
+    resetTimerIfNoDoneSets();
+  }
+
+  function resetTimerIfNoDoneSets() {
+    const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
+    if (!anyDone && clockStarted) {
+      clockStarted = false;
+      elapsed = 0;
+      startedAt = 0;
+      if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+    }
   }
 
   // ─── Rest timer ───────────────────────────────────────────────────────────
@@ -1898,14 +1914,8 @@
       set.doneLeft = false;
       set.doneRight = false;
 
-      // If no sets are done anymore, reset timer (#528)
-      const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
-      if (!anyDone && clockStarted) {
-        clockStarted = false;
-        elapsed = 0;
-        startedAt = 0;
-        if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-      }
+      // Reset timer if no sets are done anymore
+      resetTimerIfNoDoneSets();
     } catch (e) {
       console.error('Failed to uncomplete set:', e);
     } finally {
