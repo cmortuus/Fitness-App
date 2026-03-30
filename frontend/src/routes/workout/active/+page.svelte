@@ -10,7 +10,7 @@
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
     saveExerciseFeedback, syncSessionToPlan, patchSession,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
+  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import html2canvas from 'html2canvas';
@@ -550,33 +550,61 @@
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────
+  function sessionMatchesRequestedDay(session: WorkoutSession, plan: WorkoutPlan, day: PlannedDay): boolean {
+    if (session.workout_plan_id !== plan.id) return false;
+    if (!session.name) return false;
+    return session.name === `${plan.name} - ${day.day_name}`;
+  }
+
   async function startFromPlan(planId: number, dayNumber: number) {
     loading = true;
     showPicker = false;
     try {
       const bodyWtKg = $latestBodyWeight?.weight_kg ?? 0;
+      const plan = await getPlan(planId);
+      const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
+      if (!day) throw new Error(`Plan ${planId} has no day ${dayNumber}`);
       let raw;
       try {
         raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
       } catch (e: any) {
         if (e?.response?.status === 409) {
-          // Session already in progress — resume it instead of showing conflict dialog
+          // Only resume automatically when the in-progress session matches the requested day.
           const detail = e?.response?.data?.detail;
           const existingId: number | null =
             detail && typeof detail === 'object' ? detail.session_id ?? null : null;
           if (existingId != null) {
-            currentSession.set(await getSession(existingId));
+            const existing = await getSession(existingId);
+            if (sessionMatchesRequestedDay(existing, plan, day)) {
+              currentSession.set(existing);
+              await resumeSession();
+              return;
+            }
+            conflictSession = existing;
+            conflictRetry = () => startFromPlan(planId, dayNumber);
+            loading = false;
+            return;
+          }
+
+          // Fallback: only auto-resume a matching in-progress session.
+          const sessions = await getSessions({ limit: 5 });
+          const matching = sessions.find(s =>
+            s.started_at && !s.completed_at && sessionMatchesRequestedDay(s, plan, day)
+          );
+          if (matching) {
+            currentSession.set(matching);
             await resumeSession();
             return;
           }
-          // Fallback: check for any in-progress session
-          const sessions = await getSessions({ limit: 5 });
+
           const inProgress = sessions.find(s => s.started_at && !s.completed_at);
           if (inProgress) {
-            currentSession.set(inProgress);
-            await resumeSession();
+            conflictSession = await getSession(inProgress.id);
+            conflictRetry = () => startFromPlan(planId, dayNumber);
+            loading = false;
             return;
           }
+
           await handleConflict(e, () => startFromPlan(planId, dayNumber));
           return;
         }
@@ -587,9 +615,6 @@
       workoutName = sess.name ?? 'Workout';
       hasLinkedPlan = true;
       currentSession.set(sess);
-
-      const plan = await getPlan(planId);
-      const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
 
       if (day) {
         uiExercises = day.exercises.map(pe => {
