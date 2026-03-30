@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>Food Log</string>
+	<string>GymTracker</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,17 +23,13 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>Food Log uses the camera to scan food barcodes for nutrition lookup.</string>
+	<string>GymTracker uses the camera to scan food barcodes and nutrition labels for faster food logging.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>Food Log reads your health data to show body weight trends and sync workout history.</string>
+	<string>GymTracker reads your Apple Health body weight and body fat data to keep progress tracking current.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>Food Log writes completed workouts, body weight, and nutrition data to Apple Health.</string>
+	<string>GymTracker writes completed workouts and body weight entries to Apple Health when you choose to sync them.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
-	<key>UIRequiredDeviceCapabilities</key>
-	<array>
-		<string>armv7</string>
-	</array>
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
