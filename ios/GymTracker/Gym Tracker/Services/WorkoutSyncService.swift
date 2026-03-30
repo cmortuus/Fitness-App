@@ -34,14 +34,16 @@ class WorkoutSyncService {
             print("[WorkoutSync] Skipping sync because workout sync is disabled")
             return
         }
-        var authorized = HealthKitManager.shared.isAuthorized
-        print("[WorkoutSync] Starting recent workout sync. authorized=\(authorized) cachedSyncedCount=\(syncedIds.count)")
+        HealthKitManager.shared.checkAuthorization()
+        var authorized = HealthKitManager.shared.canWriteWorkouts
+        print("[WorkoutSync] Starting recent workout sync. workoutAuthorized=\(authorized) cachedSyncedCount=\(syncedIds.count)")
         if !authorized {
             print("[WorkoutSync] Requesting HealthKit authorization before workout sync")
-            authorized = await HealthKitManager.shared.requestAuthorization()
+            _ = await HealthKitManager.shared.requestAuthorization()
+            authorized = HealthKitManager.shared.canWriteWorkouts
         }
         guard authorized else {
-            print("[WorkoutSync] Aborting sync because HealthKit authorization was not granted")
+            print("[WorkoutSync] Aborting sync because workout write authorization was not granted")
             return
         }
 
