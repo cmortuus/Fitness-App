@@ -25,6 +25,7 @@ targets:
       base:
         INFOPLIST_FILE: Gym-Tracker-Info.plist
         PRODUCT_BUNDLE_IDENTIFIER: dev.lethal.gymtracker.native
+        PRODUCT_NAME: GymTracker
         CODE_SIGN_STYLE: Automatic
     entitlements:
       path: "Gym Tracker/Gym Tracker.entitlements"
