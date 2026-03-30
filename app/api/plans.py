@@ -5,16 +5,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select, func
+from sqlalchemy import select, func, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.user import User
-from app.models.workout import WorkoutPlan, WorkoutSession, ExerciseSet
+from app.models.workout import WorkoutPlan, WorkoutSession, ExerciseSet, ExerciseFeedback, WorkoutStatus
 from app.models.exercise import Exercise
 from app.schemas.requests import WorkoutPlanCreate, WorkoutPlanResponse, PlanRirOverrides
 from app.services.plan_rir import normalize_rir_overrides
+from app.api.progress import VOLUME_LANDMARKS
 
 router = APIRouter()
 
@@ -252,6 +253,101 @@ async def get_plan(
             detail=f"Workout plan {plan_id} not found",
         )
     return serialize_plan(plan)
+
+
+@router.get("/{plan_id}/recommendations")
+async def get_plan_recommendations(
+    plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workout plan {plan_id} not found")
+
+    try:
+        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    except (json.JSONDecodeError, TypeError):
+        planned_data = {}
+    days = planned_data.get("days", []) if isinstance(planned_data, dict) else []
+
+    planned_set_counts: dict[int, int] = {}
+    muscle_planned_sets: dict[str, int] = {}
+    plan_exercise_ids: set[int] = set()
+    for day in days:
+        for ex in day.get("exercises", []):
+            ex_id = ex.get("exercise_id")
+            if not ex_id:
+                continue
+            plan_exercise_ids.add(ex_id)
+            planned_set_counts[ex_id] = planned_set_counts.get(ex_id, 0) + max(0, int(ex.get("sets", 0) or 0))
+
+    if not plan_exercise_ids:
+        return []
+
+    ex_rows = await db.execute(select(Exercise).where(Exercise.id.in_(plan_exercise_ids)))
+    exercises = {exercise.id: exercise for exercise in ex_rows.scalars().all()}
+    for ex_id, count in planned_set_counts.items():
+        exercise = exercises.get(ex_id)
+        for muscle in exercise.primary_muscles or [] if exercise else []:
+            muscle_planned_sets[muscle] = muscle_planned_sets.get(muscle, 0) + count
+
+    feedback_rows = await db.execute(
+        select(ExerciseFeedback, WorkoutSession)
+        .join(WorkoutSession, ExerciseFeedback.session_id == WorkoutSession.id)
+        .where(
+            ExerciseFeedback.user_id == user.id,
+            WorkoutSession.workout_plan_id == plan_id,
+            WorkoutSession.status == WorkoutStatus.COMPLETED,
+        )
+        .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id), desc(ExerciseFeedback.id))
+    )
+
+    latest_feedback_by_exercise: dict[int, tuple[ExerciseFeedback, WorkoutSession]] = {}
+    for feedback, session in feedback_rows.all():
+        if feedback.exercise_id not in latest_feedback_by_exercise:
+            latest_feedback_by_exercise[feedback.exercise_id] = (feedback, session)
+
+    recommendations: list[dict] = []
+    for exercise_id, (feedback, session) in latest_feedback_by_exercise.items():
+        exercise = exercises.get(exercise_id)
+        if not exercise:
+            continue
+        if feedback.rir is None:
+            continue
+
+        primary_muscle = (exercise.primary_muscles or [None])[0]
+        muscle_landmarks = VOLUME_LANDMARKS.get(primary_muscle or "", {"mev": 4, "mav": 10, "mrv": 16})
+        weekly_sets = muscle_planned_sets.get(primary_muscle or "", 0)
+
+        if feedback.rir <= 1 and feedback.recovery_rating in {"poor", "ok"}:
+            add_set = weekly_sets < muscle_landmarks["mav"]
+            recommendations.append({
+                "type": "backoff_rir",
+                "exercise_id": exercise_id,
+                "exercise_name": exercise.display_name,
+                "muscle_group": primary_muscle,
+                "current_rir": feedback.rir,
+                "recovery_rating": feedback.recovery_rating,
+                "recommended_rir": 2,
+                "add_set": add_set,
+                "set_delta": 1 if add_set else 0,
+                "weekly_sets": weekly_sets,
+                "mav_sets": muscle_landmarks["mav"],
+                "reason": (
+                    f"{exercise.display_name} hit {feedback.rir} RIR with {feedback.recovery_rating} recovery. "
+                    f"Backing off to 2 RIR should improve recovery consistency."
+                ),
+                "detail": (
+                    f"{primary_muscle.replace('_', ' ').title() if primary_muscle else 'This muscle group'} is at "
+                    f"{weekly_sets} planned sets/week. "
+                    + ("Add 1 set to keep growth stimulus while easing effort." if add_set else "Hold set count steady for now.")
+                ),
+                "source_session_id": session.id,
+            })
+
+    return recommendations
 
 
 @router.post("/", response_model=WorkoutPlanResponse, status_code=status.HTTP_201_CREATED)
