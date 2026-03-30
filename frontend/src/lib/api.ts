@@ -1,6 +1,29 @@
 import axios, { AxiosError } from 'axios';
 
 const API_BASE = '/api';
+type OfflineQueueMode = 'reject' | 'queue-resolve';
+
+type QueueAwareRequestConfig = {
+  offlineQueueMode?: OfflineQueueMode;
+};
+
+class OfflineQueuedError extends Error {
+  readonly queued = true;
+  readonly isOfflineQueuedError = true;
+
+  constructor(
+    readonly method: string,
+    readonly url: string,
+    readonly pendingCount: number
+  ) {
+    super(`Queued ${method} ${url} for sync when back online`);
+    this.name = 'OfflineQueuedError';
+  }
+}
+
+function queueResolveConfig(): QueueAwareRequestConfig {
+  return { offlineQueueMode: 'queue-resolve' };
+}
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -25,7 +48,7 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    const config = error.config as any;
+    const config = error.config as (QueueAwareRequestConfig & Record<string, any>) | undefined;
     const isRetryable = !error.response || [502, 503, 504].includes(error.response.status);
     if (isRetryable && config && !config._retryCount) {
       config._retryCount = 1;
@@ -75,8 +98,10 @@ api.interceptors.response.use(
           pendingSyncCount.set(count);
           isOnline.set(false);
           console.info(`Offline: queued ${method} ${error.config.url} (${count} pending)`);
-          // Return a fake success response so the UI doesn't show an error
-          return { data: {}, status: 200, statusText: 'Queued (offline)' };
+          if (config?.offlineQueueMode === 'queue-resolve') {
+            return { data: {}, status: 202, statusText: 'Queued (offline)' };
+          }
+          return Promise.reject(new OfflineQueuedError(method, error.config.url, count));
         } catch (queueErr) {
           console.error('Failed to queue offline request:', queueErr);
         }
@@ -140,7 +165,7 @@ export async function getSettings(): Promise<Record<string, any>> {
 }
 
 export async function saveSettings(settings: Record<string, any>): Promise<void> {
-  await api.put('/auth/settings', settings);
+  await api.put('/auth/settings', settings, queueResolveConfig() as any);
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -345,11 +370,11 @@ export async function updateSet(
 }
 
 export async function deleteSet(sessionId: number, setId: number): Promise<void> {
-  await api.delete(`/sessions/${sessionId}/sets/${setId}`);
+  await api.delete(`/sessions/${sessionId}/sets/${setId}`, queueResolveConfig() as any);
 }
 
 export async function deleteSession(sessionId: number): Promise<void> {
-  await api.delete(`/sessions/${sessionId}`);
+  await api.delete(`/sessions/${sessionId}`, queueResolveConfig() as any);
 }
 
 // Exercises
@@ -377,7 +402,7 @@ export async function createExercise(data: {
 }
 
 export async function deleteExercise(exerciseId: number): Promise<void> {
-  await api.delete(`/exercises/${exerciseId}`);
+  await api.delete(`/exercises/${exerciseId}`, queueResolveConfig() as any);
 }
 
 export interface ExerciseHistorySession {
@@ -409,7 +434,7 @@ export async function getAllExerciseNotes(): Promise<Record<number, { note: stri
 }
 
 export async function setExerciseNote(exerciseId: number, note: string): Promise<void> {
-  await api.put(`/exercises/${exerciseId}/notes`, { note });
+  await api.put(`/exercises/${exerciseId}/notes`, { note }, queueResolveConfig() as any);
 }
 
 export async function recalculateWeights(pattern: string, oldBaseKg: number, newBaseKg: number): Promise<{ adjusted: number }> {
@@ -486,7 +511,7 @@ export async function getPlansWithDrafts(): Promise<WorkoutPlan[]> {
 }
 
 export async function deletePlan(planId: number): Promise<void> {
-  await api.delete(`/plans/${planId}`);
+  await api.delete(`/plans/${planId}`, queueResolveConfig() as any);
 }
 
 export async function archivePlan(planId: number): Promise<WorkoutPlan> {
@@ -549,7 +574,7 @@ export async function addBodyWeight(data: {
 }
 
 export async function deleteBodyWeight(entryId: number): Promise<void> {
-  await api.delete(`/body-weight/${entryId}`);
+  await api.delete(`/body-weight/${entryId}`, queueResolveConfig() as any);
 }
 
 // ── Nutrition ────────────────────────────────────────────────────────────────
@@ -684,7 +709,7 @@ export async function createCustomFood(data: {
 }
 
 export async function deleteCustomFood(id: number): Promise<void> {
-  await api.delete(`/nutrition/foods/${id}`);
+  await api.delete(`/nutrition/foods/${id}`, queueResolveConfig() as any);
 }
 
 // Nutrition entries
@@ -709,7 +734,7 @@ export async function addNutritionEntry(data: {
 }
 
 export async function deleteNutritionEntry(id: number): Promise<void> {
-  await api.delete(`/nutrition/entries/${id}`);
+  await api.delete(`/nutrition/entries/${id}`, queueResolveConfig() as any);
 }
 
 // Summary & goals
@@ -811,7 +836,7 @@ export async function recalculatePhase(apply: boolean = false): Promise<DietPhas
 }
 
 export async function endPhase(): Promise<void> {
-  await api.delete('/nutrition/phases/active');
+  await api.delete('/nutrition/phases/active', queueResolveConfig() as any);
 }
 
 // ── Workout Templates ────────────────────────────────────────────────────────
@@ -932,7 +957,7 @@ export async function updateRecipe(id: number, data: {
 }
 
 export async function deleteRecipe(id: number): Promise<void> {
-  await api.delete(`/recipes/${id}`);
+  await api.delete(`/recipes/${id}`, queueResolveConfig() as any);
 }
 
 export async function logRecipe(recipeId: number, data: {
