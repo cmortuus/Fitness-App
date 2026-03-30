@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { activeDietPhase } from '$lib/stores';
+  import { activeDietPhase, settings } from '$lib/stores';
   import {
     getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
     getDailySummary, setMacroGoals,
@@ -16,6 +16,13 @@
     NutritionEntry, DietPhase, DailySummary, DailyEntries,
     FoodSearchResult, FoodItem, Micronutrients,
   } from '$lib/api';
+
+  const KG_TO_LBS = 2.20462;
+  function formatWeight(kg: number): string {
+    return $settings.weightUnit === 'lbs'
+      ? `${(kg * KG_TO_LBS).toFixed(1)} lbs`
+      : `${kg.toFixed(1)} kg`;
+  }
 
   // ─── State ────────────────────────────────────────────────────────────────
   let selectedDate = $state(localDateString());
@@ -791,11 +798,11 @@
                style="width: {($activeDietPhase.current_week / $activeDietPhase.duration_weeks) * 100}%"></div>
         </div>
         <div class="flex items-center justify-between text-xs text-zinc-500">
-          <span>{$activeDietPhase.starting_weight_kg.toFixed(1)} kg</span>
+          <span>{formatWeight($activeDietPhase.starting_weight_kg)}</span>
           {#if $activeDietPhase.current_weight_kg}
-            <span class="text-white font-medium">{$activeDietPhase.current_weight_kg.toFixed(1)} kg</span>
+            <span class="text-white font-medium">{formatWeight($activeDietPhase.current_weight_kg)}</span>
           {/if}
-          <span>{$activeDietPhase.target_weight_kg.toFixed(1)} kg</span>
+          <span>{formatWeight($activeDietPhase.target_weight_kg)}</span>
         </div>
         {#if $activeDietPhase.suggestion}
           <div class="mt-2 flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
