@@ -1,8 +1,8 @@
 <script lang="ts">  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { exercises } from '$lib/stores';
-  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise } from '$lib/api';
-  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutTemplate } from '$lib/api';
+  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise, getPlan, updatePlan } from '$lib/api';
+  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutPlan, WorkoutTemplate } from '$lib/api';
 
   // Plan basic info
   let newPlanName = $state('');
@@ -27,6 +27,9 @@
   let initialized = $state(false);
   let currentStep = $state(1); // 0: Choose method, 1: Basic Info, 2: Configure Days
   let createMode = $state<'choose' | 'template' | 'custom'>('choose');
+  let editingPlanId = $state<number | null>(null);
+  let loadingExistingPlan = $state(false);
+  let savingPlan = $state(false);
 
   // Template browser state
   let templates = $state<WorkoutTemplate[]>([]);
@@ -102,6 +105,26 @@
     return Math.round(kg * KG_TO_LBS * 10) / 10;
   }
 
+  function cloneDays(sourceDays: PlannedDay[]): PlannedDay[] {
+    return sourceDays.map((day, index) => ({
+      day_number: index + 1,
+      day_name: day.day_name,
+      exercises: day.exercises.map((exercise) => ({ ...exercise }))
+    }));
+  }
+
+  function hydratePlan(plan: WorkoutPlan) {
+    editingPlanId = plan.id;
+    newPlanName = plan.name;
+    newPlanDescription = plan.description ?? '';
+    numberOfDays = plan.number_of_days;
+    durationWeeks = plan.duration_weeks;
+    blockType = plan.block_type;
+    days = cloneDays(plan.days);
+    createMode = 'custom';
+    currentStep = 2;
+  }
+
   onMount(() => {
     let autosaveInterval: ReturnType<typeof setInterval> | null = null;
     (async () => {
@@ -117,10 +140,27 @@
         recentExercises = recentData;
         groupedExercises = groupedData;
 
-        // Check for saved draft in localStorage
-        const restored = restoreDraftFromStorage();
-        if (!restored) {
-          initializeDays();
+        const params = new URLSearchParams(window.location.search);
+        const editId = Number.parseInt(params.get('edit') ?? '', 10);
+
+        if (Number.isInteger(editId) && editId > 0) {
+          loadingExistingPlan = true;
+          try {
+            const plan = await getPlan(editId);
+            hydratePlan(plan);
+          } catch (error) {
+            console.error('Failed to load existing plan:', error);
+            alert('Failed to load the selected plan for editing.');
+            goto('/plans');
+            return;
+          } finally {
+            loadingExistingPlan = false;
+          }
+        } else {
+          const restored = restoreDraftFromStorage();
+          if (!restored) {
+            initializeDays();
+          }
         }
         initialized = true;
 
@@ -363,18 +403,26 @@
     };
   }
 
-  async function handleCreatePlan() {
+  async function handleSubmitPlan() {
+    savingPlan = true;
     try {
-      await createPlan(buildPlanData(false));
+      if (editingPlanId !== null) {
+        await updatePlan(editingPlanId, buildPlanData(false));
+      } else {
+        await createPlan(buildPlanData(false));
+      }
       clearDraftFromStorage();
       goto('/plans');
     } catch (error) {
-      console.error('Failed to create plan:', error);
-      alert('Failed to create plan: ' + (error instanceof Error ? error.message : String(error)));
+      console.error('Failed to save plan:', error);
+      alert('Failed to save plan: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      savingPlan = false;
     }
   }
 
   async function handleSaveDraft() {
+    if (editingPlanId !== null) return;
     try {
       await createPlan(buildPlanData(true));
       clearDraftFromStorage();
@@ -389,6 +437,7 @@
   const DRAFT_KEY = 'hgt_plan_draft';
 
   function saveDraftToStorage() {
+    if (editingPlanId !== null) return;
     if (typeof localStorage === 'undefined') return;
     const draft = {
       name: newPlanName, description: newPlanDescription, blockType, durationWeeks,
@@ -402,6 +451,7 @@
   }
 
   function restoreDraftFromStorage(): boolean {
+    if (editingPlanId !== null) return false;
     if (typeof localStorage === 'undefined') return false;
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return false;
@@ -437,6 +487,23 @@
 
   function cancel() {
     goto('/plans');
+  }
+
+  function moveDay(dayNum: number, direction: -1 | 1) {
+    const index = days.findIndex((d) => d.day_number === dayNum);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= days.length) return;
+
+    const reordered = [...days];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    days = cloneDays(reordered);
+  }
+
+  function clearDay(dayNum: number) {
+    const dayIndex = days.findIndex((d) => d.day_number === dayNum);
+    if (dayIndex === -1) return;
+    days[dayIndex].exercises = [];
+    days = [...days];
   }
 
   async function loadTemplates() {
@@ -543,20 +610,33 @@
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-4">
         <button onclick={() => {
-          if (createMode === 'template' || createMode === 'custom') { createMode = 'choose'; }
-          else if (currentStep === 2) { goBackToStep1(); }
+          if (currentStep === 2) { goBackToStep1(); }
+          else if (createMode === 'template') { createMode = 'choose'; }
+          else if (createMode === 'custom' && editingPlanId === null) { createMode = 'choose'; }
           else { cancel(); }
         }} class="text-zinc-400 hover:text-white">
           ← {createMode === 'choose' ? 'Back to Plans' : 'Back'}
         </button>
         <h1 class="text-xl font-bold">
-          {createMode === 'choose' ? 'New Plan' : createMode === 'template' ? 'Choose Template' : 'Build Custom Plan'}
+          {editingPlanId !== null
+            ? 'Edit Weekly Plan'
+            : createMode === 'choose'
+              ? 'New Plan'
+              : createMode === 'template'
+                ? 'Choose Template'
+                : 'Build Custom Plan'}
         </h1>
       </div>
 
       {#if currentStep === 2 && createMode === 'custom'}
-        <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
-        <button onclick={handleCreatePlan} class="btn-primary">Create Plan</button>
+        {#if editingPlanId === null}
+          <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
+        {/if}
+        <button onclick={handleSubmitPlan} class="btn-primary" disabled={savingPlan}>
+          {savingPlan
+            ? (editingPlanId !== null ? 'Saving...' : 'Creating...')
+            : (editingPlanId !== null ? 'Save Changes' : 'Create Plan')}
+        </button>
       {/if}
     </div>
   </div>
@@ -670,10 +750,10 @@
 
     <!-- Custom plan builder: Step 1 -->
     {:else if currentStep === 1}
-      {#if !initialized}
+      {#if !initialized || loadingExistingPlan}
         <div class="card max-w-2xl mx-auto text-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
-          <p class="text-zinc-400 mb-4">Loading exercises...</p>
+          <p class="text-zinc-400 mb-4">{loadingExistingPlan ? 'Loading weekly plan...' : 'Loading exercises...'}</p>
           <button
             class="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-500"
             onclick={async () => {
@@ -748,7 +828,7 @@
 
         <div class="flex justify-end gap-3 mt-8">
           <button onclick={cancel} class="btn-secondary">Cancel</button>
-          <button onclick={goToStep2} class="btn-primary">Next Step</button>
+          <button onclick={goToStep2} class="btn-primary">{editingPlanId !== null ? 'Edit Week' : 'Next Step'}</button>
         </div>
       </div>
       {/if}
@@ -759,7 +839,7 @@
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-semibold">Configure Days</h2>
-          <p class="text-sm text-zinc-400">Drag and drop exercises between days to reorganize</p>
+          <p class="text-sm text-zinc-400">Drag exercises between days, clear a day to skip it, and reorder the week.</p>
         </div>
 
         <!-- Days grid - responsive columns -->
@@ -774,14 +854,39 @@
               aria-label="Day {day.day_number}"
             >
               <!-- Day header -->
-              <div class="mb-4">
-                <input
-                  type="text"
-                  value={day.day_name}
-                  oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
-                  class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
-                  placeholder="Day name..."
-                />
+              <div class="mb-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                  <input
+                    type="text"
+                    value={day.day_name}
+                    oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
+                    class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
+                    placeholder="Day name..."
+                  />
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      onclick={() => moveDay(day.day_number, -1)}
+                      disabled={day.day_number === 1}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                    >
+                      ←
+                    </button>
+                    <button
+                      onclick={() => moveDay(day.day_number, 1)}
+                      disabled={day.day_number === days.length}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                    >
+                      →
+                    </button>
+                    <button
+                      onclick={() => clearDay(day.day_number)}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-xs"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <p class="text-xs text-zinc-500">Day {day.day_number}</p>
               </div>
 
               <!-- Add exercise button -->
@@ -909,9 +1014,33 @@
             </div>
           {/if}
 
-          <div class="flex justify-end gap-3">
-            <button onclick={() => configuringExercise = null} class="btn-secondary">Back</button>
-            <button onclick={addExerciseToDay} class="btn-primary">Add to Day</button>
+          <div class="flex justify-between gap-3">
+            <button
+              onclick={async () => {
+                if (!configuringExercise?.exercise) return;
+                if (!confirm(`Delete "${configuringExercise.exercise.display_name}"? This cannot be undone.`)) return;
+                try {
+                  await deleteExercise(configuringExercise.exercise.id);
+                  const [exercisesData, groupedData] = await Promise.all([
+                    getExercises(),
+                    getExercisesGrouped(),
+                  ]);
+                  exercises.set(exercisesData);
+                  allExercises = exercisesData;
+                  groupedExercises = groupedData;
+                  closeExerciseSelector();
+                } catch (error) {
+                  alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
+                }
+              }}
+              class="px-4 py-2 rounded bg-red-600 text-white hover:bg-red-500 transition-colors text-sm"
+            >
+              Delete Exercise
+            </button>
+            <div class="flex gap-3">
+              <button onclick={() => configuringExercise = null} class="btn-secondary">Back</button>
+              <button onclick={addExerciseToDay} class="btn-primary">Add to Day</button>
+            </div>
           </div>
         </div>
       {:else}
@@ -963,15 +1092,41 @@
               {:else}
                 <div class="space-y-1 max-h-64 overflow-y-auto">
                   {#each searchResults as exercise}
-                    <button
-                      onclick={() => selectExercise(exercise)}
-                      class="w-full text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
-                    >
-                      <div class="flex items-center justify-between">
-                        <span class="font-medium">{exercise.display_name}</span>
-                        <span class="text-xs text-zinc-400">{exercise.primary_muscles[0] || 'other'}</span>
-                      </div>
-                    </button>
+                    <div class="flex items-center justify-between gap-2">
+                      <button
+                        onclick={() => selectExercise(exercise)}
+                        class="flex-1 text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
+                      >
+                        <div class="flex items-center justify-between">
+                          <span class="font-medium">{exercise.display_name}</span>
+                          <span class="text-xs text-zinc-400">{exercise.primary_muscles[0] || 'other'}</span>
+                        </div>
+                      </button>
+                      <button
+                        onclick={async (e) => {
+                          e.stopPropagation();
+                          if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
+                          try {
+                            await deleteExercise(exercise.id);
+                            // Refresh exercises list
+                            const [exercisesData, groupedData] = await Promise.all([
+                              getExercises(),
+                              getExercisesGrouped(),
+                            ]);
+                            exercises.set(exercisesData);
+                            allExercises = exercisesData;
+                            groupedExercises = groupedData;
+                            handleSearch(); // Re-run search
+                          } catch (error) {
+                            alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
+                          }
+                        }}
+                        class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors"
+                        title="Delete exercise"
+                      >
+                        🗑️
+                      </button>
+                    </div>
                   {/each}
                 </div>
               {/if}
@@ -985,15 +1140,39 @@
                   <h5 class="text-sm font-medium text-zinc-400 mb-2">Recently Used</h5>
                   <div class="space-y-1 max-h-40 overflow-y-auto">
                     {#each recentExercises as exercise}
-                      <button
-                        onclick={() => selectExercise(exercise)}
-                        class="w-full text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
-                      >
-                        <div class="flex items-center justify-between">
-                          <span class="font-medium">{exercise.display_name}</span>
-                          <span class="text-xs text-zinc-400">Used {exercise.usage_count} times</span>
-                        </div>
-                      </button>
+                      <div class="flex items-center justify-between gap-2">
+                        <button
+                          onclick={() => selectExercise(exercise)}
+                          class="flex-1 text-left px-3 py-2 rounded hover:bg-zinc-800 transition-colors"
+                        >
+                          <div class="flex items-center justify-between">
+                            <span class="font-medium">{exercise.display_name}</span>
+                            <span class="text-xs text-zinc-400">Used {exercise.usage_count} times</span>
+                          </div>
+                        </button>
+                        <button
+                          onclick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
+                            try {
+                              await deleteExercise(exercise.id);
+                              const [exercisesData, groupedData] = await Promise.all([
+                                getExercises(),
+                                getExercisesGrouped(),
+                              ]);
+                              exercises.set(exercisesData);
+                              allExercises = exercisesData;
+                              groupedExercises = groupedData;
+                            } catch (error) {
+                              alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
+                            }
+                          }}
+                          class="px-2 py-2 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors"
+                          title="Delete exercise"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     {/each}
                   </div>
                 </div>
@@ -1022,12 +1201,36 @@
                         {#if expandedMuscleGroups[muscle]}
                           <div class="space-y-1 px-3 py-2 bg-zinc-900">
                             {#each muscleExercises as exercise}
-                              <button
-                                onclick={() => selectExercise(exercise)}
-                                class="w-full text-left px-3 py-1.5 rounded hover:bg-zinc-800 transition-colors text-sm"
-                              >
-                                {exercise.display_name}
-                              </button>
+                              <div class="flex items-center justify-between gap-2">
+                                <button
+                                  onclick={() => selectExercise(exercise)}
+                                  class="flex-1 text-left px-3 py-1.5 rounded hover:bg-zinc-800 transition-colors text-sm"
+                                >
+                                  {exercise.display_name}
+                                </button>
+                                <button
+                                  onclick={async (e) => {
+                                    e.stopPropagation();
+                                    if (!confirm(`Delete "${exercise.display_name}"? This cannot be undone.`)) return;
+                                    try {
+                                      await deleteExercise(exercise.id);
+                                      const [exercisesData, groupedData] = await Promise.all([
+                                        getExercises(),
+                                        getExercisesGrouped(),
+                                      ]);
+                                      exercises.set(exercisesData);
+                                      allExercises = exercisesData;
+                                      groupedExercises = groupedData;
+                                    } catch (error) {
+                                      alert('Failed to delete: ' + (error instanceof Error ? error.message : String(error)));
+                                    }
+                                  }}
+                                  class="px-2 py-1.5 text-red-400 hover:text-red-300 hover:bg-zinc-800 rounded transition-colors text-sm"
+                                  title="Delete exercise"
+                                >
+                                  🗑️
+                                </button>
+                              </div>
                             {/each}
                           </div>
                         {/if}

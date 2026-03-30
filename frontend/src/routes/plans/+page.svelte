@@ -254,6 +254,10 @@
 
               <!-- Actions -->
               <div class="flex items-center gap-2 pt-2 border-t border-zinc-800">
+                <button onclick={() => goto(`/plans/create?edit=${plan.id}`)}
+                        class="btn-secondary text-sm">
+                  Edit Week
+                </button>
                 <button onclick={() => goto(`/workout/active?plan=${plan.id}&day=1`)}
                         class="btn-primary text-sm flex-1">
                   Start Workout
