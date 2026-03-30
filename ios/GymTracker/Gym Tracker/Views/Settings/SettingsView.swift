@@ -54,6 +54,24 @@ enum SettingsKey {
     static let lastBodyWeightKg    = "lastBodyWeightKg"
 }
 
+private let validHeightUnits = ["imperial_split", "imperial_in", "metric"]
+private let validActivityLevels: [Double] = [1.0, 1.2, 1.4, 1.6, 1.8]
+
+private func normalizedHeightUnit(_ value: String?) -> String {
+    switch value {
+    case "ft", "imperial":
+        return "imperial_split"
+    case let unit? where validHeightUnits.contains(unit):
+        return unit
+    default:
+        return "imperial_split"
+    }
+}
+
+private func normalizedActivityLevel(_ value: Double) -> Double {
+    validActivityLevels.contains(value) ? value : 1.4
+}
+
 // MARK: - Settings Sync (backend DB ↔ @AppStorage cache)
 
 /// JSON structure matching the web app's settings format for cross-platform sync.
@@ -200,7 +218,7 @@ enum SettingsSync {
         let settings = SettingsJSON(
             branchPreference: ud.string(forKey: SettingsKey.branchPreference) ?? "main",
             weightUnit: ud.string(forKey: SettingsKey.weightUnit) ?? "lbs",
-            heightUnit: ud.string(forKey: SettingsKey.heightUnit) ?? "ft",
+            heightUnit: normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit)),
             progressionStyle: ud.string(forKey: SettingsKey.progressionStyle) ?? "rep",
             showPlateMath: ud.bool(forKey: SettingsKey.showPlateMath),
             maxWarmupSets: ud.integer(forKey: SettingsKey.maxWarmupSets),
@@ -358,8 +376,8 @@ struct SettingsView: View {
 
             // Activity level (#481)
             Picker("Activity Level", selection: Binding(
-                get: { UserDefaults.standard.double(forKey: "activityLevel") },
-                set: { UserDefaults.standard.set($0, forKey: "activityLevel") }
+                get: { normalizedActivityLevel(UserDefaults.standard.double(forKey: "activityLevel")) },
+                set: { UserDefaults.standard.set(normalizedActivityLevel($0), forKey: "activityLevel") }
             )) {
                 Text("Sedentary (1.0)").tag(1.0)
                 Text("Lightly Active (1.2)").tag(1.2)
@@ -914,6 +932,13 @@ struct SettingsView: View {
 
     private func loadData() async {
         loadingWeighIns = true
+        let ud = UserDefaults.standard
+        let normalizedUnit = normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit))
+        if normalizedUnit != heightUnit {
+            heightUnit = normalizedUnit
+        }
+        let normalizedActivity = normalizedActivityLevel(ud.double(forKey: "activityLevel"))
+        ud.set(normalizedActivity, forKey: "activityLevel")
         do {
             weighIns = try await APIClient.shared.get(
                 "/body-weight/",
@@ -928,7 +953,10 @@ struct SettingsView: View {
         await SettingsSync.loadFromDB()
 
         // Extract display bases from the loaded machine weights
-        let ud = UserDefaults.standard
+        let refreshedUnit = normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit))
+        if refreshedUnit != heightUnit {
+            heightUnit = refreshedUnit
+        }
         let mwKeys = ["smithMachine", "legPress", "hackSquat", "tBarRow", "beltSquat",
                        "chestPress", "shoulderPress", "inclinePress", "declinePress",
                        "calfRaise", "seatedRow", "latPulldown", "pendulumSquat",
