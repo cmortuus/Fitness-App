@@ -328,12 +328,19 @@ export async function completeSession(sessionId: number): Promise<WorkoutSession
   return response.data;
 }
 
+export async function resetSessionToPlanned(sessionId: number): Promise<WorkoutSession> {
+  const response = await api.post(`/sessions/${sessionId}/reset-to-planned`);
+  return response.data;
+}
+
 export async function patchSession(sessionId: number, data: { notes?: string; name?: string }): Promise<WorkoutSession> {
   const response = await api.patch(`/sessions/${sessionId}`, data);
   return response.data;
 }
 
-export async function syncSessionToPlan(sessionId: number): Promise<{ updated: number }> {
+export async function syncSessionToPlan(
+  sessionId: number
+): Promise<{ updated: number; structural_changes?: number }> {
   const response = await api.post(`/sessions/${sessionId}/sync-to-plan`);
   return response.data;
 }
