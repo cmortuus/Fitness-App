@@ -5,7 +5,7 @@
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
-    createSessionFromPlan, createSession, startSession,
+    createSessionFromPlan, createSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
     saveExerciseFeedback, syncSessionToPlan, patchSession,
@@ -586,7 +586,7 @@
         }
         throw e;
       }
-      const sess = await startSession(raw.id);
+      const sess = raw;
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
       hasLinkedPlan = true;
@@ -683,6 +683,17 @@
     }, 1000);
   }
 
+  function markCurrentSessionInProgress(startedAtIso: string) {
+    currentSession.update((sess) => {
+      if (!sess) return sess;
+      return {
+        ...sess,
+        status: 'in_progress',
+        started_at: startedAtIso,
+      };
+    });
+  }
+
   async function startFreeSession() {
     loading = true;
     showPicker = false;
@@ -700,7 +711,7 @@
         }
         throw e;
       }
-      const sess = await startSession(raw.id);
+      const sess = raw;
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
       currentSession.set(sess);
@@ -1032,10 +1043,11 @@
         ? [{ weight_kg: weightKg, reps: set.partialReps, type: 'partial' }]
         : undefined;
 
+      const startedAtIso = new Date().toISOString();
       await updateSet(sessionId, bId, {
         actual_reps: effectiveReps,
         actual_weight_kg: weightKg,
-        completed_at: new Date().toISOString(),
+        completed_at: startedAtIso,
         ...(ex.isUnilateral && { reps_left: set.repsLeft ?? 0, reps_right: set.repsRight ?? 0 }),
         ...(notes && { notes }),
         ...(set.setType !== 'standard' && { set_type: set.setType }),
@@ -1045,6 +1057,7 @@
       set.reps = effectiveReps; // sync reps field for drop-off calc
       set.done = true;
       startClockIfNeeded(); // Start timer on first set completion (#524)
+      markCurrentSessionInProgress(startedAtIso);
 
       // Sync myo match sets with set 1's final values
       syncMyoMatchSets(ex);
@@ -1368,6 +1381,16 @@
       elapsed = 0;
       startedAt = 0;
       if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+    }
+    if (!anyDone) {
+      currentSession.update((sess) => {
+        if (!sess || sess.completed_at) return sess;
+        return {
+          ...sess,
+          status: 'planned',
+          started_at: null,
+        };
+      });
     }
   }
 
