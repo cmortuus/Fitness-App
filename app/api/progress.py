@@ -1,5 +1,6 @@
 """Progress tracking API endpoints."""
 
+import json
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
@@ -19,6 +20,20 @@ from app.models.workout import ExerciseSet, WorkoutSession, WorkoutStatus
 from app.services.overload import OverloadInput, calculate_overload, epley_1rm
 
 router = APIRouter()
+
+
+def get_training_level(user: User) -> str:
+    """Read the saved progression training level from user settings."""
+    if not user.settings_json:
+        return "intermediate"
+
+    try:
+        settings = json.loads(user.settings_json)
+    except json.JSONDecodeError:
+        return "intermediate"
+
+    training_level = settings.get("progression", {}).get("trainingLevel")
+    return training_level if training_level in {"beginner", "intermediate", "advanced"} else "intermediate"
 
 
 @router.get("/")
@@ -589,7 +604,7 @@ async def get_overload_suggestion(
         select(Exercise).where(Exercise.id == body.exercise_id)
     )
     exercise = ex_result.scalar_one_or_none()
-    exercise_type = exercise.category if exercise else "compound"
+    exercise_type = exercise.movement_type if exercise else "compound"
 
     # Get recent completed sets for this exercise (last 5 sessions)
     recent_sets_q = await db.execute(
@@ -640,7 +655,7 @@ async def get_overload_suggestion(
         baseline_reps=baseline_reps,
         target_reps=body.target_reps,
         exercise_type=exercise_type,
-        training_level="intermediate",  # TODO: get from user settings
+        training_level=get_training_level(user),
         rolling_e1rm_trend=rolling_trend,
         weight_increment=weight_increment,
     ))
