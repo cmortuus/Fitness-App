@@ -40,6 +40,13 @@ export interface DashboardWidget {
   enabled: boolean;
 }
 
+export interface SettingsMeta {
+  updated_at: string | null;
+  updated_by: string | null;
+  source_device: string | null;
+  schema_version: number;
+}
+
 export interface DeloadSettings {
   sessions: number;         // how many deload sessions (1-7, 0 = match plan days)
   weightPercent: number;    // % of working weight (50-90, default 70)
@@ -60,6 +67,7 @@ export interface AppSettings {
   deload: DeloadSettings;
   progression: ProgressionSettings;
   dashboardWidgets: DashboardWidget[];
+  settingsMeta?: SettingsMeta;
 }
 
 const SETTINGS_KEY = 'hgt_settings';
@@ -135,6 +143,12 @@ const defaultSettings: AppSettings = {
     minRepsForIncrease: 8,
     maxRepsForIncrease: 12,
   },
+  settingsMeta: {
+    updated_at: null,
+    updated_by: null,
+    source_device: null,
+    schema_version: 1,
+  },
 };
 
 function deepMergeSettings(stored: any): AppSettings {
@@ -155,6 +169,7 @@ function deepMergeSettings(stored: any): AppSettings {
     deload: { ...defaultSettings.deload, ...(stored.deload ?? {}) },
     progression: { ...defaultSettings.progression, ...(stored.progression ?? {}) },
     dashboardWidgets: mergedWidgets,
+    settingsMeta: { ...defaultSettings.settingsMeta, ...(stored.settingsMeta ?? {}) },
   };
 }
 
@@ -177,35 +192,57 @@ function hasSettingValue(value: unknown): boolean {
 // Debounce timer for DB saves
 let dbSaveTimer: ReturnType<typeof setTimeout> | null = null;
 
+function withSettingsMeta(value: AppSettings): AppSettings {
+  return {
+    ...value,
+    settingsMeta: {
+      schema_version: 1,
+      updated_at: new Date().toISOString(),
+      updated_by: typeof localStorage !== 'undefined'
+        ? JSON.parse(localStorage.getItem('hgt_user') ?? 'null')?.username ?? null
+        : null,
+      source_device: 'web',
+    },
+  };
+}
+
+function isLocalNewer(local: any, remote: any): boolean {
+  const localTs = local?.settingsMeta?.updated_at ? Date.parse(local.settingsMeta.updated_at) : NaN;
+  const remoteTs = remote?.settingsMeta?.updated_at ? Date.parse(remote.settingsMeta.updated_at) : NaN;
+  if (Number.isNaN(localTs)) return false;
+  if (Number.isNaN(remoteTs)) return true;
+  return localTs > remoteTs;
+}
+
 function createSettingsStore() {
   const { subscribe, set, update } = writable<AppSettings>(loadSettings());
 
   function persist(value: AppSettings) {
+    const withMeta = withSettingsMeta(value);
     // Always save to localStorage (instant, offline-capable)
     if (typeof localStorage !== 'undefined') {
-      localStorage.setItem(SETTINGS_KEY, JSON.stringify(value));
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(withMeta));
     }
     // Debounce save to DB (500ms) — avoids hammering API on rapid changes
     if (dbSaveTimer) clearTimeout(dbSaveTimer);
     dbSaveTimer = setTimeout(async () => {
       try {
         const { saveSettings } = await import('$lib/api');
-        await saveSettings(value);
+        await saveSettings(withMeta);
       } catch { /* offline or not logged in — localStorage has it */ }
     }, 500);
+    return withMeta;
   }
 
   return {
     subscribe,
     set(value: AppSettings) {
-      persist(value);
-      set(value);
+      set(persist(value));
     },
     update(fn: (s: AppSettings) => AppSettings) {
       update(s => {
         const next = fn(s);
-        persist(next);
-        return next;
+        return persist(next);
       });
     },
     /** Load settings from DB (call after login) */
@@ -214,17 +251,22 @@ function createSettingsStore() {
         const { getSettings } = await import('$lib/api');
         const remote = await getSettings();
         if (remote && Object.keys(remote).length > 0) {
-          const merged = deepMergeSettings(remote);
+          let merged = deepMergeSettings(remote);
           let shouldBackfillRemote = false;
 
           if (typeof localStorage !== 'undefined') {
             try {
               const local = JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? '{}');
-              if (!hasSettingValue(remote.dashboardWidgets) && hasSettingValue(local.dashboardWidgets)) {
+              if (isLocalNewer(local, remote)) {
+                merged = deepMergeSettings(local);
+                shouldBackfillRemote = true;
+              } else if (!hasSettingValue(remote.dashboardWidgets) && hasSettingValue(local.dashboardWidgets)) {
                 merged.dashboardWidgets = local.dashboardWidgets;
                 shouldBackfillRemote = true;
-              }
-              if (!hasSettingValue(remote.branchPreference) && hasSettingValue(local.branchPreference)) {
+                if (!hasSettingValue(remote.branchPreference) && hasSettingValue(local.branchPreference)) {
+                  merged.branchPreference = local.branchPreference;
+                }
+              } else if (!hasSettingValue(remote.branchPreference) && hasSettingValue(local.branchPreference)) {
                 merged.branchPreference = local.branchPreference;
                 shouldBackfillRemote = true;
               }
