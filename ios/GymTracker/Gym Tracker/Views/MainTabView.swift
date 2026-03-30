@@ -5,30 +5,24 @@ struct MainTabView: View {
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            DashboardView()
+            HomeView()
                 .tabItem {
-                    Label("Training", systemImage: "dumbbell.fill")
+                    Label("Home", systemImage: "house.fill")
                 }
                 .tag(0)
 
             NutritionView()
                 .tabItem {
-                    Label("Nutrition", systemImage: "fork.knife")
+                    Label("Log", systemImage: "plus.circle.fill")
                 }
                 .tag(1)
-
-            ProgressView_()
-                .tabItem {
-                    Label("Progress", systemImage: "chart.line.uptrend.xyaxis")
-                }
-                .tag(2)
 
             SettingsView()
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
-                .tag(3)
+                .tag(2)
         }
-        .tint(.blue)
+        .tint(Color(red: 0.004, green: 0.439, blue: 0.725)) // MacroFactor blue
     }
 }

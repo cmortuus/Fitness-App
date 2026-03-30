@@ -53,6 +53,181 @@ enum SettingsKey {
     static let lastBodyWeightKg    = "lastBodyWeightKg"
 }
 
+// MARK: - Settings Sync (backend DB ↔ @AppStorage cache)
+
+/// JSON structure matching the web app's settings format for cross-platform sync.
+struct SettingsJSON: Codable {
+    var weightUnit: String?
+    var heightUnit: String?
+    var progressionStyle: String?
+    var showPlateMath: Bool?
+    var maxWarmupSets: Int?
+    var profile: ProfileJSON?
+    var restDurations: RestDurationsJSON?
+    var machineWeights: [String: Double]?
+    var deload: DeloadJSON?
+
+    struct ProfileJSON: Codable {
+        var age: Int?
+        var sex: String?
+        var heightIn: Double?
+    }
+
+    struct RestDurationsJSON: Codable {
+        var upperCompound: Int?
+        var upperIsolation: Int?
+        var lowerCompound: Int?
+        var lowerIsolation: Int?
+    }
+
+    struct DeloadJSON: Codable {
+        var sessions: Int?
+        var weightPercent: Int?
+        var volumePercent: Int?
+    }
+}
+
+@MainActor
+enum SettingsSync {
+    private static var saveTask: Task<Void, Never>?
+
+    /// Load all settings from backend → write to @AppStorage cache
+    static func loadFromDB() async {
+        do {
+            let remote: SettingsJSON = try await APIClient.shared.get("/auth/settings")
+            let ud = UserDefaults.standard
+
+            if let v = remote.weightUnit { ud.set(v, forKey: SettingsKey.weightUnit) }
+            if let v = remote.heightUnit { ud.set(v, forKey: SettingsKey.heightUnit) }
+            if let v = remote.progressionStyle { ud.set(v, forKey: SettingsKey.progressionStyle) }
+            if let v = remote.showPlateMath { ud.set(v, forKey: SettingsKey.showPlateMath) }
+            if let v = remote.maxWarmupSets { ud.set(v, forKey: SettingsKey.maxWarmupSets) }
+
+            if let p = remote.profile {
+                if let v = p.age { ud.set(v, forKey: SettingsKey.age) }
+                if let v = p.sex { ud.set(v, forKey: SettingsKey.sex) }
+                if let v = p.heightIn { ud.set(v, forKey: SettingsKey.heightInches) }
+            }
+
+            if let r = remote.restDurations {
+                if let v = r.upperCompound { ud.set(v, forKey: SettingsKey.upperCompound) }
+                if let v = r.upperIsolation { ud.set(v, forKey: SettingsKey.upperIsolation) }
+                if let v = r.lowerCompound { ud.set(v, forKey: SettingsKey.lowerCompound) }
+                if let v = r.lowerIsolation { ud.set(v, forKey: SettingsKey.lowerIsolation) }
+            }
+
+            if let d = remote.deload {
+                if let v = d.sessions { ud.set(v, forKey: SettingsKey.deloadSessions) }
+                if let v = d.weightPercent { ud.set(v, forKey: SettingsKey.deloadWeightPct) }
+                if let v = d.volumePercent { ud.set(v, forKey: SettingsKey.deloadVolumePct) }
+            }
+
+            if let mw = remote.machineWeights {
+                let keyMap: [String: String] = [
+                    "barbell": SettingsKey.barbellWeight,
+                    "ezBar": SettingsKey.ezBarWeight,
+                    "ezBarRackable": SettingsKey.rackableEZBarWeight,
+                    "safetySquatBar": SettingsKey.ssbWeight,
+                    "trapBar": SettingsKey.trapBarWeight,
+                    "smithMachine": SettingsKey.smithWeight,
+                    "legPress": SettingsKey.legPressWeight,
+                    "hackSquat": SettingsKey.hackSquatWeight,
+                    "tBarRow": SettingsKey.tBarWeight,
+                    "beltSquat": SettingsKey.beltSquatWeight,
+                    "chestPress": SettingsKey.chestPressWeight,
+                    "shoulderPress": SettingsKey.shoulderPressWeight,
+                    "inclinePress": SettingsKey.inclinePressWeight,
+                    "declinePress": SettingsKey.declinePressWeight,
+                    "calfRaise": SettingsKey.calfRaiseWeight,
+                    "seatedRow": SettingsKey.seatedRowWeight,
+                    "latPulldown": SettingsKey.latPulldownWeight,
+                    "pendulumSquat": SettingsKey.pendulumSquatWeight,
+                    "hipThrust": SettingsKey.hipThrustWeight,
+                    "legExtension": SettingsKey.legExtensionWeight,
+                    "legCurl": SettingsKey.legCurlWeight,
+                ]
+                for (webKey, appKey) in keyMap {
+                    if let val = mw[webKey] { ud.set(val, forKey: appKey) }
+                }
+            }
+
+            print("[SettingsSync] Loaded from DB")
+        } catch {
+            print("[SettingsSync] Load error: \(error)")
+        }
+    }
+
+    /// Read all @AppStorage values → build JSON → PUT to backend (debounced 500ms)
+    static func scheduleSave() {
+        saveTask?.cancel()
+        saveTask = Task {
+            try? await Task.sleep(for: .milliseconds(500))
+            guard !Task.isCancelled else { return }
+            await saveToDB()
+        }
+    }
+
+    static func saveToDB() async {
+        let ud = UserDefaults.standard
+
+        let mw: [String: Double] = [
+            "barbell": ud.double(forKey: SettingsKey.barbellWeight),
+            "ezBar": ud.double(forKey: SettingsKey.ezBarWeight),
+            "ezBarRackable": ud.double(forKey: SettingsKey.rackableEZBarWeight),
+            "safetySquatBar": ud.double(forKey: SettingsKey.ssbWeight),
+            "trapBar": ud.double(forKey: SettingsKey.trapBarWeight),
+            "smithMachine": ud.double(forKey: SettingsKey.smithWeight),
+            "legPress": ud.double(forKey: SettingsKey.legPressWeight),
+            "hackSquat": ud.double(forKey: SettingsKey.hackSquatWeight),
+            "tBarRow": ud.double(forKey: SettingsKey.tBarWeight),
+            "beltSquat": ud.double(forKey: SettingsKey.beltSquatWeight),
+            "chestPress": ud.double(forKey: SettingsKey.chestPressWeight),
+            "shoulderPress": ud.double(forKey: SettingsKey.shoulderPressWeight),
+            "inclinePress": ud.double(forKey: SettingsKey.inclinePressWeight),
+            "declinePress": ud.double(forKey: SettingsKey.declinePressWeight),
+            "calfRaise": ud.double(forKey: SettingsKey.calfRaiseWeight),
+            "seatedRow": ud.double(forKey: SettingsKey.seatedRowWeight),
+            "latPulldown": ud.double(forKey: SettingsKey.latPulldownWeight),
+            "pendulumSquat": ud.double(forKey: SettingsKey.pendulumSquatWeight),
+            "hipThrust": ud.double(forKey: SettingsKey.hipThrustWeight),
+            "legExtension": ud.double(forKey: SettingsKey.legExtensionWeight),
+            "legCurl": ud.double(forKey: SettingsKey.legCurlWeight),
+        ]
+
+        let settings = SettingsJSON(
+            weightUnit: ud.string(forKey: SettingsKey.weightUnit) ?? "lbs",
+            heightUnit: ud.string(forKey: SettingsKey.heightUnit) ?? "ft",
+            progressionStyle: ud.string(forKey: SettingsKey.progressionStyle) ?? "rep",
+            showPlateMath: ud.bool(forKey: SettingsKey.showPlateMath),
+            maxWarmupSets: ud.integer(forKey: SettingsKey.maxWarmupSets),
+            profile: .init(
+                age: ud.integer(forKey: SettingsKey.age),
+                sex: ud.string(forKey: SettingsKey.sex) ?? "male",
+                heightIn: ud.double(forKey: SettingsKey.heightInches)
+            ),
+            restDurations: .init(
+                upperCompound: ud.integer(forKey: SettingsKey.upperCompound),
+                upperIsolation: ud.integer(forKey: SettingsKey.upperIsolation),
+                lowerCompound: ud.integer(forKey: SettingsKey.lowerCompound),
+                lowerIsolation: ud.integer(forKey: SettingsKey.lowerIsolation)
+            ),
+            machineWeights: mw,
+            deload: .init(
+                sessions: ud.integer(forKey: SettingsKey.deloadSessions),
+                weightPercent: ud.integer(forKey: SettingsKey.deloadWeightPct),
+                volumePercent: ud.integer(forKey: SettingsKey.deloadVolumePct)
+            )
+        )
+
+        do {
+            let _: SettingsJSON = try await APIClient.shared.put("/auth/settings", body: settings)
+            print("[SettingsSync] Saved to DB")
+        } catch {
+            print("[SettingsSync] Save error: \(error)")
+        }
+    }
+}
+
 // MARK: - SettingsView
 
 struct SettingsView: View {
@@ -110,6 +285,10 @@ struct SettingsView: View {
     @AppStorage(SettingsKey.legExtensionWeight) private var legExtensionWeight: Double = 0
     @AppStorage(SettingsKey.legCurlWeight) private var legCurlWeight: Double = 0
 
+    // Machine display bases (plate math offset) — synced from backend
+    @State private var displayBases: [String: Double] = [:]
+    @State private var saveDebounce: Task<Void, Never>? = nil
+
     // Rest timers
     @AppStorage(SettingsKey.upperCompound) private var upperCompound: Int = 180
     @AppStorage(SettingsKey.upperIsolation) private var upperIsolation: Int = 90
@@ -129,18 +308,14 @@ struct SettingsView: View {
                 profileSection
                 unitsSection
                 bodyWeightSection
-                progressionSection
-                restTimerSection
-                plateMathSection
-                barsSection
-                machinesSection
-                deloadSection
+                workoutSyncSection
                 appleHealthSection
                 accountSection
             }
             .navigationTitle("Settings")
             .task { await loadData() }
             .keyboardDoneButton()
+            .onDisappear { Task { await SettingsSync.saveToDB() } }
             .sheet(isPresented: $showWeighIn) {
                 weighInSheet
             }
@@ -176,6 +351,18 @@ struct SettingsView: View {
             }
 
             heightRow
+
+            // Activity level (#481)
+            Picker("Activity Level", selection: Binding(
+                get: { UserDefaults.standard.double(forKey: "activityLevel") },
+                set: { UserDefaults.standard.set($0, forKey: "activityLevel") }
+            )) {
+                Text("Sedentary (1.0)").tag(1.0)
+                Text("Lightly Active (1.2)").tag(1.2)
+                Text("Moderate (1.4)").tag(1.4)
+                Text("Active (1.6)").tag(1.6)
+                Text("Very Active (1.8)").tag(1.8)
+            }
         }
     }
 
@@ -382,23 +569,28 @@ struct SettingsView: View {
     // MARK: - Machines Section
 
     private var machinesSection: some View {
-        Section("Plate-Loaded Machines (\(weightUnit))") {
-            equipmentRow("Smith Machine", lbsValue: $smithWeight)
-            equipmentRow("Leg Press", lbsValue: $legPressWeight)
-            equipmentRow("Hack Squat", lbsValue: $hackSquatWeight)
-            equipmentRow("T-Bar Row", lbsValue: $tBarWeight)
-            equipmentRow("Belt Squat", lbsValue: $beltSquatWeight)
-            equipmentRow("Chest Press", lbsValue: $chestPressWeight)
-            equipmentRow("Shoulder Press", lbsValue: $shoulderPressWeight)
-            equipmentRow("Incline Press", lbsValue: $inclinePressWeight)
-            equipmentRow("Decline Press", lbsValue: $declinePressWeight)
-            equipmentRow("Calf Raise", lbsValue: $calfRaiseWeight)
-            equipmentRow("Seated Row", lbsValue: $seatedRowWeight)
-            equipmentRow("Lat Pulldown", lbsValue: $latPulldownWeight)
-            equipmentRow("Pendulum Squat", lbsValue: $pendulumSquatWeight)
-            equipmentRow("Hip Thrust Machine", lbsValue: $hipThrustWeight)
-            equipmentRow("Leg Extension", lbsValue: $legExtensionWeight)
-            equipmentRow("Leg Curl", lbsValue: $legCurlWeight)
+        Section {
+            machineRow("Smith Machine", machineKey: "smithMachine", weight: $smithWeight)
+            machineRow("Leg Press", machineKey: "legPress", weight: $legPressWeight)
+            machineRow("Hack Squat", machineKey: "hackSquat", weight: $hackSquatWeight)
+            machineRow("T-Bar Row", machineKey: "tBarRow", weight: $tBarWeight)
+            machineRow("Belt Squat", machineKey: "beltSquat", weight: $beltSquatWeight)
+            machineRow("Chest Press", machineKey: "chestPress", weight: $chestPressWeight)
+            machineRow("Shoulder Press", machineKey: "shoulderPress", weight: $shoulderPressWeight)
+            machineRow("Incline Press", machineKey: "inclinePress", weight: $inclinePressWeight)
+            machineRow("Decline Press", machineKey: "declinePress", weight: $declinePressWeight)
+            machineRow("Calf Raise", machineKey: "calfRaise", weight: $calfRaiseWeight)
+            machineRow("Seated Row", machineKey: "seatedRow", weight: $seatedRowWeight)
+            machineRow("Lat Pulldown", machineKey: "latPulldown", weight: $latPulldownWeight)
+            machineRow("Pendulum Squat", machineKey: "pendulumSquat", weight: $pendulumSquatWeight)
+            machineRow("Hip Thrust Machine", machineKey: "hipThrust", weight: $hipThrustWeight)
+            machineRow("Leg Extension", machineKey: "legExtension", weight: $legExtensionWeight)
+            machineRow("Leg Curl", machineKey: "legCurl", weight: $legCurlWeight)
+        } header: {
+            Text("Plate-Loaded Machines (\(weightUnit))")
+        } footer: {
+            Text("Sled/carriage = actual weight for tracking. Plate math base = weight subtracted for plate calculations (e.g., set to 0 to count all weight as plates).")
+                .font(.caption2)
         }
     }
 
@@ -425,6 +617,35 @@ struct SettingsView: View {
 
     @State private var importingWeight = false
     @State private var importedWeight: String? = nil
+
+    // MARK: - Workout Sync Section
+
+    private var workoutSyncSection: some View {
+        Section {
+            Toggle("Sync workouts to Apple Health",
+                   isOn: Binding(
+                    get: { WorkoutSyncService.shared.isSyncEnabled },
+                    set: { WorkoutSyncService.shared.isSyncEnabled = $0 }
+                   ))
+
+            if let lastSync = WorkoutSyncService.shared.lastSyncDate {
+                HStack {
+                    Text("Last synced")
+                    Spacer()
+                    Text(lastSync, style: .relative)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Button("Sync Now") {
+                Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
+            }
+        } header: {
+            Text("Workout Sync")
+        } footer: {
+            Text("Workouts logged in the web app will appear in Apple Health.")
+        }
+    }
 
     @ViewBuilder
     private var appleHealthSection: some View {
@@ -595,6 +816,50 @@ struct SettingsView: View {
         }
     }
 
+    private func machineRow(_ label: String, machineKey: String, weight: Binding<Double>) -> some View {
+        let weightDisplay = Binding<Double>(
+            get: { weightUnit == "kg" ? weight.wrappedValue * 0.453592 : weight.wrappedValue },
+            set: { weight.wrappedValue = weightUnit == "kg" ? $0 / 0.453592 : $0 }
+        )
+        let baseVal = displayBases[machineKey] ?? weight.wrappedValue
+        let baseDisplay = Binding<Double>(
+            get: { weightUnit == "kg" ? baseVal * 0.453592 : baseVal },
+            set: { saveDisplayBase(machine: machineKey, value: weightUnit == "kg" ? $0 / 0.453592 : $0) }
+        )
+
+        return VStack(spacing: 6) {
+            HStack {
+                Text(label).font(.subheadline)
+                Spacer()
+            }
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Sled weight").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        TextField("0", value: weightDisplay, format: .number.precision(.fractionLength(1)))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 55)
+                        Text(weightUnit).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Plate math base").font(.caption2).foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        TextField("0", value: baseDisplay, format: .number.precision(.fractionLength(1)))
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 55)
+                        Text(weightUnit).font(.caption2).foregroundStyle(.tertiary)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
     private func restRow(_ label: String, value: Binding<Int>) -> some View {
         HStack {
             Text(label)
@@ -655,9 +920,36 @@ struct SettingsView: View {
         }
         loadingWeighIns = false
 
+        // Load all settings from backend (source of truth) → cache in @AppStorage
+        await SettingsSync.loadFromDB()
+
+        // Extract display bases from the loaded machine weights
+        let ud = UserDefaults.standard
+        let mwKeys = ["smithMachine", "legPress", "hackSquat", "tBarRow", "beltSquat",
+                       "chestPress", "shoulderPress", "inclinePress", "declinePress",
+                       "calfRaise", "seatedRow", "latPulldown", "pendulumSquat",
+                       "hipThrust", "legExtension", "legCurl"]
+        do {
+            let remote: SettingsJSON = try await APIClient.shared.get("/auth/settings")
+            if let mw = remote.machineWeights {
+                var bases: [String: Double] = [:]
+                for key in mwKeys {
+                    if let val = mw["\(key)_displayBase"] { bases[key] = val }
+                }
+                displayBases = bases
+            }
+        } catch { /* already loaded above */ }
+
         HealthKitManager.shared.checkAuthorization()
         healthKitAuthorized = HealthKitManager.shared.isAuthorized
     }
+
+    private func saveDisplayBase(machine: String, value: Double) {
+        displayBases[machine] = value
+        // Merge display base into the full settings save
+        SettingsSync.scheduleSave()
+    }
+
 
     private func saveWeighIn() async {
         guard let w = newWeight else { return }

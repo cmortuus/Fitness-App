@@ -70,9 +70,25 @@ class MacroGoal(Base):
     protein: Mapped[float] = mapped_column(Float, nullable=False)
     carbs: Mapped[float] = mapped_column(Float, nullable=False)
     fat: Mapped[float] = mapped_column(Float, nullable=False)
+    water_goal_ml: Mapped[float] = mapped_column(Float, nullable=False, default=2500.0)
     effective_from: Mapped[date_type] = mapped_column(Date, nullable=False)
     micronutrient_goals: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: RDA targets
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+
+class WaterEntry(Base):
+    """A single water intake log entry."""
+
+    __tablename__ = "water_entries"
+    __table_args__ = (Index("ix_water_entries_date", "date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    amount_ml: Mapped[float] = mapped_column(Float, nullable=False)
+    logged_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.utcnow(), nullable=False
     )
 
@@ -169,3 +185,70 @@ class RecipeIngredient(Base):
     fat: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
 
     recipe: Mapped["Recipe"] = relationship(back_populates="ingredients")
+
+
+class TDEEHistory(Base):
+    """Daily adaptive TDEE estimate derived from intake + weight trend data."""
+
+    __tablename__ = "tdee_history"
+    __table_args__ = (Index("ix_tdee_history_user_date", "user_id", "date", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    date: Mapped[date_type] = mapped_column(Date, nullable=False)
+    estimated_tdee: Mapped[float] = mapped_column(Float, nullable=False)
+    intake_calories: Mapped[float | None] = mapped_column(Float, nullable=True)
+    weight_trend_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    confidence: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    method: Mapped[str] = mapped_column(String(20), nullable=False, default="adaptive")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+
+class WeeklyCheckIn(Base):
+    """Automated weekly nutrition review with macro adjustment recommendations."""
+
+    __tablename__ = "weekly_checkins"
+    __table_args__ = (Index("ix_weekly_checkins_user_week", "user_id", "week_start", unique=True),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    week_start: Mapped[date_type] = mapped_column(Date, nullable=False)
+    weight_trend_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    avg_intake: Mapped[float | None] = mapped_column(Float, nullable=True)
+    tdee_estimate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_calories: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_protein: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_carbs: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_fat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    stall_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rate_too_fast: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+
+class MacroCycle(Base):
+    """Per-day macro targets for training vs rest day cycling."""
+
+    __tablename__ = "macro_cycles"
+    __table_args__ = (Index("ix_macro_cycles_user_active", "user_id", "is_active"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    training_calories: Mapped[float] = mapped_column(Float, nullable=False)
+    training_protein: Mapped[float] = mapped_column(Float, nullable=False)
+    training_carbs: Mapped[float] = mapped_column(Float, nullable=False)
+    training_fat: Mapped[float] = mapped_column(Float, nullable=False)
+    rest_calories: Mapped[float] = mapped_column(Float, nullable=False)
+    rest_protein: Mapped[float] = mapped_column(Float, nullable=False)
+    rest_carbs: Mapped[float] = mapped_column(Float, nullable=False)
+    rest_fat: Mapped[float] = mapped_column(Float, nullable=False)
+    effective_from: Mapped[date_type] = mapped_column(Date, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )

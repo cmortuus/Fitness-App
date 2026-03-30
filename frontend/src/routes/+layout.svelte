@@ -7,11 +7,18 @@
   import type { AuthUser } from '$lib/api';
   import { initLocale } from '$lib/i18n';
 
-  const staticNavItems = [
+  // Desktop shows all tabs including nutrition; mobile hides nutrition
+  const desktopNavItems = [
     { path: '/',          label: 'Training',  icon: '🏋️' },
     { path: '/nutrition', label: 'Nutrition', icon: '🍽️' },
     { path: '/settings',  label: 'Settings',  icon: '⚙️' },
   ];
+  const mobileNavItems = [
+    { path: '/',          label: 'Training',  icon: '🏋️' },
+    { path: '/settings',  label: 'Settings',  icon: '⚙️' },
+  ];
+  // Legacy alias for any code referencing staticNavItems
+  const staticNavItems = desktopNavItems;
 
   let { children } = $props<{ children: import('svelte').Snippet }>();
   let authUser = $state<AuthUser | null>(null);
@@ -226,7 +233,7 @@
 
   <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
   <nav aria-label="Mobile navigation" class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
-    {#each staticNavItems as item}
+    {#each mobileNavItems as item}
       <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
         <span class="text-xl leading-none">{item.icon}</span>
         <span class="text-[10px] font-medium">{item.label}</span>

@@ -2,6 +2,14 @@
 export default {
   content: ['./src/**/*.{html,js,svelte,ts}'],
   theme: {
+    screens: {
+      // Override md breakpoint: iPhone 15 Pro is 393px, add buffer
+      'sm': '430px',
+      'md': '430px',
+      'lg': '1024px',
+      'xl': '1280px',
+      '2xl': '1536px',
+    },
     extend: {
       colors: {
         primary: {

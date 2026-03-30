@@ -38,15 +38,18 @@ EQUIPMENT_MAP = {
 
 
 def get_equipment_type(name: str) -> str:
-    """Determine equipment type from exercise name prefix."""
+    """Determine equipment type from exercise name — checks all parts, not just prefix."""
     parts = name.split("_")
-    # Check two-word prefixes first (e.g. t_bar, plate_loaded, safety_squat)
-    if len(parts) >= 2:
-        two_word = f"{parts[0]}_{parts[1]}"
+    # Check two-word combos anywhere in the name (e.g. ez_bar, t_bar, belt_squat)
+    for i in range(len(parts) - 1):
+        two_word = f"{parts[i]}_{parts[i + 1]}"
         if two_word in EQUIPMENT_MAP:
             return EQUIPMENT_MAP[two_word]
-    prefix = parts[0]
-    return EQUIPMENT_MAP.get(prefix, "other")
+    # Check single words anywhere in the name
+    for part in parts:
+        if part in EQUIPMENT_MAP:
+            return EQUIPMENT_MAP[part]
+    return "other"
 
 
 def generate_all_exercises():

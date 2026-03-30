@@ -254,9 +254,6 @@ struct DietPhaseSheet: View {
             )
             onUpdate()
             dismiss()
-        } catch let APIError.httpError(code, body) {
-            errorMessage = body ?? "Server error (\(code))"
-            print("[Phase] Create error: \(code) \(body ?? "")")
         } catch {
             errorMessage = error.localizedDescription
             print("[Phase] Create error: \(error)")

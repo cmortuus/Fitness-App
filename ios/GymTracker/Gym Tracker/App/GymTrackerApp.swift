@@ -10,10 +10,19 @@ struct GymTrackerApp: App {
                 if auth.isAuthenticated {
                     MainTabView()
                         .task {
-                            await HealthKitManager.shared.syncBodyWeightOnLaunch()
+                            // Fire-and-forget — don't block app launch
+                            Task { await SettingsSync.loadFromDB() }
+                            Task { await HealthKitManager.shared.syncBodyWeightOnLaunch() }
+                            Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
                         }
                 } else {
                     LoginView()
+                        .task {
+                            // AUTO-LOGIN FOR UI TESTING — REMOVE BEFORE SHIPPING
+                            #if DEBUG
+                            try? await auth.login(username: "claude_test", password: "TestPass123")
+                            #endif
+                        }
                 }
             }
             .environment(auth)

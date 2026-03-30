@@ -262,7 +262,12 @@ async def sync_session_to_plan(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Sync actual weights/reps from a completed session back to its linked plan template."""
+    """Sync a completed session back to its plan — weights/reps AND structural changes.
+
+    Structural changes synced: added/removed exercises, reordering,
+    set count changes, set type changes. Weight/rep updates use
+    progressive overload values (max weight, most common reps).
+    """
     # Load session and verify ownership + completion
     result = await db.execute(
         select(WorkoutSession).where(
@@ -282,46 +287,42 @@ async def sync_session_to_plan(
             detail="Session must be completed before syncing to plan",
         )
 
-    # If there's no linked plan, nothing to do
     if not session.workout_plan_id:
-        return {"updated": 0}
+        return {"updated": 0, "structural_changes": 0}
 
-    # Load all sets for this session that have actual weight data
-    sets_result = await db.execute(
-        select(ExerciseSet).where(
-            ExerciseSet.workout_session_id == session_id,
-            ExerciseSet.actual_weight_kg.is_not(None),
-        )
+    # Load ALL sets for this session (including those without actual weight)
+    all_sets_result = await db.execute(
+        select(ExerciseSet)
+        .where(ExerciseSet.workout_session_id == session_id)
+        .order_by(ExerciseSet.exercise_id, ExerciseSet.set_number)
     )
-    sets = sets_result.scalars().all()
+    all_sets = all_sets_result.scalars().all()
 
-    if not sets:
-        return {"updated": 0}
+    if not all_sets:
+        return {"updated": 0, "structural_changes": 0}
 
-    # Compute per-exercise: max actual_weight_kg and most common actual_reps
-    exercise_data: dict[int, dict] = {}
-    for s in sets:
+    # Build session exercise list: ordered by first appearance, with set counts and types
+    seen_order: list[int] = []
+    session_exercises: dict[int, dict] = {}
+    for s in all_sets:
         eid = s.exercise_id
-        if eid not in exercise_data:
-            exercise_data[eid] = {"max_weight": 0.0, "reps_counts": {}}
-        if (s.actual_weight_kg or 0.0) > exercise_data[eid]["max_weight"]:
-            exercise_data[eid]["max_weight"] = s.actual_weight_kg
+        if eid not in session_exercises:
+            seen_order.append(eid)
+            session_exercises[eid] = {
+                "set_count": 0,
+                "set_type": s.set_type or "standard",
+                "max_weight": 0.0,
+                "reps_counts": {},
+            }
+        session_exercises[eid]["set_count"] += 1
+        if s.actual_weight_kg is not None:
+            if s.actual_weight_kg > session_exercises[eid]["max_weight"]:
+                session_exercises[eid]["max_weight"] = s.actual_weight_kg
         if s.actual_reps is not None:
-            reps_counts = exercise_data[eid]["reps_counts"]
-            reps_counts[s.actual_reps] = reps_counts.get(s.actual_reps, 0) + 1
+            rc = session_exercises[eid]["reps_counts"]
+            rc[s.actual_reps] = rc.get(s.actual_reps, 0) + 1
 
-    # Resolve most common reps per exercise
-    exercise_updates: dict[int, dict] = {}
-    for eid, data in exercise_data.items():
-        most_common_reps = None
-        if data["reps_counts"]:
-            most_common_reps = max(data["reps_counts"], key=lambda r: data["reps_counts"][r])
-        exercise_updates[eid] = {
-            "starting_weight_kg": data["max_weight"],
-            "reps": most_common_reps,
-        }
-
-    # Load the linked plan (verify ownership)
+    # Load the linked plan
     plan_result = await db.execute(
         select(WorkoutPlan).where(
             WorkoutPlan.id == session.workout_plan_id,
@@ -330,27 +331,87 @@ async def sync_session_to_plan(
     )
     plan = plan_result.scalar_one_or_none()
     if not plan:
-        return {"updated": 0}
+        return {"updated": 0, "structural_changes": 0}
 
-    # Parse and mutate the planned_exercises JSON
     planned = json.loads(plan.planned_exercises) if isinstance(plan.planned_exercises, str) else plan.planned_exercises
-    updated_count = 0
-
     days = planned.get("days", [])
-    for day in days:
-        for exercise in day.get("exercises", []):
-            eid = exercise.get("exercise_id")
-            if eid in exercise_updates:
-                exercise["starting_weight_kg"] = exercise_updates[eid]["starting_weight_kg"]
-                if exercise_updates[eid]["reps"] is not None:
-                    exercise["reps"] = exercise_updates[eid]["reps"]
-                updated_count += 1
 
-    # Save updated plan
+    # Find the matching day by parsing day_name from session name ("Plan - DayName")
+    target_day = None
+    if session.name and " - " in session.name:
+        session_day_name = session.name.split(" - ", 1)[1]
+        target_day = next((d for d in days if d.get("day_name") == session_day_name), None)
+    if target_day is None and days:
+        target_day = days[0]
+    if target_day is None:
+        return {"updated": 0, "structural_changes": 0}
+
+    # Build map of existing plan exercises for this day
+    plan_exercise_map: dict[int, dict] = {}
+    for ex in target_day.get("exercises", []):
+        plan_exercise_map[ex.get("exercise_id")] = ex
+
+    plan_exercise_ids = set(plan_exercise_map.keys())
+    session_exercise_ids = set(seen_order)
+
+    # Rebuild the day's exercise list in session order
+    new_exercises = []
+    updated_count = 0
+    structural_changes = 0
+
+    for eid in seen_order:
+        sdata = session_exercises[eid]
+        most_common_reps = None
+        if sdata["reps_counts"]:
+            most_common_reps = max(sdata["reps_counts"], key=lambda r: sdata["reps_counts"][r])
+
+        if eid in plan_exercise_map:
+            # Existing exercise — update weight/reps and structural fields
+            ex = dict(plan_exercise_map[eid])
+            if sdata["max_weight"] > 0:
+                ex["starting_weight_kg"] = sdata["max_weight"]
+                updated_count += 1
+            if most_common_reps is not None:
+                ex["reps"] = most_common_reps
+            # Structural: set count changed
+            if ex.get("sets") != sdata["set_count"]:
+                ex["sets"] = sdata["set_count"]
+                structural_changes += 1
+            # Structural: set type changed
+            if ex.get("set_type", "standard") != sdata["set_type"]:
+                ex["set_type"] = sdata["set_type"]
+                structural_changes += 1
+            new_exercises.append(ex)
+        else:
+            # New exercise added during session
+            new_exercises.append({
+                "exercise_id": eid,
+                "sets": sdata["set_count"],
+                "reps": most_common_reps or 8,
+                "starting_weight_kg": sdata["max_weight"] if sdata["max_weight"] > 0 else 0.0,
+                "progression_type": "linear",
+                "set_type": sdata["set_type"],
+                "rest_seconds": 90,
+                "notes": None,
+            })
+            structural_changes += 1
+
+    # Count removed exercises
+    removed = plan_exercise_ids - session_exercise_ids
+    structural_changes += len(removed)
+
+    # Check if order changed (comparing exercise IDs in order)
+    old_order = [ex.get("exercise_id") for ex in target_day.get("exercises", [])]
+    new_order = [ex.get("exercise_id") for ex in new_exercises]
+    if old_order != new_order:
+        structural_changes = max(structural_changes, 1)  # ensure at least 1 if reordered
+
+    # Apply changes
+    target_day["exercises"] = new_exercises
     plan.planned_exercises = json.dumps(planned)
     await db.flush()
 
-    return {"updated": updated_count}
+    return {"updated": updated_count, "structural_changes": structural_changes}
 
 
 @router.post("/{session_id}/sets", response_model=SetResponse, status_code=status.HTTP_201_CREATED)

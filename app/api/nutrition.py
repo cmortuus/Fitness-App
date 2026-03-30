@@ -11,17 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
-from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry
+from app.models.body_weight import BodyWeightEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
 from app.models.user import User
-from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate
+from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
+from app.services.expenditure import compute_adaptive_tdee
 
 router = APIRouter()
 
 
 # ── Serializers ───────────────────────────────────────────────────────────────
 
-def serialize_food_item(item: FoodItem) -> dict:
-    return {
+def serialize_food_item(item: FoodItem, submission_count: int | None = None) -> dict:
+    d = {
         "id": item.id,
         "name": item.name,
         "brand": item.brand,
@@ -37,6 +39,9 @@ def serialize_food_item(item: FoodItem) -> dict:
         "is_custom": item.is_custom,
         "micronutrients": json.loads(item.micronutrients) if item.micronutrients else None,
     }
+    if submission_count is not None:
+        d["submission_count"] = submission_count
+    return d
 
 
 def serialize_entry(entry: NutritionEntry) -> dict:
@@ -63,6 +68,7 @@ def serialize_goal(goal: MacroGoal) -> dict:
         "protein": goal.protein,
         "carbs": goal.carbs,
         "fat": goal.fat,
+        "water_goal_ml": getattr(goal, "water_goal_ml", 2500.0),
         "effective_from": goal.effective_from.isoformat(),
         "micronutrient_goals": json.loads(goal.micronutrient_goals) if goal.micronutrient_goals else None,
     }
@@ -71,11 +77,46 @@ def serialize_goal(goal: MacroGoal) -> dict:
 # ── Food search (proxy) ──────────────────────────────────────────────────────
 
 @router.get("/search")
-async def search(q: str = "", page: int = 1) -> list[dict]:
-    """Search Open Food Facts + USDA for foods matching a query."""
+async def search(
+    q: str = "",
+    page: int = 1,
+    user: Annotated[User, Depends(get_current_user)] = None,
+    db: Annotated[AsyncSession, Depends(get_db)] = None,
+) -> list[dict]:
+    """Search local food DB first, then external APIs if needed."""
     if not q.strip():
         return []
-    return await search_foods(q.strip(), page=page)
+
+    query = q.strip()
+    results: list[dict] = []
+
+    # Search local DB first (imported + community + custom foods)
+    if db and user:
+        local_result = await db.execute(
+            select(FoodItem)
+            .where(
+                FoodItem.name.ilike(f"%{query}%"),
+                (FoodItem.source != "pending") | (FoodItem.user_id == user.id),
+            )
+            .order_by(
+                desc(FoodItem.source == "custom"),
+                desc(FoodItem.source == "community"),
+            )
+            .limit(15)
+        )
+        local_foods = local_result.scalars().all()
+        results.extend([serialize_food_item(f) for f in local_foods])
+
+    # Only hit external APIs if local results are sparse
+    if len(results) < 5:
+        external = await search_foods(query, page=page)
+        # Deduplicate against local results by name
+        local_names = {r["name"].lower() for r in results}
+        for item in external:
+            if item["name"].lower() not in local_names:
+                results.append(item)
+
+    return results[:25]
 
 
 @router.get("/barcode/{code}")
@@ -101,7 +142,13 @@ async def barcode_lookup(
     )
     local_food = local_result.scalar_one_or_none()
     if local_food:
-        return serialize_food_item(local_food)
+        sc = None
+        if local_food.source == "pending":
+            cr = await db.execute(
+                select(func.count()).select_from(FoodSubmission).where(FoodSubmission.food_item_id == local_food.id)
+            )
+            sc = cr.scalar_one()
+        return serialize_food_item(local_food, submission_count=sc)
 
     # Fall back to external APIs
     result = await lookup_barcode(code)
@@ -119,12 +166,32 @@ async def list_foods(
     q: str = "",
     limit: int = 50,
 ) -> list[dict]:
-    """List saved foods, optionally filtered by name substring."""
-    stmt = select(FoodItem).where(FoodItem.user_id == user.id).order_by(desc(FoodItem.created_at)).limit(limit)
+    """List saved foods — includes custom foods and pending community submissions by this user."""
+    own_ids = select(FoodItem.id).where(FoodItem.user_id == user.id)
+    submitted_ids = select(FoodSubmission.food_item_id).where(FoodSubmission.user_id == user.id)
+    stmt = (
+        select(FoodItem)
+        .where(FoodItem.id.in_(own_ids.union(submitted_ids)))
+        .order_by(desc(FoodItem.created_at))
+        .limit(limit)
+    )
     if q.strip():
         stmt = stmt.where(FoodItem.name.ilike(f"%{q.strip()}%"))
     result = await db.execute(stmt)
-    return [serialize_food_item(f) for f in result.scalars().all()]
+    foods = result.scalars().all()
+
+    # Enrich pending foods with submission counts
+    pending_ids = [f.id for f in foods if f.source == "pending"]
+    counts: dict[int, int] = {}
+    if pending_ids:
+        count_result = await db.execute(
+            select(FoodSubmission.food_item_id, func.count())
+            .where(FoodSubmission.food_item_id.in_(pending_ids))
+            .group_by(FoodSubmission.food_item_id)
+        )
+        counts = dict(count_result.all())
+
+    return [serialize_food_item(f, submission_count=counts.get(f.id)) for f in foods]
 
 
 @router.post("/foods", status_code=status.HTTP_201_CREATED)
@@ -259,7 +326,7 @@ async def create_community_food(
 
     await db.flush()
     await db.refresh(pending)
-    return serialize_food_item(pending)
+    return serialize_food_item(pending, submission_count=submission_count)
 
 
 @router.delete("/foods/{food_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -338,6 +405,35 @@ async def add_entry(
     return serialize_entry(entry)
 
 
+@router.patch("/entries/{entry_id}")
+async def update_entry(
+    entry_id: int,
+    data: NutritionEntryUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Update a nutrition entry (quantity, macros, or meal)."""
+    result = await db.execute(select(NutritionEntry).where(NutritionEntry.id == entry_id, NutritionEntry.user_id == user.id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+    if data.quantity_g is not None:
+        entry.quantity_g = data.quantity_g
+    if data.calories is not None:
+        entry.calories = data.calories
+    if data.protein is not None:
+        entry.protein = data.protein
+    if data.carbs is not None:
+        entry.carbs = data.carbs
+    if data.fat is not None:
+        entry.fat = data.fat
+    if data.meal is not None:
+        entry.meal = data.meal.value
+    await db.flush()
+    await db.refresh(entry)
+    return serialize_entry(entry)
+
+
 @router.delete("/entries/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_entry(
     entry_id: int,
@@ -351,6 +447,102 @@ async def delete_entry(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
     await db.delete(entry)
     await db.flush()
+
+
+@router.get("/entries/recent")
+async def recent_foods(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 20,
+) -> list[dict]:
+    """Return the user's most recently logged distinct foods."""
+    result = await db.execute(
+        select(NutritionEntry)
+        .where(NutritionEntry.user_id == user.id)
+        .order_by(desc(NutritionEntry.logged_at))
+        .limit(limit * 3)  # fetch extra to deduplicate by name
+    )
+    entries = result.scalars().all()
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for e in entries:
+        key = e.name.lower().strip()
+        if key not in seen:
+            seen.add(key)
+            unique.append(serialize_entry(e))
+        if len(unique) >= limit:
+            break
+    return unique
+
+
+@router.get("/entries/frequent")
+async def frequent_foods(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: int = 20,
+) -> list[dict]:
+    """Return the user's most frequently logged foods."""
+    count_result = await db.execute(
+        select(NutritionEntry.name, func.count().label("times"), func.max(NutritionEntry.logged_at).label("last_logged"))
+        .where(NutritionEntry.user_id == user.id)
+        .group_by(NutritionEntry.name)
+        .order_by(desc("times"))
+        .limit(limit)
+    )
+    rows = count_result.all()
+    if not rows:
+        return []
+
+    names = [r.name for r in rows]
+    entry_result = await db.execute(
+        select(NutritionEntry)
+        .where(NutritionEntry.user_id == user.id, NutritionEntry.name.in_(names))
+        .order_by(desc(NutritionEntry.logged_at))
+    )
+    all_entries = entry_result.scalars().all()
+    latest: dict[str, NutritionEntry] = {}
+    for e in all_entries:
+        if e.name not in latest:
+            latest[e.name] = e
+
+    return [serialize_entry(latest[r.name]) for r in rows if r.name in latest]
+
+
+@router.post("/entries/copy-day")
+async def copy_day(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: date = Query(),
+    to_date: date = Query(),
+) -> dict:
+    """Copy all entries from from_date to to_date."""
+    result = await db.execute(
+        select(NutritionEntry)
+        .where(NutritionEntry.date == from_date, NutritionEntry.user_id == user.id)
+    )
+    source_entries = result.scalars().all()
+    if not source_entries:
+        return {"copied": 0}
+
+    now = datetime.utcnow()
+    for e in source_entries:
+        new_entry = NutritionEntry(
+            user_id=user.id,
+            food_item_id=e.food_item_id,
+            name=e.name,
+            date=to_date,
+            meal=e.meal,
+            quantity_g=e.quantity_g,
+            calories=e.calories,
+            protein=e.protein,
+            carbs=e.carbs,
+            fat=e.fat,
+            micronutrients=e.micronutrients,
+            logged_at=now,
+        )
+        db.add(new_entry)
+    await db.flush()
+    return {"copied": len(source_entries)}
 
 
 # ── Daily summary ─────────────────────────────────────────────────────────────
@@ -407,7 +599,10 @@ async def daily_summary(
             "fat": goal.fat - totals["fat"],
         }
 
-    return {"date": target_date.isoformat(), "totals": totals, "goals": goals, "remaining": remaining, "micronutrient_totals": micro_totals or None}
+    return {
+        "date": target_date.isoformat(), "totals": totals, "goals": goals,
+        "remaining": remaining, "micronutrient_totals": micro_totals or None,
+    }
 
 
 @router.get("/weekly-report")
@@ -545,12 +740,15 @@ async def set_goals(
         goal.carbs = data.carbs
         goal.fat = data.fat
         goal.micronutrient_goals = micro_goals_json
+        if data.water_goal_ml is not None:
+            goal.water_goal_ml = data.water_goal_ml
     else:
         goal = MacroGoal(
             calories=data.calories,
             protein=data.protein,
             carbs=data.carbs,
             fat=data.fat,
+            water_goal_ml=data.water_goal_ml or 2500.0,
             effective_from=effective,
             user_id=user.id,
             micronutrient_goals=micro_goals_json,
@@ -560,3 +758,131 @@ async def set_goals(
     await db.flush()
     await db.refresh(goal)
     return serialize_goal(goal)
+
+
+# ── Water tracking ────────────────────────────────────────────────────────────
+
+@router.get("/water")
+async def get_water(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    date: date = Query(default=None),
+) -> dict:
+    """Get water entries and total for a date."""
+    target_date = date or datetime.utcnow().date()
+    result = await db.execute(
+        select(WaterEntry)
+        .where(WaterEntry.date == target_date, WaterEntry.user_id == user.id)
+        .order_by(WaterEntry.logged_at)
+    )
+    entries = result.scalars().all()
+    total_ml = sum(e.amount_ml for e in entries)
+
+    goal_result = await db.execute(
+        select(MacroGoal)
+        .where(MacroGoal.effective_from <= target_date, MacroGoal.user_id == user.id)
+        .order_by(desc(MacroGoal.effective_from))
+        .limit(1)
+    )
+    goal = goal_result.scalar_one_or_none()
+    water_goal_ml = getattr(goal, "water_goal_ml", 2500.0) if goal else 2500.0
+
+    return {
+        "date": target_date.isoformat(),
+        "total_ml": total_ml,
+        "goal_ml": water_goal_ml,
+        "entries": [{"id": e.id, "amount_ml": e.amount_ml, "logged_at": e.logged_at.isoformat()} for e in entries],
+    }
+
+
+@router.post("/water", status_code=status.HTTP_201_CREATED)
+async def add_water(
+    data: WaterEntryCreate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Log a water entry."""
+    entry = WaterEntry(user_id=user.id, date=data.date, amount_ml=data.amount_ml)
+    db.add(entry)
+    await db.flush()
+    await db.refresh(entry)
+    return {"id": entry.id, "amount_ml": entry.amount_ml, "logged_at": entry.logged_at.isoformat()}
+
+
+@router.delete("/water/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_water(
+    entry_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete a water entry."""
+    result = await db.execute(select(WaterEntry).where(WaterEntry.id == entry_id, WaterEntry.user_id == user.id))
+    entry = result.scalar_one_or_none()
+    if not entry:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Water entry not found")
+    await db.delete(entry)
+    await db.flush()
+
+
+# ── Expenditure (adaptive TDEE) ───────────────────────────────────────────────
+
+@router.get("/expenditure")
+async def get_expenditure(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    days: int = Query(default=90, ge=7, le=365),
+) -> dict:
+    """Return adaptive TDEE history and current estimate."""
+    today = datetime.utcnow().date()
+    start = today - timedelta(days=days)
+
+    # Check for stored TDEE history
+    tdee_result = await db.execute(
+        select(TDEEHistory)
+        .where(TDEEHistory.user_id == user.id, TDEEHistory.date >= start)
+        .order_by(TDEEHistory.date)
+    )
+    history = tdee_result.scalars().all()
+
+    # Compute current TDEE on the fly
+    intake_result = await db.execute(
+        select(NutritionEntry.date, func.sum(NutritionEntry.calories).label("total"))
+        .where(NutritionEntry.user_id == user.id, NutritionEntry.date >= today - timedelta(days=28))
+        .group_by(NutritionEntry.date)
+    )
+    intake_by_date = {row.date: row.total for row in intake_result.all()}
+
+    weight_result = await db.execute(
+        select(BodyWeightEntry)
+        .where(BodyWeightEntry.user_id == user.id, BodyWeightEntry.recorded_at >= datetime.combine(today - timedelta(days=28), datetime.min.time()))
+        .order_by(BodyWeightEntry.recorded_at)
+    )
+    weights = weight_result.scalars().all()
+
+    daily_records = []
+    for i in range(29):
+        d = today - timedelta(days=28) + timedelta(days=i)
+        daily_records.append({
+            "date": d,
+            "intake_calories": intake_by_date.get(d),
+            "weight_kg": next((w.weight_kg for w in weights if w.recorded_at.date() == d), None),
+        })
+
+    current = compute_adaptive_tdee(daily_records)
+
+    return {
+        "current_tdee": current["estimated_tdee"],
+        "confidence": current["confidence"],
+        "method": current["method"],
+        "weight_trend_kg": current["weight_trend_kg"],
+        "history": [
+            {
+                "date": h.date.isoformat(),
+                "estimated_tdee": round(h.estimated_tdee),
+                "intake_calories": round(h.intake_calories) if h.intake_calories else None,
+                "weight_trend_kg": h.weight_trend_kg,
+                "confidence": h.confidence,
+            }
+            for h in history
+        ],
+    }

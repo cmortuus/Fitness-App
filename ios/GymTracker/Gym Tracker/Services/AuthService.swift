@@ -74,29 +74,43 @@ class AuthService {
 
     // MARK: - Refresh
 
+    private var refreshTask: Task<Bool, Never>? = nil
+
     func refreshTokens() async -> Bool {
+        // If a refresh is already in flight, wait for it (no spin-loop)
+        if let existing = refreshTask {
+            return await existing.value
+        }
+
         guard let refresh = refreshToken else { return false }
 
-        struct RefreshRequest: Encodable {
-            let refresh_token: String
-        }
+        // Create a single refresh task — all concurrent callers share it
+        let task = Task<Bool, Never> { @MainActor in
+            struct RefreshRequest: Encodable {
+                let refresh_token: String
+            }
 
-        struct RefreshResponse: Decodable {
-            let access_token: String
-            let refresh_token: String
-        }
+            struct RefreshResponse: Decodable {
+                let access_token: String
+                let refresh_token: String
+            }
 
-        do {
-            let response: RefreshResponse = try await APIClient.shared.post(
-                "/auth/refresh",
-                body: RefreshRequest(refresh_token: refresh)
-            )
-            saveTokens(access: response.access_token, refresh: response.refresh_token)
-            return true
-        } catch {
-            logout()
-            return false
+            do {
+                let response: RefreshResponse = try await APIClient.shared.post(
+                    "/auth/refresh",
+                    body: RefreshRequest(refresh_token: refresh)
+                )
+                saveTokens(access: response.access_token, refresh: response.refresh_token)
+                return true
+            } catch {
+                logout()
+                return false
+            }
         }
+        refreshTask = task
+        let result = await task.value
+        refreshTask = nil
+        return result
     }
 
     // MARK: - Logout

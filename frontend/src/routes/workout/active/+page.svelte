@@ -152,6 +152,7 @@
   let syncToPlan = $state(true);
   let hasLinkedPlan = $state(false);
   let syncCount = $state<number | null>(null);
+  let syncStructural = $state<number | null>(null);
   let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
   let sharing = $state(false);
 
@@ -318,11 +319,12 @@
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
   }
 
-  // Workout clock
+  // Workout clock — only starts on first set completion
   let startedAt = $state<number>(0);
   let elapsed = $state(0);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
   let clockPaused = $state(false);
+  let clockStarted = $state(false);
   let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
@@ -333,13 +335,21 @@
     if (!exercise) return false;
     if (!$settings.showPlateMath) return false;
     if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
-    // Fallback: check name prefix for exercises that haven't been re-seeded yet
+    // Fallback: check name for plate-loaded exercises with wrong equipment_type
     const n = exercise.name?.toLowerCase() ?? '';
-    const prefix = n.split('_')[0];
-    if (['barbell', 'smith', 'tbar', 'belt', 'plate'].includes(prefix)) return true;
-    // Multi-word prefixes and variants
-    if (n.startsWith('t_bar') || n.startsWith('t-bar') || n.includes('t bar') || n.includes('landmine')) return true;
-    if (n.startsWith('plate_loaded')) return true;
+    const d = (exercise.display_name ?? '').toLowerCase();
+    // Smith machine variants
+    if (n.includes('smith') || d.includes('smith')) return true;
+    // EZ bar / curl bar variants (plate-loaded bars)
+    if (n.includes('ez_bar') || n.includes('ez bar') || d.includes('ez bar')) return true;
+    if (n.includes('axle_bar') || d.includes('axle bar')) return true;
+    if (n.includes('swiss_bar') || d.includes('swiss bar')) return true;
+    if (n.includes('rackable') || d.includes('rackable')) return true;
+    // T-bar row / landmine
+    if (n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || d.includes('t-bar') || d.includes('t bar')) return true;
+    if (n.includes('landmine') || d.includes('landmine')) return true;
+    // Belt squat, plate loaded prefix
+    if (n.includes('belt_squat') || n.startsWith('plate_loaded') || d.includes('belt squat')) return true;
     return false;
   }
 
@@ -656,15 +666,21 @@
         });
       }
 
-      startedAt = Date.now();
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
+      // Clock starts on first set completion, not here (#524)
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
       loading = false;
     }
+  }
+
+  function startClockIfNeeded() {
+    if (clockStarted) return;
+    clockStarted = true;
+    startedAt = Date.now();
+    clockInterval = setInterval(() => {
+      elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
   }
 
   async function startFreeSession() {
@@ -689,10 +705,7 @@
       workoutName = sess.name ?? 'Workout';
       currentSession.set(sess);
 
-      startedAt = Date.now();
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
+      // Clock starts on first set completion, not here (#524)
     } catch (e) {
       error = 'Failed to start workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
@@ -1031,6 +1044,7 @@
 
       set.reps = effectiveReps; // sync reps field for drop-off calc
       set.done = true;
+      startClockIfNeeded(); // Start timer on first set completion (#524)
 
       // Sync myo match sets with set 1's final values
       syncMyoMatchSets(ex);
@@ -1657,6 +1671,7 @@
         try {
           const data = await syncSessionToPlan(sessionId);
           syncCount = data.updated;
+          syncStructural = data.structural_changes ?? 0;
         } catch (e) {
           console.error('Failed to sync session to plan:', e);
         }
@@ -1882,6 +1897,15 @@
       set.done = false;
       set.doneLeft = false;
       set.doneRight = false;
+
+      // If no sets are done anymore, reset timer (#528)
+      const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
+      if (!anyDone && clockStarted) {
+        clockStarted = false;
+        elapsed = 0;
+        startedAt = 0;
+        if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
+      }
     } catch (e) {
       console.error('Failed to uncomplete set:', e);
     } finally {
@@ -2107,7 +2131,7 @@
       <!-- Sync result -->
       {#if syncCount !== null}
         <div class="mb-4 flex items-center gap-2 text-sm text-green-400 bg-green-900/20 border border-green-700/40 rounded-lg px-3 py-2">
-          <span>✓ {syncCount} exercise{syncCount !== 1 ? 's' : ''} updated in plan</span>
+          <span>✓ Plan updated{syncCount ? ` — ${syncCount} weight/rep update${syncCount !== 1 ? 's' : ''}` : ''}{syncStructural ? ` — ${syncStructural} structural change${syncStructural !== 1 ? 's' : ''}` : ''}</span>
         </div>
       {/if}
 
@@ -2190,23 +2214,7 @@
           </div>
         </div>
 
-        {#if showCancelConfirm}
-          <div class="flex items-center gap-2 shrink-0">
-            <span class="text-xs text-zinc-400 hidden sm:block">Cancel workout?</span>
-            <button onclick={cancelWorkout} disabled={cancelling}
-                    class="px-3 py-2 bg-red-600 hover:bg-red-500 text-white text-xs font-semibold rounded-xl transition-colors disabled:opacity-50">
-              {cancelling ? 'Cancelling…' : 'Yes, cancel'}
-            </button>
-            <button onclick={() => showCancelConfirm = false}
-                    class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-medium rounded-xl transition-colors">
-              Keep going
-            </button>
-          </div>
-        {:else}
-          <button onclick={() => showCancelConfirm = true}
-                  class="shrink-0 w-8 h-8 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded-lg transition-colors"
-                  title="Cancel workout">✕</button>
-        {/if}
+        <!-- Cancel button removed (#528) — discard via menu if needed -->
       </div>
     </header>
 
@@ -2877,7 +2885,7 @@
               {#if hasLinkedPlan}
                 <label class="flex items-center gap-2 text-sm text-zinc-300 cursor-pointer px-1">
                   <input type="checkbox" bind:checked={syncToPlan} class="rounded" />
-                  Update plan with today's weights & reps
+                  Update plan with today's changes
                 </label>
               {/if}
               <button onclick={doFinish} disabled={finishing}

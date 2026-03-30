@@ -24,80 +24,6 @@ struct Exercise: Codable, Identifiable {
     var category: String? { movement_type }
 }
 
-// MARK: - Workout Plan
-
-struct PlanExerciseEntry: Codable {
-    let exercise_id: Int
-    let exercise_name: String?
-    let sets: Int?
-    let reps: Int?
-    let starting_weight_kg: Double?
-    let set_type: String?
-    let rest_seconds: Int?
-    let notes: String?
-
-    var displayName: String { exercise_name ?? "Exercise #\(exercise_id)" }
-}
-
-struct PlanDay: Codable, Identifiable {
-    var id: Int { day_number }
-    let day_number: Int
-    let day_name: String
-    let exercises: [PlanExerciseEntry]
-}
-
-struct WorkoutPlan: Codable, Identifiable {
-    let id: Int
-    let name: String
-    let days: [PlanDay]?
-    let number_of_days: Int?
-    let description: String?
-    let plan_data: String?
-    let duration_weeks: Int?
-    let current_week: Int?
-    let block_type: String?
-    let auto_progression: Bool?
-    let is_draft: Bool?
-    let is_archived: Bool?
-
-    var dayCount: Int { days?.count ?? number_of_days ?? 0 }
-}
-
-
-/// Generic JSON value for flexible decoding
-enum AnyCodableValue: Codable {
-    case string(String)
-    case int(Int)
-    case double(Double)
-    case bool(Bool)
-    case array([AnyCodableValue])
-    case dictionary([String: AnyCodableValue])
-    case null
-
-    init(from decoder: Decoder) throws {
-        let container = try decoder.singleValueContainer()
-        if let v = try? container.decode(String.self) { self = .string(v) }
-        else if let v = try? container.decode(Int.self) { self = .int(v) }
-        else if let v = try? container.decode(Double.self) { self = .double(v) }
-        else if let v = try? container.decode(Bool.self) { self = .bool(v) }
-        else if let v = try? container.decode([AnyCodableValue].self) { self = .array(v) }
-        else if let v = try? container.decode([String: AnyCodableValue].self) { self = .dictionary(v) }
-        else { self = .null }
-    }
-
-    func encode(to encoder: Encoder) throws {
-        var container = encoder.singleValueContainer()
-        switch self {
-        case .string(let v): try container.encode(v)
-        case .int(let v): try container.encode(v)
-        case .double(let v): try container.encode(v)
-        case .bool(let v): try container.encode(v)
-        case .array(let v): try container.encode(v)
-        case .dictionary(let v): try container.encode(v)
-        case .null: try container.encodeNil()
-        }
-    }
-}
 
 // MARK: - Workout Session
 
@@ -150,28 +76,6 @@ struct SubSet: Codable {
     let type: String?
 }
 
-// MARK: - Create/Update DTOs
-
-struct CreateSetRequest: Encodable {
-    let exercise_id: Int
-    let set_number: Int
-    let planned_reps: Int?
-    let planned_weight_kg: Double?
-    let set_type: String?
-}
-
-struct UpdateSetRequest: Encodable {
-    let actual_reps: Int?
-    let actual_weight_kg: Double?
-    let completed_at: String?
-    let reps_left: Int?
-    let reps_right: Int?
-    let notes: String?
-    let set_type: String?
-    let sub_sets: [SubSet]?
-    let draft_weight_kg: Double?
-    let draft_reps: Int?
-}
 
 // MARK: - Body Weight
 
@@ -195,6 +99,22 @@ struct NutritionEntry: Codable, Identifiable {
     let carbs: Double?
     let fat: Double?
     let quantity_g: Double?
+    let food_item_id: Int?
+    let meal: String?
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        date = try c.decodeIfPresent(String.self, forKey: .date)
+        calories = try c.decodeIfPresent(Double.self, forKey: .calories)
+        protein = try c.decodeIfPresent(Double.self, forKey: .protein)
+        carbs = try c.decodeIfPresent(Double.self, forKey: .carbs)
+        fat = try c.decodeIfPresent(Double.self, forKey: .fat)
+        quantity_g = try c.decodeIfPresent(Double.self, forKey: .quantity_g)
+        food_item_id = try? c.decodeIfPresent(Int.self, forKey: .food_item_id)
+        meal = try? c.decodeIfPresent(String.self, forKey: .meal)
+    }
 }
 
 struct MacroTotals: Codable {
@@ -209,6 +129,7 @@ struct MacroGoals: Codable {
     let protein: Double?
     let carbs: Double?
     let fat: Double?
+    let water_goal_ml: Double?
     // API returns extra fields we can ignore
     let id: Int?
     let effective_from: String?
@@ -220,6 +141,7 @@ struct MacroGoals: Codable {
         self.protein = protein
         self.carbs = carbs
         self.fat = fat
+        self.water_goal_ml = nil
         self.id = nil
         self.effective_from = nil
         self.micronutrient_goals = nil
@@ -231,10 +153,24 @@ struct MacroGoals: Codable {
         protein = try c.decodeIfPresent(Double.self, forKey: .protein)
         carbs = try c.decodeIfPresent(Double.self, forKey: .carbs)
         fat = try c.decodeIfPresent(Double.self, forKey: .fat)
+        water_goal_ml = try c.decodeIfPresent(Double.self, forKey: .water_goal_ml)
         id = try c.decodeIfPresent(Int.self, forKey: .id)
         effective_from = try c.decodeIfPresent(String.self, forKey: .effective_from)
         micronutrient_goals = try c.decodeIfPresent([String: Double].self, forKey: .micronutrient_goals)
     }
+}
+
+struct WaterSummary: Codable {
+    let date: String
+    let total_ml: Double
+    let goal_ml: Double
+    let entries: [WaterEntryItem]
+}
+
+struct WaterEntryItem: Codable, Identifiable {
+    let id: Int
+    let amount_ml: Double
+    let logged_at: String
 }
 
 struct DailySummary: Codable {
@@ -279,99 +215,6 @@ struct PhaseGoals: Codable {
     let fat: Double?
 }
 
-// MARK: - Progress
-
-/// One row from GET /progress/ — one entry per session × exercise
-struct ProgressDataPoint: Codable, Identifiable {
-    var id: String { "\(exercise_id)_\(date)_\(estimated_1rm ?? 0)_\(volume_load ?? 0)" }
-    let exercise_id: Int
-    let exercise_name: String
-    let date: String          // "YYYY-MM-DD"
-    let estimated_1rm: Double?
-    let volume_load: Double?
-    let recommended_weight: Double?
-}
-
-/// GET /progress/recommendations
-struct ProgressRecommendation: Codable, Identifiable {
-    var id: Int { exercise_id }
-    let exercise_id: Int
-    let exercise_name: String
-    let current_weight: Double?
-    let recommended_weight: Double?
-    let reason: String?
-    let confidence: Double?
-}
-
-/// GET /progress/insights (7-day lifestyle insights)
-struct ProgressInsight: Codable {
-    let exercise_id: Int
-    let exercise_name: String
-    let estimated_1rm: Double?
-    let previous_1rm: Double?
-    let trend: String? // up, down, stable
-}
-
-struct PersonalRecord: Codable, Identifiable {
-    var id: Int { exercise_id }
-    let exercise_id: Int
-    let display_name: String?
-    let name: String?
-    let max_weight_kg: Double?
-    let max_reps: Int?
-    let best_1rm_kg: Double?
-    let best_set_weight_kg: Double?
-    let best_set_reps: Int?
-
-    var exerciseName: String { display_name ?? name ?? "Exercise #\(exercise_id)" }
-}
-
-struct VolumeLandmark: Codable, Identifiable {
-    var id: String { muscle }
-    let muscle: String
-    let sets: Int
-    let mev: Int
-    let mav: Int
-    let mrv: Int
-    let status: String // none, below_mev, in_range, above_mav, above_mrv
-}
-
-struct VolumeLandmarksResponse: Codable {
-    let days: Int
-    let muscles: [VolumeLandmark]
-    let total_sets: Int
-}
-
-// MARK: - Workout Templates
-
-struct WorkoutTemplateExercise: Codable {
-    let exercise_id: Int
-    let exercise_name: String?
-    let sets: Int?
-    let reps: Int?
-    let starting_weight_kg: Double?
-    let progression_type: String?
-
-    var displayName: String { exercise_name ?? "Exercise #\(exercise_id)" }
-}
-
-struct WorkoutTemplateDay: Codable {
-    let day_number: Int
-    let day_name: String
-    let exercises: [WorkoutTemplateExercise]
-}
-
-struct WorkoutTemplate: Codable, Identifiable {
-    let id: Int
-    let name: String
-    let split_type: String?
-    let days_per_week: Int?
-    let equipment_tier: String?
-    let description: String?
-    let block_type: String?
-    let exercise_count: Int?
-    let days: [WorkoutTemplateDay]?
-}
 
 // MARK: - Recipe Models
 
@@ -421,3 +264,4 @@ struct RecipeLogBody: Codable {
     let servings: Double
     let meal_type: String
 }
+

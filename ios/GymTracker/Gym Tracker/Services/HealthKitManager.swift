@@ -8,7 +8,9 @@ final class HealthKitManager: @unchecked Sendable {
 
     private let store = HKHealthStore()
 
-    var isAuthorized = false
+    // Protected by MainActor access pattern — only mutated from async functions
+    // called from .task modifiers which run on MainActor
+    private(set) var isAuthorized = false
 
     // MARK: - Types we read/write
 
@@ -211,176 +213,49 @@ final class HealthKitManager: @unchecked Sendable {
     /// - Bodyweight exercises: MET 3.8
     ///
     /// Formula: kcal = MET × bodyWeightKg × durationHours
-    func writeWorkout(
+    /// Write a workout from API session data to HealthKit
+    func writeWorkoutFromAPI(
         name: String,
         startDate: Date,
-        duration: TimeInterval,
-        exercises: [UIExercise],
-        bodyWeightKg: Double
+        endDate: Date,
+        totalCalories: Double,
+        totalSets: Int,
+        totalVolume: Double
     ) async {
         guard isAuthorized else { return }
 
-        let totalCalories = estimateCalories(
-            exercises: exercises,
-            durationSeconds: duration,
-            bodyWeightKg: bodyWeightKg
-        )
-
-        let calorieQuantity = HKQuantity(
-            unit: .kilocalorie(),
-            doubleValue: totalCalories
-        )
+        let calorieQuantity = HKQuantity(unit: .kilocalorie(), doubleValue: totalCalories)
 
         let workout = HKWorkout(
             activityType: .traditionalStrengthTraining,
             start: startDate,
-            end: startDate.addingTimeInterval(duration),
+            end: endDate,
             workoutEvents: nil,
             totalEnergyBurned: calorieQuantity,
             totalDistance: nil,
             metadata: [
                 HKMetadataKeyWorkoutBrandName: "GymTracker",
                 "WorkoutName": name,
-                "TotalSets": exercises.flatMap(\.sets).filter(\.done).count,
-                "TotalVolume": exercises.flatMap(\.sets).filter(\.done).reduce(0.0) { sum, s in
-                    sum + (s.weight ?? 0) * Double(s.reps ?? 0)
-                },
+                "TotalSets": totalSets,
+                "TotalVolumeKg": totalVolume,
             ]
         )
 
         do {
             try await store.save(workout)
 
-            // Also save the active energy burned sample linked to the workout
             let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
             let energySample = HKQuantitySample(
                 type: energyType,
                 quantity: calorieQuantity,
                 start: startDate,
-                end: startDate.addingTimeInterval(duration)
+                end: endDate
             )
             try await store.addSamples([energySample], to: workout)
 
-            print("[HealthKit] Saved workout '\(name)': \(Int(totalCalories)) kcal, \(Int(duration / 60)) min")
+            print("[HealthKit] Synced workout '\(name)': \(Int(totalCalories)) kcal")
         } catch {
             print("[HealthKit] Save workout error: \(error)")
         }
-    }
-
-    // MARK: - Calorie Estimation
-
-    /// Estimate calories burned using MET values from the Compendium of Physical Activities.
-    ///
-    /// The estimation works by:
-    /// 1. Calculating active time per exercise (sets × avg time per set based on exercise type)
-    /// 2. Applying the appropriate MET value based on exercise characteristics
-    /// 3. Adding rest period calories at a resting MET of 1.2
-    ///
-    /// Reference MET values (Ainsworth et al., 2011):
-    /// - 06030: Resistance training, free weights (compound): 6.0
-    /// - 06050: Resistance training, machines: 3.5
-    /// - 02050: Resistance training, bodyweight: 3.8
-    /// - 06010: General weight training: 5.0
-    func estimateCalories(
-        exercises: [UIExercise],
-        durationSeconds: TimeInterval,
-        bodyWeightKg: Double
-    ) -> Double {
-        let hours = durationSeconds / 3600.0
-        guard hours > 0, bodyWeightKg > 0 else { return 0 }
-
-        // If no exercises (shouldn't happen), use general MET
-        guard !exercises.isEmpty else {
-            return 5.0 * bodyWeightKg * hours
-        }
-
-        // Calculate weighted MET based on exercise composition
-        var totalActiveSets = 0
-        var weightedMETSum = 0.0
-
-        for exercise in exercises {
-            let doneSets = exercise.sets.filter(\.done).count
-            guard doneSets > 0 else { continue }
-
-            let met = metForExercise(exercise)
-            weightedMETSum += met * Double(doneSets)
-            totalActiveSets += doneSets
-        }
-
-        guard totalActiveSets > 0 else {
-            return 5.0 * bodyWeightKg * hours
-        }
-
-        // Weighted average MET across all exercises
-        let avgMET = weightedMETSum / Double(totalActiveSets)
-
-        // Estimate active vs rest time
-        // Assume ~40 seconds per working set, rest fills the remaining time
-        let activeSeconds = min(Double(totalActiveSets) * 40.0, durationSeconds * 0.6)
-        let restSeconds = durationSeconds - activeSeconds
-
-        let activeHours = activeSeconds / 3600.0
-        let restHours = restSeconds / 3600.0
-
-        // Active calories (exercise MET) + rest calories (standing rest MET ~1.5)
-        let activeCal = avgMET * bodyWeightKg * activeHours
-        let restCal = 1.5 * bodyWeightKg * restHours
-
-        return max(1, activeCal + restCal)
-    }
-
-    /// Determine MET value for an exercise based on its characteristics.
-    ///
-    /// Uses equipment type, category, and muscle group to assign appropriate MET values:
-    /// - Heavy compound barbell movements: 6.0 MET
-    /// - Dumbbell compound movements: 5.5 MET
-    /// - Machine exercises: 3.5 MET
-    /// - Cable exercises: 4.0 MET
-    /// - Bodyweight exercises: 3.8 MET
-    /// - Isolation free weight: 4.5 MET
-    private func metForExercise(_ exercise: UIExercise) -> Double {
-        let equipment = exercise.equipmentType.lowercased()
-        let category = exercise.category.lowercased()
-        let muscle = exercise.muscleGroup.lowercased()
-
-        // Heavy compound barbell lifts (squat, deadlift, bench, OHP, rows)
-        if equipment == "barbell" && category == "compound" {
-            // Large muscle groups get higher MET
-            if muscle == "legs" || muscle == "back" || muscle == "full body" {
-                return 6.0  // Heavy squats, deadlifts
-            }
-            return 5.5  // Bench press, OHP, barbell rows
-        }
-
-        // Dumbbell compound movements
-        if equipment == "dumbbell" && category == "compound" {
-            return 5.0
-        }
-
-        // Bodyweight exercises
-        if equipment == "bodyweight" || equipment == "body weight" || equipment == "none" {
-            if category == "compound" {
-                return 4.5  // Pull-ups, dips, push-ups
-            }
-            return 3.8  // Bodyweight isolation
-        }
-
-        // Machine exercises
-        if equipment == "machine" || equipment == "smith machine" {
-            return 3.5
-        }
-
-        // Cable exercises
-        if equipment == "cable" {
-            return 4.0
-        }
-
-        // Isolation with free weights
-        if category == "isolation" {
-            return 3.5
-        }
-
-        // Default: general resistance training
-        return 5.0
     }
 }

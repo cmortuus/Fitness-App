@@ -576,6 +576,11 @@
       // Select it for logging
       selectedFood = food;
       selectedQty = srv;
+      if (food.source === 'pending') {
+        ocrError = `Saved! ${food.submission_count ?? 1} verification(s) so far.`;
+      } else if (food.source === 'community') {
+        ocrError = 'Added to community library!';
+      }
       ocrResult = null;
     } catch (e) {
       ocrError = 'Failed to save food. Please try again.';
@@ -1371,7 +1376,14 @@
                 <div class="flex items-center gap-1 rounded-lg hover:bg-zinc-800 transition-colors group">
                   <button onclick={() => { selectedFood = food; selectedQty = food.serving_size_g || 100; }}
                           class="flex-1 text-left px-3 py-2.5">
-                    <p class="text-sm text-white truncate">{food.name}</p>
+                    <p class="text-sm text-white truncate">
+                      {food.name}
+                      {#if food.source === 'pending'}
+                        <span class="text-[10px] ml-1 px-1.5 py-0.5 rounded-full bg-amber-500/15 text-amber-400">Pending{#if food.submission_count} ({food.submission_count}){/if}</span>
+                      {:else if food.source === 'community'}
+                        <span class="text-[10px] ml-1 px-1.5 py-0.5 rounded-full bg-green-500/15 text-green-400">Community</span>
+                      {/if}
+                    </p>
                     <p class="text-xs text-zinc-500">
                       {food.brand ?? 'Custom'}
                       {#if food.calories_per_100g != null}
