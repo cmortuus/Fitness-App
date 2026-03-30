@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { workoutPlans, exercises, settings } from '$lib/stores';
-  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate, getSessions, updatePlanRirOverrides } from '$lib/api';
-  import type { Exercise, WorkoutPlan, WorkoutTemplate, WorkoutSession, PlannedDay, PlanRirOverrides } from '$lib/api';
+  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate, getSessions, updatePlanRirOverrides, getPlanRecommendations } from '$lib/api';
+  import type { Exercise, WorkoutPlan, WorkoutTemplate, WorkoutSession, PlannedDay, PlanRirOverrides, PlanRecommendation } from '$lib/api';
 
   let avgSetDuration = $state(30); // seconds per set from history, default 30s
 
@@ -15,6 +15,9 @@
   let rirPlan = $state<WorkoutPlan | null>(null);
   let rirOverridesDraft = $state<PlanRirOverrides>({ plan: null, muscles: {}, exercises: {} });
   let savingRir = $state(false);
+  let recommendationsByPlan = $state<Record<number, PlanRecommendation[]>>({});
+  let loadingRecommendations = $state<Record<number, boolean>>({});
+  let applyingRecommendation = $state<string | null>(null);
 
   // Templates
   let templates = $state<WorkoutTemplate[]>([]);
@@ -259,6 +262,8 @@
 
   function togglePlan(planId: number) {
     expandedPlan = expandedPlan === planId ? null : planId;
+    if (expandedPlan === planId) return;
+    void loadRecommendations(planId);
   }
 
   function toggleDay(planId: number, dayNum: number) {
@@ -268,6 +273,51 @@
 
   function isDayExpanded(planId: number, dayNum: number): boolean {
     return !!expandedDays[`${planId}-${dayNum}`];
+  }
+
+  async function loadRecommendations(planId: number) {
+    if (recommendationsByPlan[planId] || loadingRecommendations[planId]) return;
+    loadingRecommendations = { ...loadingRecommendations, [planId]: true };
+    try {
+      const recs = await getPlanRecommendations(planId);
+      recommendationsByPlan = { ...recommendationsByPlan, [planId]: recs };
+    } catch {
+      showError('Failed to load plan recommendations.');
+    } finally {
+      loadingRecommendations = { ...loadingRecommendations, [planId]: false };
+    }
+  }
+
+  async function applyRecommendation(plan: WorkoutPlan, recommendation: PlanRecommendation) {
+    const applyKey = `${plan.id}-${recommendation.exercise_id}`;
+    applyingRecommendation = applyKey;
+    try {
+      const nextOverrides = cloneOverrides(plan.rir_overrides);
+      nextOverrides.exercises[String(recommendation.exercise_id)] = recommendation.recommended_rir;
+      let nextPlan = await updatePlanRirOverrides(plan.id, nextOverrides);
+
+      if (recommendation.add_set && recommendation.set_delta > 0) {
+        const nextDays = nextPlan.days.map(day => ({
+          ...day,
+          exercises: day.exercises.map(ex => ex.exercise_id === recommendation.exercise_id
+            ? { ...ex, sets: Math.min((ex.sets ?? 1) + recommendation.set_delta, 12) }
+            : ex
+          ),
+        }));
+        nextPlan = await updatePlan(plan.id, { days: nextDays, number_of_days: nextPlan.number_of_days });
+      }
+
+      localPlans = localPlans.map(existing => existing.id === nextPlan.id ? nextPlan : existing);
+      workoutPlans.set(localPlans);
+      recommendationsByPlan = {
+        ...recommendationsByPlan,
+        [plan.id]: (recommendationsByPlan[plan.id] ?? []).filter(rec => rec.exercise_id !== recommendation.exercise_id),
+      };
+    } catch {
+      showError('Failed to apply recommendation.');
+    } finally {
+      applyingRecommendation = null;
+    }
   }
 </script>
 
@@ -341,6 +391,42 @@
                   {/if}
                 </div>
               {/each}
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <h4 class="text-sm font-semibold text-zinc-300">Recommendations</h4>
+                  {#if loadingRecommendations[plan.id]}
+                    <span class="text-xs text-zinc-500">Loading…</span>
+                  {/if}
+                </div>
+                {#if (recommendationsByPlan[plan.id]?.length ?? 0) > 0}
+                  <div class="space-y-2">
+                    {#each recommendationsByPlan[plan.id] as recommendation}
+                      <div class="rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3">
+                        <div class="flex items-start justify-between gap-3">
+                          <div class="min-w-0">
+                            <p class="text-sm font-medium text-amber-300">{recommendation.exercise_name}</p>
+                            <p class="text-xs text-zinc-300 mt-1">{recommendation.reason}</p>
+                            <p class="text-xs text-zinc-500 mt-1">{recommendation.detail}</p>
+                            <p class="text-[11px] text-zinc-500 mt-2">
+                              Apply: {recommendation.recommended_rir} RIR{recommendation.add_set ? ` and +${recommendation.set_delta} set` : ''}
+                            </p>
+                          </div>
+                          <button
+                            onclick={() => applyRecommendation(plan, recommendation)}
+                            class="btn-primary text-sm shrink-0"
+                            disabled={applyingRecommendation === `${plan.id}-${recommendation.exercise_id}`}
+                          >
+                            {applyingRecommendation === `${plan.id}-${recommendation.exercise_id}` ? 'Applying…' : 'Apply'}
+                          </button>
+                        </div>
+                      </div>
+                    {/each}
+                  </div>
+                {:else if !loadingRecommendations[plan.id]}
+                  <p class="text-xs text-zinc-500">No autoregulation recommendations yet.</p>
+                {/if}
+              </div>
 
               <!-- Actions -->
               <div class="flex items-center gap-2 pt-2 border-t border-zinc-800">

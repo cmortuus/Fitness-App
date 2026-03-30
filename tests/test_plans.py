@@ -112,6 +112,35 @@ class TestPlansCRUD:
         assert data["rir_overrides"]["muscles"]["quadriceps"] == 3
         assert data["rir_overrides"]["exercises"][str(ex["id"])] == 1
 
+    async def test_get_plan_recommendations_flags_low_recovery_low_rir(self, client: AsyncClient):
+        """GET /plans/{id}/recommendations suggests backing off and adding a set when effort is too high."""
+        ex = await create_exercise(client, display_name="Squat", primary_muscles=["quadriceps"], secondary_muscles=["glutes"])
+        plan = await create_plan(client, ex["id"], sets=3, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+        await log_set(client, sess["id"], sess["sets"][0]["id"], 100.0, 8)
+        complete_r = await client.post(f"/api/sessions/{sess['id']}/complete")
+        assert complete_r.status_code == 200, complete_r.text
+        feedback_r = await client.post(
+            f"/api/sessions/{sess['id']}/feedback",
+            json={
+                "exercise_id": ex["id"],
+                "recovery_rating": "poor",
+                "rir": 0,
+                "pump_rating": "good",
+                "suggestion": "ease",
+                "suggestion_detail": "Hold steady — recovery needs time",
+            },
+        )
+        assert feedback_r.status_code == 201, feedback_r.text
+
+        r = await client.get(f"/api/plans/{plan['id']}/recommendations")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert len(data) == 1
+        assert data[0]["type"] == "backoff_rir"
+        assert data[0]["recommended_rir"] == 2
+        assert data[0]["add_set"] is True
+
     async def test_next_workout_defaults_to_first_day(self, client: AsyncClient):
         """GET /plans/next-workout returns day 1 when nothing is completed yet."""
         ex = await create_exercise(client)

@@ -285,6 +285,23 @@ export interface NextWorkoutResolution {
   };
 }
 
+export interface PlanRecommendation {
+  type: 'backoff_rir';
+  exercise_id: number;
+  exercise_name: string;
+  muscle_group: string | null;
+  current_rir: number;
+  recovery_rating: string | null;
+  recommended_rir: number;
+  add_set: boolean;
+  set_delta: number;
+  weekly_sets: number;
+  mav_sets: number;
+  reason: string;
+  detail: string;
+  source_session_id: number;
+}
+
 export interface ProgressMetric {
   exercise_id: number;
   exercise_name: string;
@@ -514,6 +531,11 @@ export async function getNextWorkout(): Promise<NextWorkoutResolution | null> {
 
 export async function getPlan(planId: number): Promise<WorkoutPlan> {
   const response = await api.get(`/plans/${planId}`);
+  return response.data;
+}
+
+export async function getPlanRecommendations(planId: number): Promise<PlanRecommendation[]> {
+  const response = await api.get(`/plans/${planId}/recommendations`);
   return response.data;
 }
 
