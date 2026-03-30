@@ -31,10 +31,14 @@
     loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
   );
 
+  let hasActiveCurrentSession = $derived(
+    !!$currentSession && ($currentSession.status === 'in_progress' || !!$currentSession.started_at)
+  );
+
   // Keep the global nextWorkoutUrl store in sync so the bottom nav Workout
   // tab deep-links straight to the right plan + day.
   $effect(() => {
-    if ($currentSession) {
+    if (hasActiveCurrentSession) {
       nextWorkoutUrl.set('/workout/active');
     } else if (nextWorkout && !nextWorkout.isComplete) {
       nextWorkoutUrl.set(`/workout/active?plan=${nextWorkout.plan.id}&day=${nextWorkout.day.day_number}`);
@@ -581,7 +585,7 @@
 
   {:else if widget.id === 'nextWorkout'}
   <!-- ── Next / Active workout hero ─────────────────────────────────── -->
-  {#if $currentSession}
+  {#if hasActiveCurrentSession}
     <a href="/workout/active"
        class="block rounded-2xl overflow-hidden border border-primary-500/40 hover:border-primary-400/60 transition-all group"
        style="background: linear-gradient(135deg, rgba(37,99,235,0.2), rgba(139,92,246,0.1));">
