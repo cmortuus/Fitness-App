@@ -2,9 +2,9 @@
   import { onMount } from 'svelte';
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import type { DashboardWidget } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, getNextWorkout, getProgress, saveSettings } from '$lib/api';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, getNextWorkout, getProgress, getExercises } from '$lib/api';
   import { daysAgoLocalDateString, localDateString } from '$lib/date';
-  import type { DailySummary, Insight, NextWorkoutResolution, ProgressMetric, WorkoutSession } from '$lib/api';
+  import type { DailySummary, Exercise, Insight, NextWorkoutResolution, ProgressMetric, WorkoutSession } from '$lib/api';
 
   const KG_TO_LBS = 2.20462;
   function volDisplay(kg: number): number {
@@ -25,6 +25,7 @@
   let nutritionSummary = $state<DailySummary | null>(null);
   let insights = $state<Insight[]>([]);
   let progressMetrics = $state<ProgressMetric[]>([]);
+  let allExercises = $state<Exercise[]>([]);
   let nextWorkout = $state<NextWorkoutResolution | null>(null);
   let showNextWorkoutInspector = $state(false);
 
@@ -66,13 +67,14 @@
 
   onMount(async () => {
     try {
-      const [sessions, plans, next, nutrition, insightData, progress] = await Promise.all([
+      const [sessions, plans, next, nutrition, insightData, progress, exercises] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
         getNextWorkout().catch(() => null),
         getDailySummary(localDateString()).catch(() => null),
         getInsights().catch(() => []),
         getProgress({ start_date: daysAgoLocalDateString(90), end_date: localDateString() }).catch(() => []),
+        getExercises().catch(() => []),
       ]);
       allSessions = sessions;
       reconcileCurrentSession(sessions);
@@ -81,6 +83,7 @@
       nutritionSummary = nutrition;
       insights = insightData;
       progressMetrics = progress;
+      allExercises = exercises;
     } catch (e) {
       console.error('Failed to load dashboard:', e);
     } finally {
@@ -236,6 +239,43 @@
       .sort((a, b) => b.points - a.points || b.latest - a.latest)
       .slice(0, 4);
   });
+  let progressMetricsByExerciseId = $derived.by(() => {
+    const grouped = new Map<number, ProgressMetric[]>();
+    for (const metric of progressMetrics) {
+      if (!metric.estimated_1rm || metric.estimated_1rm <= 0) continue;
+      if (!grouped.has(metric.exercise_id)) grouped.set(metric.exercise_id, []);
+      grouped.get(metric.exercise_id)!.push(metric);
+    }
+    return grouped;
+  });
+
+  function buildMiniGraphCard(widget: DashboardWidget) {
+    if (widget.exerciseId == null) return null;
+    const points = progressMetricsByExerciseId.get(widget.exerciseId);
+    if (!points || points.length < 2) return null;
+    const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+    const values = sorted.map((point) => point.estimated_1rm ?? 0);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = Math.max(max - min, 1);
+    const width = 96;
+    const height = 32;
+    const path = sorted
+      .map((point, index) => {
+        const x = sorted.length === 1 ? width / 2 : (index / (sorted.length - 1)) * width;
+        const y = height - (((point.estimated_1rm ?? min) - min) / range) * height;
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+    const latest = sorted[sorted.length - 1].estimated_1rm ?? 0;
+    const first = sorted[0].estimated_1rm ?? 0;
+    return {
+      exerciseName: widget.exerciseName ?? sorted[sorted.length - 1].exercise_name,
+      latest,
+      change: latest - first,
+      path,
+    };
+  }
   let nextWorkoutInspectorSessions = $derived(
     (() => {
       const activeNextWorkout = nextWorkout;
@@ -259,6 +299,7 @@
   const WIDGET_LABELS: Record<string, string> = {
     stats: 'Quick Stats',
     nextWorkout: 'Next Workout',
+    nextWorkoutInspector: 'Workout Inspector',
     nutrition: 'Nutrition',
     insights: 'Insights',
     calendar: 'Calendar',
@@ -274,6 +315,8 @@
   // ── Inline calculator state ────────────────────────────────────────
   let calcWeight = $state<number | null>(null);
   let calcReps = $state<number | null>(null);
+  let addPanelType = $state<'widget' | 'miniGraph'>('widget');
+  let miniGraphSearch = $state('');
   let calcResult = $derived(
     calcWeight && calcReps && calcReps > 0
       ? Math.round(calcWeight * (1 + calcReps / 30))
@@ -300,8 +343,52 @@
     showAddPanel = false;
   }
 
+  function createMiniGraphWidget(exercise: Exercise) {
+    const widgets = [...($settings.dashboardWidgets ?? [])];
+    const idx = widgets.findIndex(
+      (widget) => widget.type === 'miniGraph' && widget.exerciseId === exercise.id
+    );
+    if (idx >= 0) {
+      widgets[idx] = { ...widgets[idx], enabled: true };
+    } else {
+      widgets.push({
+        id: `miniGraph:${exercise.id}`,
+        enabled: true,
+        type: 'miniGraph',
+        exerciseId: exercise.id,
+        exerciseName: exercise.display_name || exercise.name,
+      });
+    }
+    settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+    miniGraphSearch = '';
+    showAddPanel = false;
+  }
+
   let orderedWidgets = $derived($settings.dashboardWidgets ?? []);
-  let hiddenWidgets = $derived(orderedWidgets.filter(w => !w.enabled && !REQUIRED_WIDGETS.has(w.id)));
+  let hiddenWidgets = $derived(
+    orderedWidgets.filter(w => w.type !== 'miniGraph' && !w.enabled && !REQUIRED_WIDGETS.has(w.id))
+  );
+  let filteredMiniGraphExercises = $derived.by(() => {
+    const query = miniGraphSearch.trim().toLowerCase();
+    const selectedExerciseIds = new Set(
+      orderedWidgets
+        .filter((widget) => widget.type === 'miniGraph' && widget.enabled && widget.exerciseId != null)
+        .map((widget) => widget.exerciseId)
+    );
+    return allExercises
+      .filter((exercise) => !selectedExerciseIds.has(exercise.id))
+      .filter((exercise) => {
+        if (!query) return true;
+        const searchValues = [
+          exercise.display_name,
+          exercise.name,
+          ...exercise.primary_muscles,
+          ...exercise.secondary_muscles,
+        ].map((value) => value.toLowerCase());
+        return searchValues.some((value) => value.includes(query));
+      })
+      .slice(0, 8);
+  });
 
   // Long-press to enter edit mode
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -466,7 +553,7 @@
     <div class="flex items-center justify-between sticky top-0 z-40 bg-zinc-950/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-zinc-800">
       <span class="text-sm font-semibold text-zinc-300">Editing Dashboard</span>
       <div class="flex items-center gap-3">
-        {#if hiddenWidgets.length > 0}
+        {#if hiddenWidgets.length > 0 || allExercises.length > 0}
           <button onclick={() => showAddPanel = !showAddPanel}
                   class="w-8 h-8 rounded-full bg-primary-600 text-white flex items-center justify-center text-lg font-bold hover:bg-primary-500 transition-colors">+</button>
         {/if}
@@ -476,18 +563,57 @@
     </div>
 
     <!-- Add widget panel -->
-    {#if showAddPanel && hiddenWidgets.length > 0}
+    {#if showAddPanel}
       <div class="card border border-zinc-700 add-widget-panel">
         <p class="text-xs text-zinc-500 mb-2">Add widgets</p>
-        <div class="space-y-1">
-          {#each hiddenWidgets as widget}
-            <button onclick={() => addWidget(widget.id)}
-                    class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
-              <span class="text-green-400 text-lg">+</span>
-              <span class="text-sm text-zinc-300">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
-            </button>
-          {/each}
+        <div class="flex gap-2 mb-3">
+          <select bind:value={addPanelType} class="input !py-2 text-sm flex-1">
+            <option value="widget">Widgets</option>
+            <option value="miniGraph">Mini Graphs</option>
+          </select>
+          <input
+            type="text"
+            bind:value={miniGraphSearch}
+            placeholder={addPanelType === 'miniGraph' ? 'Search movements…' : 'Select mini graphs'}
+            class="input !py-2 text-sm flex-[2]"
+            disabled={addPanelType !== 'miniGraph'}
+          />
         </div>
+
+        {#if addPanelType === 'widget'}
+          <div class="space-y-1">
+            {#if hiddenWidgets.length > 0}
+              {#each hiddenWidgets as widget}
+                <button onclick={() => addWidget(widget.id)}
+                        class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
+                  <span class="text-green-400 text-lg">+</span>
+                  <span class="text-sm text-zinc-300">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
+                </button>
+              {/each}
+            {:else}
+              <p class="text-sm text-zinc-500 px-1 py-2">No hidden standard widgets.</p>
+            {/if}
+          </div>
+        {:else}
+          <div class="space-y-1">
+            {#if filteredMiniGraphExercises.length > 0}
+              {#each filteredMiniGraphExercises as exercise}
+                <button onclick={() => createMiniGraphWidget(exercise)}
+                        class="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
+                  <div class="min-w-0">
+                    <p class="text-sm text-zinc-300 truncate">{exercise.display_name || exercise.name}</p>
+                    <p class="text-xs text-zinc-500 truncate">{exercise.primary_muscles.join(', ')}</p>
+                  </div>
+                  <span class="text-green-400 text-lg shrink-0">+</span>
+                </button>
+              {/each}
+            {:else}
+              <p class="text-sm text-zinc-500 px-1 py-2">
+                {miniGraphSearch ? 'No matching movements.' : 'All movements are already added.'}
+              </p>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -698,7 +824,19 @@
       </div>
     </a>
 
-    <div class="mt-3 card !py-3">
+  {/if}
+
+  {#if !nextWorkout && !$currentSession}
+    <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
+      <p class="text-4xl mb-3">💪</p>
+      <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
+      <a href="/plans/create" class="btn-primary">Create a Plan</a>
+    </div>
+  {/if}
+
+  {:else if widget.id === 'nextWorkoutInspector'}
+  {#if nextWorkout}
+    <div class="card !py-3">
       <button
         onclick={() => showNextWorkoutInspector = !showNextWorkoutInspector}
         class="w-full flex items-center justify-between text-left"
@@ -758,15 +896,6 @@
           </div>
         </div>
       {/if}
-    </div>
-
-  {/if}
-
-  {#if !nextWorkout && !$currentSession}
-    <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
-      <p class="text-4xl mb-3">💪</p>
-      <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
-      <a href="/plans/create" class="btn-primary">Create a Plan</a>
     </div>
   {/if}
 
@@ -969,6 +1098,42 @@
           <p class="text-sm font-semibold text-rose-400 mt-0.5">1RM →</p>
         </a>
       </div>
+    {/if}
+  </div>
+
+  {:else if widget.type === 'miniGraph'}
+  {@const miniGraphCard = buildMiniGraphCard(widget)}
+  <div class="card">
+    <div class="flex items-center justify-between mb-3 gap-3">
+      <div class="min-w-0">
+        <p class="text-xs text-zinc-500 uppercase tracking-wide">Mini Graph</p>
+        <h3 class="font-semibold text-zinc-200 truncate">{widget.exerciseName ?? 'Exercise'}</h3>
+      </div>
+      <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors shrink-0">
+        Full Progress →
+      </a>
+    </div>
+    {#if miniGraphCard}
+      <a href="/progress" class="block bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs text-zinc-500 truncate">Estimated 1RM</p>
+            <p class="text-lg font-semibold text-green-400 mt-0.5">
+              {weightDisplay(miniGraphCard.latest)} {$settings.weightUnit}
+            </p>
+            <p class="text-[10px] {miniGraphCard.change >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+              {miniGraphCard.change >= 0 ? '+' : ''}{weightDisplay(miniGraphCard.change)} {$settings.weightUnit}
+            </p>
+          </div>
+          <svg viewBox="0 0 96 32" class="w-24 h-8 shrink-0">
+            <path d={miniGraphCard.path} fill="none" stroke="currentColor" stroke-width="2" class="text-primary-400" stroke-linecap="round" />
+          </svg>
+        </div>
+      </a>
+    {:else}
+      <a href="/progress" class="block bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-sm text-zinc-400">Not enough progress data yet for this movement.</p>
+      </a>
     {/if}
   </div>
 
