@@ -91,37 +91,58 @@
 </script>
 
 {#if plates.length > 0}
-  <!-- Horizontal barbell view -->
-  <div class="flex items-center gap-0.5 justify-center mt-0.5">
-    <!-- Left bar end -->
-    <div style="width: 10px; height: 4px; background: #52525b; border-radius: 1px 0 0 1px;"></div>
-    <!-- Left side: smallest outside, biggest near bar -->
-    {#each [...plates].reverse() as plate}
-      {#each Array(plate.count) as _}
-        <div
-          style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
-          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-        ></div>
+  {#if oneSided}
+    <!-- Single-pin vertical view (T-bar row, landmine) -->
+    <div class="flex items-end gap-0.5 justify-center mt-0.5">
+      <!-- Vertical post -->
+      <div style="width: 6px; height: 3.5rem; background: #52525b; border-radius: 1px 1px 0 0;"></div>
+      <!-- Collar -->
+      <div style="width: 10px; height: 8px; background: #71717a; border-radius: 1px; align-self: flex-end; margin-left: -2px; margin-right: 2px;"></div>
+      <!-- Plates stacked horizontally from post outward -->
+      {#each plates as plate}
+        {#each Array(plate.count) as _}
+          <div
+            style="width: 6px; height: {plate.height}; background: {plate.color}; border-radius: 1px; align-self: flex-end;"
+            title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+          ></div>
+        {/each}
       {/each}
-    {/each}
-    <!-- Sleeve -->
-    <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
-    <!-- Bar -->
-    <div style="width: 30px; height: 4px; background: #52525b; border-radius: 1px;"></div>
-    <!-- Sleeve -->
-    <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
-    <!-- Right side: biggest near bar, smallest outside -->
-    {#each plates as plate}
-      {#each Array(plate.count) as _}
-        <div
-          style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
-          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-        ></div>
+      <!-- Pin end cap -->
+      <div style="width: 4px; height: 10px; background: #3f3f46; border-radius: 0 2px 2px 0; align-self: flex-end;"></div>
+    </div>
+  {:else}
+    <!-- Horizontal barbell view -->
+    <div class="flex items-center gap-0.5 justify-center mt-0.5">
+      <!-- Left bar end -->
+      <div style="width: 10px; height: 4px; background: #52525b; border-radius: 1px 0 0 1px;"></div>
+      <!-- Left side: smallest outside, biggest near bar -->
+      {#each [...plates].reverse() as plate}
+        {#each Array(plate.count) as _}
+          <div
+            style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
+            title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+          ></div>
+        {/each}
       {/each}
-    {/each}
-    <!-- Right bar end -->
-    <div style="width: 10px; height: 4px; background: #52525b; border-radius: 0 1px 1px 0;"></div>
-  </div>
+      <!-- Sleeve -->
+      <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
+      <!-- Bar -->
+      <div style="width: 30px; height: 4px; background: #52525b; border-radius: 1px;"></div>
+      <!-- Sleeve -->
+      <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
+      <!-- Right side: biggest near bar, smallest outside -->
+      {#each plates as plate}
+        {#each Array(plate.count) as _}
+          <div
+            style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
+            title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+          ></div>
+        {/each}
+      {/each}
+      <!-- Right bar end -->
+      <div style="width: 10px; height: 4px; background: #52525b; border-radius: 0 1px 1px 0;"></div>
+    </div>
+  {/if}
   <p class="text-[9px] text-zinc-500 text-center">
     {plates.map(p => `${p.count}×${p.weight}`).join(' + ')} {oneSided ? '' : '/side'}
   </p>
@@ -136,7 +157,9 @@
       {#if plateDelta.add.length > 0}
         <span class="text-green-400">+{plateDelta.add.join(', ')}</span>
       {/if}
-      <span class="text-zinc-600"> /side</span>
+      {#if !oneSided}
+        <span class="text-zinc-600"> /side</span>
+      {/if}
     </p>
   {/if}
 {/if}
