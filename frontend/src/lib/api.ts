@@ -217,6 +217,18 @@ export interface WorkoutSession {
   sets: Set[];
 }
 
+export interface WorkoutSessionAuditEntry {
+  id: number;
+  workout_session_id: number;
+  from_status: string | null;
+  to_status: string | null;
+  reason: string;
+  endpoint: string;
+  actor_username: string | null;
+  source_device: string | null;
+  created_at: string;
+}
+
 export interface PlannedExercise {
   exercise_id: number;
   sets: number;
@@ -330,6 +342,11 @@ export async function completeSession(sessionId: number): Promise<WorkoutSession
 
 export async function resetSessionToPlanned(sessionId: number): Promise<WorkoutSession> {
   const response = await api.post(`/sessions/${sessionId}/reset-to-planned`);
+  return response.data;
+}
+
+export async function getSessionAudit(sessionId: number): Promise<WorkoutSessionAuditEntry[]> {
+  const response = await api.get(`/sessions/${sessionId}/audit`);
   return response.data;
 }
 

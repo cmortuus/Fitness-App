@@ -5,7 +5,7 @@ from app.models.exercise_note import ExerciseNote
 from app.models.nutrition import DietPhase, FoodItem, MacroGoal, NutritionEntry, Recipe, RecipeIngredient
 from app.models.template import WorkoutTemplate
 from app.models.user import User
-from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
+from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutSessionAudit, WorkoutStatus
 
 __all__ = [
     "BodyWeightEntry",
@@ -22,5 +22,6 @@ __all__ = [
     "ExerciseSet",
     "WorkoutPlan",
     "WorkoutSession",
+    "WorkoutSessionAudit",
     "WorkoutStatus",
 ]
