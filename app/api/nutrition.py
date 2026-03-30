@@ -357,7 +357,7 @@ async def list_entries(
     result = await db.execute(
         select(NutritionEntry)
         .where(NutritionEntry.date == target_date, NutritionEntry.user_id == user.id)
-        .order_by(NutritionEntry.logged_at)
+        .order_by(desc(NutritionEntry.logged_at), desc(NutritionEntry.id))
     )
     entries = result.scalars().all()
 
