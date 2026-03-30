@@ -548,15 +548,16 @@ async def delete_set(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a set from a workout session."""
-    # Verify session belongs to user
     sess_result = await db.execute(
         select(WorkoutSession).where(WorkoutSession.id == session_id, WorkoutSession.user_id == user.id)
     )
-    if not sess_result.scalar_one_or_none():
+    session = sess_result.scalar_one_or_none()
+    if not session:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workout session {session_id} not found",
         )
+
     result = await db.execute(
         select(ExerciseSet).where(
             ExerciseSet.id == set_id,
@@ -571,19 +572,14 @@ async def delete_set(
         )
     await db.delete(exercise_set)
 
-    session_result = await db.execute(
-        select(WorkoutSession).where(WorkoutSession.id == session_id)
-    )
-    session = session_result.scalar_one_or_none()
-    if session:
-        remaining_result = await db.execute(
-            select(ExerciseSet).where(
-                ExerciseSet.workout_session_id == session_id,
-                ExerciseSet.id != set_id,
-            )
+    remaining_result = await db.execute(
+        select(ExerciseSet).where(
+            ExerciseSet.workout_session_id == session_id,
+            ExerciseSet.id != set_id,
         )
-        remaining = remaining_result.scalars().all()
-        await _sync_session_totals_and_status(db, session, all_sets=remaining)
+    )
+    remaining = remaining_result.scalars().all()
+    await _sync_session_totals_and_status(db, session, all_sets=remaining)
 
     await db.flush()
 
