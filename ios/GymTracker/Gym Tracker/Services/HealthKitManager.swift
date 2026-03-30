@@ -255,25 +255,17 @@ final class HealthKitManager: @unchecked Sendable {
 
         let calorieQuantity = HKQuantity(unit: .kilocalorie(), doubleValue: totalCalories)
 
-        let workout = HKWorkout(
-            activityType: .traditionalStrengthTraining,
-            start: startDate,
-            end: endDate,
-            workoutEvents: nil,
-            totalEnergyBurned: calorieQuantity,
-            totalDistance: nil,
-            metadata: [
-                HKMetadataKeyWorkoutBrandName: "GymTracker",
-                "WorkoutName": name,
-                "TotalSets": totalSets,
-                "TotalVolumeKg": totalVolume,
-            ]
-        )
+        let config = HKWorkoutConfiguration()
+        config.activityType = .traditionalStrengthTraining
+
+        let builder = HKWorkoutBuilder(healthStore: store, configuration: config, device: nil)
 
         do {
             print("[HealthKit] Saving workout session \(sessionId.map(String.init) ?? "?") '\(name)' start=\(startDate) end=\(endDate) totalSets=\(totalSets) totalVolumeKg=\(totalVolume)")
-            try await store.save(workout)
 
+            try await builder.beginCollection(at: startDate)
+
+            // Add only the calorie sample — no heart rate samples attached
             let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
             let energySample = HKQuantitySample(
                 type: energyType,
@@ -281,7 +273,19 @@ final class HealthKitManager: @unchecked Sendable {
                 start: startDate,
                 end: endDate
             )
-            try await store.addSamples([energySample], to: workout)
+            try await builder.addSamples([energySample])
+
+            try await builder.endCollection(at: endDate)
+
+            // Add metadata before finishing
+            try await builder.addMetadata([
+                HKMetadataKeyWorkoutBrandName: "GymTracker",
+                "WorkoutName": name,
+                "TotalSets": totalSets,
+                "TotalVolumeKg": totalVolume,
+            ])
+
+            try await builder.finishWorkout()
 
             print("[HealthKit] Synced workout session \(sessionId.map(String.init) ?? "?") '\(name)': \(Int(totalCalories)) kcal")
             return true
