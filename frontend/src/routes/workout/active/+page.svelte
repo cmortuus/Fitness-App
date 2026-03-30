@@ -2312,8 +2312,8 @@
 
 <!-- ─── Finished screen ────────────────────────────────────────────────── -->
 {:else if finished}
-  <div class="flex items-center justify-center flex-1 p-4">
-    <div class="card max-w-lg w-full" bind:this={summaryCardEl}>
+  <div class="flex-1 overflow-y-auto px-4 py-4">
+    <div class="card max-w-lg w-full mx-auto mb-8" bind:this={summaryCardEl}>
       <div class="text-center mb-6">
         <div class="text-6xl mb-3">🎉</div>
         <h2 class="text-3xl font-bold">Workout done!</h2>
