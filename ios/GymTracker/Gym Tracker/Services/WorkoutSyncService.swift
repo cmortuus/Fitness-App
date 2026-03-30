@@ -7,6 +7,22 @@ class WorkoutSyncService {
     static let shared = WorkoutSyncService()
 
     private let syncedKey = "healthkit_synced_session_ids"
+    private static let apiDateFormatterWithFractionalSeconds: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSS"
+        return formatter
+    }()
+    private static let apiDateFormatterWithoutFractionalSeconds: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        return formatter
+    }()
 
     private var syncedIds: Set<Int> {
         get { Set(UserDefaults.standard.array(forKey: syncedKey) as? [Int] ?? []) }
@@ -34,14 +50,16 @@ class WorkoutSyncService {
             print("[WorkoutSync] Skipping sync because workout sync is disabled")
             return
         }
-        var authorized = HealthKitManager.shared.isAuthorized
-        print("[WorkoutSync] Starting recent workout sync. authorized=\(authorized) cachedSyncedCount=\(syncedIds.count)")
+        HealthKitManager.shared.checkAuthorization()
+        var authorized = HealthKitManager.shared.canWriteWorkouts
+        print("[WorkoutSync] Starting recent workout sync. canWriteWorkouts=\(authorized) cachedSyncedCount=\(syncedIds.count)")
         if !authorized {
             print("[WorkoutSync] Requesting HealthKit authorization before workout sync")
-            authorized = await HealthKitManager.shared.requestAuthorization()
+            _ = await HealthKitManager.shared.requestAuthorization()
+            authorized = HealthKitManager.shared.canWriteWorkouts
         }
         guard authorized else {
-            print("[WorkoutSync] Aborting sync because HealthKit authorization was not granted")
+            print("[WorkoutSync] Aborting sync because workout write authorization was not granted")
             return
         }
 
@@ -74,19 +92,14 @@ class WorkoutSyncService {
     }
 
     private func writeSessionToHealthKit(_ session: WorkoutSession) async -> Bool {
-        // Parse dates
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let isoBasic = ISO8601DateFormatter()
-
         guard let startStr = session.started_at,
-              let start = iso.date(from: startStr) ?? isoBasic.date(from: startStr) else {
+              let start = Self.parseAPITimestamp(startStr) else {
             print("[WorkoutSync] Skipping session \(session.id) '\(session.name ?? "Workout")' because started_at is missing or unparsable: \(session.started_at ?? "nil")")
             return false
         }
         let end: Date
         if let endStr = session.completed_at,
-           let parsed = iso.date(from: endStr) ?? isoBasic.date(from: endStr) {
+           let parsed = Self.parseAPITimestamp(endStr) {
             end = parsed
         } else {
             print("[WorkoutSync] Session \(session.id) '\(session.name ?? "Workout")' has missing/unparsable completed_at (\(session.completed_at ?? "nil")); defaulting end time to +1 hour")
@@ -111,5 +124,22 @@ class WorkoutSyncService {
             totalSets: totalSets,
             totalVolume: session.total_volume_kg ?? 0
         )
+    }
+
+    private static func parseAPITimestamp(_ value: String) -> Date? {
+        let isoWithFractionalSeconds = ISO8601DateFormatter()
+        isoWithFractionalSeconds.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoBasic = ISO8601DateFormatter()
+
+        if let date = isoWithFractionalSeconds.date(from: value) ?? isoBasic.date(from: value) {
+            return date
+        }
+
+        if let date = apiDateFormatterWithFractionalSeconds.date(from: value)
+            ?? apiDateFormatterWithoutFractionalSeconds.date(from: value) {
+            return date
+        }
+
+        return nil
     }
 }

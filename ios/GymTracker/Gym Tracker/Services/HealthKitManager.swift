@@ -11,6 +11,10 @@ final class HealthKitManager: @unchecked Sendable {
     // Protected by MainActor access pattern — only mutated from async functions
     // called from .task modifiers which run on MainActor
     private(set) var isAuthorized = false
+    private(set) var isBodyWeightAuthorized = false
+    private(set) var isWorkoutAuthorized = false
+    private(set) var isEnergyAuthorized = false
+    var canWriteWorkouts: Bool { isWorkoutAuthorized && isEnergyAuthorized }
 
     // MARK: - Types we read/write
 
@@ -31,13 +35,37 @@ final class HealthKitManager: @unchecked Sendable {
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    private func refreshAuthorizationState() {
+        guard isAvailable else {
+            isAuthorized = false
+            isBodyWeightAuthorized = false
+            isWorkoutAuthorized = false
+            isEnergyAuthorized = false
+            return
+        }
+
+        let bodyWeightStatus = store.authorizationStatus(
+            for: HKObjectType.quantityType(forIdentifier: .bodyMass)!
+        )
+        let workoutStatus = store.authorizationStatus(
+            for: HKObjectType.workoutType()
+        )
+        let energyStatus = store.authorizationStatus(
+            for: HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+        )
+
+        isBodyWeightAuthorized = (bodyWeightStatus == .sharingAuthorized)
+        isWorkoutAuthorized = (workoutStatus == .sharingAuthorized)
+        isEnergyAuthorized = (energyStatus == .sharingAuthorized)
+        isAuthorized = isBodyWeightAuthorized || canWriteWorkouts
+    }
+
     func requestAuthorization() async -> Bool {
         guard isAvailable else { return false }
         do {
             try await store.requestAuthorization(toShare: typesToWrite, read: typesToRead)
-            let status = store.authorizationStatus(
-                for: HKObjectType.quantityType(forIdentifier: .bodyMass)!)
-            isAuthorized = (status == .sharingAuthorized)
+            refreshAuthorizationState()
+            print("[HealthKit] Authorization refreshed. bodyWeight=\(isBodyWeightAuthorized) workout=\(isWorkoutAuthorized) energy=\(isEnergyAuthorized)")
             return isAuthorized
         } catch {
             print("[HealthKit] Auth error: \(error)")
@@ -46,10 +74,7 @@ final class HealthKitManager: @unchecked Sendable {
     }
 
     func checkAuthorization() {
-        guard isAvailable else { return }
-        let status = store.authorizationStatus(
-            for: HKObjectType.quantityType(forIdentifier: .bodyMass)!)
-        isAuthorized = (status == .sharingAuthorized)
+        refreshAuthorizationState()
     }
 
     // MARK: - Auto Sync
@@ -58,7 +83,7 @@ final class HealthKitManager: @unchecked Sendable {
     /// from HealthKit and syncs to backend if it's newer than what we have cached.
     func syncBodyWeightOnLaunch() async {
         checkAuthorization()
-        guard isAuthorized else { return }
+        guard isBodyWeightAuthorized else { return }
 
         guard let hkWeight = await readLatestBodyWeight() else { return }
 
@@ -128,7 +153,7 @@ final class HealthKitManager: @unchecked Sendable {
 
     /// Write a body weight sample to HealthKit
     func writeBodyWeight(kg: Double, date: Date = Date()) async {
-        guard isAuthorized else { return }
+        guard isBodyWeightAuthorized else { return }
         let type = HKObjectType.quantityType(forIdentifier: .bodyMass)!
         let quantity = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg)
         let sample = HKQuantitySample(type: type, quantity: quantity, start: date, end: date)
@@ -223,8 +248,8 @@ final class HealthKitManager: @unchecked Sendable {
         totalSets: Int,
         totalVolume: Double
     ) async -> Bool {
-        guard isAuthorized else {
-            print("[HealthKit] Refusing workout sync for session \(sessionId.map(String.init) ?? "?") because HealthKit is not authorized")
+        guard canWriteWorkouts else {
+            print("[HealthKit] Refusing workout sync for session \(sessionId.map(String.init) ?? "?") because workout authorization is incomplete. workout=\(isWorkoutAuthorized) energy=\(isEnergyAuthorized)")
             return false
         }
 
