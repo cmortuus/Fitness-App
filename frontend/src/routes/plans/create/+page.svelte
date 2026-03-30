@@ -113,6 +113,26 @@
     }));
   }
 
+  function updateDayExercises(dayNum: number, updater: (exercises: PlannedExercise[]) => PlannedExercise[]) {
+    days = cloneDays(days).map((day) =>
+      day.day_number === dayNum
+        ? { ...day, exercises: updater(day.exercises) }
+        : day
+    );
+  }
+
+  function moveExerciseWithinDay(dayNum: number, fromIndex: number, toIndex: number) {
+    updateDayExercises(dayNum, (exercises) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= exercises.length || toIndex >= exercises.length) {
+        return exercises;
+      }
+      const reordered = [...exercises];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    });
+  }
+
   function hydratePlan(plan: WorkoutPlan) {
     editingPlanId = plan.id;
     newPlanName = plan.name;
@@ -275,19 +295,13 @@
   }
 
   function removeExerciseFromDay(dayNum: number, exerciseIndex: number) {
-    const dayIndex = days.findIndex(d => d.day_number === dayNum);
-    if (dayIndex === -1) return;
-
-    days[dayIndex].exercises = days[dayIndex].exercises.filter((_, i) => i !== exerciseIndex);
-    days = [...days];
+    updateDayExercises(dayNum, (exercises) => exercises.filter((_, i) => i !== exerciseIndex));
   }
 
   function updateDayName(dayNum: number, newName: string) {
-    const dayIndex = days.findIndex(d => d.day_number === dayNum);
-    if (dayIndex !== -1) {
-      days[dayIndex].day_name = newName;
-      days = [...days];
-    }
+    days = cloneDays(days).map((day) =>
+      day.day_number === dayNum ? { ...day, day_name: newName } : day
+    );
   }
 
   // Drag and drop handlers
@@ -316,15 +330,16 @@
 
     if (sourceDayIndex === -1 || targetDayIndex === -1) return;
 
-    // Remove from source
-    days[sourceDayIndex].exercises = days[sourceDayIndex].exercises.filter(
-      (_, i) => i !== draggedExercise!.index
-    );
+    const sourceDay = days[sourceDayIndex];
+    const targetDay = days[targetDayIndex];
+    const nextSourceExercises = sourceDay.exercises.filter((_, i) => i !== draggedExercise!.index);
+    const nextTargetExercises = [...targetDay.exercises, { ...draggedExercise.exercise }];
 
-    // Add to target
-    days[targetDayIndex].exercises = [...days[targetDayIndex].exercises, draggedExercise.exercise];
-
-    days = [...days];
+    days = cloneDays(days).map((day) => {
+      if (day.day_number === sourceDay.day_number) return { ...day, exercises: nextSourceExercises };
+      if (day.day_number === targetDay.day_number) return { ...day, exercises: nextTargetExercises };
+      return day;
+    });
     draggedExercise = null;
   }
 
@@ -500,10 +515,7 @@
   }
 
   function clearDay(dayNum: number) {
-    const dayIndex = days.findIndex((d) => d.day_number === dayNum);
-    if (dayIndex === -1) return;
-    days[dayIndex].exercises = [];
-    days = [...days];
+    updateDayExercises(dayNum, () => []);
   }
 
   async function loadTemplates() {
@@ -912,10 +924,10 @@
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1.5">
                           <div class="flex flex-col shrink-0">
-                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) { const arr = day.exercises; [arr[idx-1], arr[idx]] = [arr[idx], arr[idx-1]]; days = [...days]; } }}
+                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) moveExerciseWithinDay(day.day_number, idx, idx - 1); }}
                                     disabled={idx === 0}
                                     class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▲</button>
-                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) { const arr = day.exercises; [arr[idx], arr[idx+1]] = [arr[idx+1], arr[idx]]; days = [...days]; } }}
+                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) moveExerciseWithinDay(day.day_number, idx, idx + 1); }}
                                     disabled={idx === day.exercises.length - 1}
                                     class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▼</button>
                           </div>
@@ -930,8 +942,11 @@
                             oninput={(e) => {
                               const v = parseInt((e.target as HTMLInputElement).value);
                               if (!isNaN(v) && v > 0) {
-                                days[days.findIndex(d => d.day_number === day.day_number)].exercises[idx].sets = v;
-                                days = [...days];
+                                updateDayExercises(day.day_number, (exercises) =>
+                                  exercises.map((exercise, exerciseIndex) =>
+                                    exerciseIndex === idx ? { ...exercise, sets: v } : exercise
+                                  )
+                                );
                               }
                             }}
                             min="1" max="20"
