@@ -171,6 +171,20 @@ class WorkoutSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkoutSessionAuditResponse(BaseModel):
+    id: int
+    workout_session_id: int
+    from_status: str | None
+    to_status: str | None
+    reason: str
+    endpoint: str
+    actor_username: str | None
+    source_device: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # Workout plan schemas
 class PlannedExercise(BaseModel):
     exercise_id: int

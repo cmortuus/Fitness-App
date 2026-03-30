@@ -1,12 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { deleteSession, getSessions, resetSessionToPlanned, type WorkoutSession } from '$lib/api';
+  import { deleteSession, getSessionAudit, getSessions, resetSessionToPlanned, type WorkoutSession, type WorkoutSessionAuditEntry } from '$lib/api';
 
   let sessions = $state<WorkoutSession[]>([]);
   let loading = $state(true);
   let error = $state('');
   let expandedSessionId = $state<number | null>(null);
   let workingSessionId = $state<number | null>(null);
+  let auditBySessionId = $state<Record<number, WorkoutSessionAuditEntry[]>>({});
 
   function fmtDate(iso: string): string {
     return new Date(`${iso}T00:00:00`).toLocaleDateString('en-US', {
@@ -48,6 +49,21 @@
   }
 
   onMount(loadSessions);
+
+  async function toggleExpanded(sessionId: number) {
+    expandedSessionId = expandedSessionId === sessionId ? null : sessionId;
+    if (expandedSessionId === sessionId && !auditBySessionId[sessionId]) {
+      try {
+        auditBySessionId = {
+          ...auditBySessionId,
+          [sessionId]: await getSessionAudit(sessionId),
+        };
+      } catch (err) {
+        console.error('Failed to load audit trail', err);
+        error = `Failed to load audit trail for session ${sessionId}.`;
+      }
+    }
+  }
 
   async function handleReset(sessionId: number) {
     if (!confirm(`Reset session ${sessionId} back to planned? This clears logged sets and draft values.`)) return;
@@ -149,7 +165,7 @@
             </div>
             <div class="flex flex-wrap gap-2">
               <button
-                onclick={() => expandedSessionId = expandedSessionId === session.id ? null : session.id}
+                onclick={() => toggleExpanded(session.id)}
                 class="px-3 py-2 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition-colors"
               >
                 {expandedSessionId === session.id ? 'Hide Details' : 'Inspect'}
@@ -219,6 +235,31 @@
                   </div>
                 </div>
               {/each}
+            </div>
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden mt-3">
+              <div class="px-4 py-2 text-xs uppercase tracking-wide text-zinc-500 border-b border-zinc-800">Audit Trail</div>
+              {#if auditBySessionId[session.id]?.length}
+                <div class="divide-y divide-zinc-800">
+                  {#each auditBySessionId[session.id] as entry}
+                    <div class="px-4 py-3 text-sm">
+                      <div class="flex items-center justify-between gap-3">
+                        <p class="text-zinc-200">
+                          {entry.from_status ?? 'none'} → {entry.to_status ?? 'none'}
+                        </p>
+                        <p class="text-xs text-zinc-500">{fmtTimestamp(entry.created_at)}</p>
+                      </div>
+                      <p class="text-xs text-zinc-400 mt-1">
+                        {entry.reason} · {entry.endpoint} · {entry.actor_username ?? 'unknown'}
+                        {#if entry.source_device}
+                          · {entry.source_device}
+                        {/if}
+                      </p>
+                    </div>
+                  {/each}
+                </div>
+              {:else}
+                <div class="px-4 py-3 text-sm text-zinc-500">No audit entries yet.</div>
+              {/if}
             </div>
           {/if}
         </div>
