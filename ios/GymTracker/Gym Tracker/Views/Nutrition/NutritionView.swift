@@ -875,9 +875,22 @@ struct EditEntrySheet: View {
     @State private var errorMessage: String? = nil
     @Environment(\.dismiss) private var dismiss
 
+    // Store original per-gram ratios for scaling
+    private let originalQty: Double
+    private let calPer100: Double
+    private let proPer100: Double
+    private let carbPer100: Double
+    private let fatPer100: Double
+
     init(entry: NutritionEntry, onSave: @escaping () -> Void, onDelete: @escaping () -> Void) {
         self.entry = entry; self.onSave = onSave; self.onDelete = onDelete
-        _qty = State(initialValue: entry.quantity_g.map { "\(Int($0))" } ?? "100")
+        let q = entry.quantity_g ?? 100
+        self.originalQty = q > 0 ? q : 100
+        self.calPer100 = (entry.calories ?? 0) / (q > 0 ? q : 100) * 100
+        self.proPer100 = (entry.protein ?? 0) / (q > 0 ? q : 100) * 100
+        self.carbPer100 = (entry.carbs ?? 0) / (q > 0 ? q : 100) * 100
+        self.fatPer100 = (entry.fat ?? 0) / (q > 0 ? q : 100) * 100
+        _qty = State(initialValue: "\(Int(q))")
         _cal = State(initialValue: entry.calories.map { "\(Int($0))" } ?? "0")
         _pro = State(initialValue: entry.protein.map { "\(Int($0))" } ?? "0")
         _carb = State(initialValue: entry.carbs.map { "\(Int($0))" } ?? "0")
@@ -896,6 +909,16 @@ struct EditEntrySheet: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
+                            .onChange(of: qty) { _, newQty in
+                                // Scale macros proportionally (#535)
+                                if let newG = Double(newQty), newG > 0 {
+                                    let scale = newG / 100
+                                    cal = "\(Int(calPer100 * scale))"
+                                    pro = "\(Int(proPer100 * scale))"
+                                    carb = "\(Int(carbPer100 * scale))"
+                                    fat = "\(Int(fatPer100 * scale))"
+                                }
+                            }
                     }
                     Picker("Meal", selection: $meal) {
                         ForEach(["breakfast", "lunch", "dinner", "snack"], id: \.self) {
