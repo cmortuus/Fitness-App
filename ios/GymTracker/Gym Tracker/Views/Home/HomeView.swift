@@ -9,6 +9,7 @@ struct HomeView: View {
     @State private var activePhase: DietPhase?
     @State private var bodyWeights: [BodyWeightEntry] = []
     @State private var loading = true
+    let onSetGoals: () -> Void
 
     private let accentBlue = Color(red: 0.004, green: 0.439, blue: 0.725) // #0170B9
 
@@ -113,9 +114,7 @@ struct HomeView: View {
                 Text("calories today")
                     .font(.subheadline).foregroundStyle(.secondary)
 
-                NavigationLink("Set Goals") {
-                    // TODO: goals sheet
-                }
+                Button("Set Goals", action: onSetGoals)
                 .font(.caption.bold())
                 .foregroundStyle(accentBlue)
             }

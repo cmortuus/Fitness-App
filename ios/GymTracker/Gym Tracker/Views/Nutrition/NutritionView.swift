@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NutritionView: View {
+    @Binding private var externalShowGoalsSheet: Bool
     @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
     @State private var summary: DailySummary?
     @State private var mealEntries: [String: [NutritionEntry]] = [:]
@@ -25,6 +26,10 @@ struct NutritionView: View {
     @State private var scannedFoodWrapper: IdentifiedFood? = nil
 
     private let meals = ["breakfast", "lunch", "dinner", "snack"]
+
+    init(externalShowGoalsSheet: Binding<Bool> = .constant(false)) {
+        _externalShowGoalsSheet = externalShowGoalsSheet
+    }
 
     private var dateString: String {
         let df = DateFormatter()
@@ -124,6 +129,11 @@ struct NutritionView: View {
             .confirmationDialog("Copy yesterday's food log?", isPresented: $showCopyDayConfirm, titleVisibility: .visible) {
                 Button("Copy") { Task { await copyPreviousDay() } }
                 Button("Cancel", role: .cancel) {}
+            }
+            .onChange(of: externalShowGoalsSheet) { _, shouldShow in
+                guard shouldShow else { return }
+                showGoalsSheet = true
+                externalShowGoalsSheet = false
             }
         }
     }
@@ -1187,4 +1197,3 @@ struct ServingSizeSheet: View {
         saving = false
     }
 }
-
