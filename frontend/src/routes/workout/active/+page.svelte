@@ -2,10 +2,11 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { beforeNavigate } from '$app/navigation';
+  import { localDateString } from '$lib/date';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
-    createSessionFromPlan, createSession,
+    createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
     saveExerciseFeedback, syncSessionToPlan, patchSession,
@@ -586,7 +587,7 @@
         }
         throw e;
       }
-      const sess = raw;
+      const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
       hasLinkedPlan = true;
@@ -683,17 +684,6 @@
     }, 1000);
   }
 
-  function markCurrentSessionInProgress(startedAtIso: string) {
-    currentSession.update((sess) => {
-      if (!sess) return sess;
-      return {
-        ...sess,
-        status: 'in_progress',
-        started_at: startedAtIso,
-      };
-    });
-  }
-
   async function startFreeSession() {
     loading = true;
     showPicker = false;
@@ -701,7 +691,7 @@
       let raw;
       try {
         raw = await createSession({
-          date: new Date().toISOString().split('T')[0],
+          date: localDateString(),
           name: `Workout – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
         });
       } catch (e: any) {
@@ -711,7 +701,7 @@
         }
         throw e;
       }
-      const sess = raw;
+      const sess = await startSession(raw.id);
       sessionId = sess.id;
       workoutName = sess.name ?? 'Workout';
       currentSession.set(sess);
@@ -1043,11 +1033,10 @@
         ? [{ weight_kg: weightKg, reps: set.partialReps, type: 'partial' }]
         : undefined;
 
-      const startedAtIso = new Date().toISOString();
       await updateSet(sessionId, bId, {
         actual_reps: effectiveReps,
         actual_weight_kg: weightKg,
-        completed_at: startedAtIso,
+        completed_at: new Date().toISOString(),
         ...(ex.isUnilateral && { reps_left: set.repsLeft ?? 0, reps_right: set.repsRight ?? 0 }),
         ...(notes && { notes }),
         ...(set.setType !== 'standard' && { set_type: set.setType }),
@@ -1057,7 +1046,6 @@
       set.reps = effectiveReps; // sync reps field for drop-off calc
       set.done = true;
       startClockIfNeeded(); // Start timer on first set completion (#524)
-      markCurrentSessionInProgress(startedAtIso);
 
       // Sync myo match sets with set 1's final values
       syncMyoMatchSets(ex);
@@ -1381,16 +1369,6 @@
       elapsed = 0;
       startedAt = 0;
       if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-    }
-    if (!anyDone) {
-      currentSession.update((sess) => {
-        if (!sess || sess.completed_at) return sess;
-        return {
-          ...sess,
-          status: 'planned',
-          started_at: null,
-        };
-      });
     }
   }
 

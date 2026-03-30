@@ -10,6 +10,7 @@
   } from '$lib/api';
   import type { Recipe } from '$lib/api';
   import { MICRO_META } from '$lib/api';
+  import { localDateString, parseLocalDateString, shiftLocalDateString } from '$lib/date';
   import { writeNutrition } from '$lib/healthkit';
   import type {
     NutritionEntry, DietPhase, DailySummary, DailyEntries,
@@ -17,7 +18,7 @@
   } from '$lib/api';
 
   // ─── State ────────────────────────────────────────────────────────────────
-  let selectedDate = $state(new Date().toISOString().slice(0, 10));
+  let selectedDate = $state(localDateString());
   let entries = $state<DailyEntries | null>(null);
   let summary = $state<DailySummary | null>(null);
   let loading = $state(true);
@@ -277,19 +278,15 @@
   }
 
   function changeDate(delta: number) {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + delta);
-    selectedDate = d.toISOString().slice(0, 10);
+    selectedDate = shiftLocalDateString(selectedDate, delta);
     loadDay();
   }
 
   function formatDate(iso: string): string {
-    const d = new Date(iso + 'T00:00:00');
-    const today = new Date().toISOString().slice(0, 10);
+    const d = parseLocalDateString(iso);
+    const today = localDateString();
     if (iso === today) return 'Today';
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    if (iso === yesterday.toISOString().slice(0, 10)) return 'Yesterday';
+    if (iso === shiftLocalDateString(today, -1)) return 'Yesterday';
     return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   }
 

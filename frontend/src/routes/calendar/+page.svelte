@@ -1,6 +1,7 @@
-<script lang="ts">
+  <script lang="ts">
   import { onMount } from 'svelte';
   import { getSessions } from '$lib/api';
+  import { localDateString } from '$lib/date';
   import { settings } from '$lib/stores';
 
   const KG_TO_LBS = 2.20462;
@@ -64,7 +65,7 @@
     }
   });
 
-  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
+  function isoDate(d: Date) { return localDateString(d); }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
