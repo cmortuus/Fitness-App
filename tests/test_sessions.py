@@ -27,7 +27,7 @@ class TestSessionLifecycle:
         assert len(data["sets"]) == 3
 
     async def test_start_session(self, client: AsyncClient):
-        """POST /sessions/{id}/start transitions status to in_progress."""
+        """POST /sessions/{id}/start opens the session but keeps it planned."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=2, reps=8)
 
@@ -40,20 +40,53 @@ class TestSessionLifecycle:
 
         r2 = await client.post(f"/api/sessions/{session_id}/start")
         assert r2.status_code == 200
-        assert r2.json()["status"] == "in_progress"
+        assert r2.json()["status"] == "planned"
+        assert r2.json()["started_at"] is None
+
+    async def test_first_completed_set_starts_session(self, client: AsyncClient):
+        """The first completed set promotes the session to in_progress."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+
+        r1 = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
+        )
+        assert r1.status_code == 201
+        sess = r1.json()
+
+        await client.post(f"/api/sessions/{sess['id']}/start")
+
+        set_id = sess["sets"][0]["id"]
+        r2 = await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 80.0,
+                "actual_reps": 10,
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert r2.status_code == 200
+
+        r3 = await client.get(f"/api/sessions/{sess['id']}")
+        assert r3.status_code == 200
+        assert r3.json()["status"] == "in_progress"
+        assert r3.json()["started_at"] == "2024-01-01T10:00:00"
 
     async def test_prevent_duplicate_in_progress(self, client: AsyncClient):
         """Starting a second session while one is in_progress returns 409."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
 
-        # Create and start first session
-        r1 = await client.post(
-            f"/api/sessions/from-plan/{plan['id']}",
-            params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
+        sess1 = await start_session_from_plan(client, plan["id"])
+        await client.patch(
+            f"/api/sessions/{sess1['id']}/sets/{sess1['sets'][0]['id']}",
+            json={
+                "actual_weight_kg": 80.0,
+                "actual_reps": 10,
+                "completed_at": "2024-01-01T10:00:00",
+            },
         )
-        sess1_id = r1.json()["id"]
-        await client.post(f"/api/sessions/{sess1_id}/start")
 
         # Create a second session and attempt to start it
         r2 = await client.post(
@@ -97,6 +130,42 @@ class TestSessionLifecycle:
         data = r.json()
         assert data["actual_weight_kg"] == 80.0
         assert data["actual_reps"] == 10
+
+        r2 = await client.get(f"/api/sessions/{sess['id']}")
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "in_progress"
+        assert r2.json()["started_at"] == "2024-01-01T10:00:00"
+
+    async def test_uncompleting_last_done_set_resets_session_to_planned(self, client: AsyncClient):
+        """Removing the only completed set should clear in_progress state."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+
+        set_id = sess["sets"][0]["id"]
+        await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 80.0,
+                "actual_reps": 10,
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+
+        r = await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": None,
+                "actual_reps": None,
+                "completed_at": None,
+            },
+        )
+        assert r.status_code == 200
+
+        r2 = await client.get(f"/api/sessions/{sess['id']}")
+        assert r2.status_code == 200
+        assert r2.json()["status"] == "planned"
+        assert r2.json()["started_at"] is None
 
     async def test_guard_survives_multiple_in_progress_sessions(
         self, client: AsyncClient, db: AsyncSession
@@ -217,6 +286,8 @@ class TestSessionLifecycle:
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
         sess1 = await start_session_from_plan(client, plan["id"])
+        complete = await client.post(f"/api/sessions/{sess1['id']}/complete")
+        assert complete.status_code == 200
         sess2 = await start_session_from_plan(client, plan["id"])
 
         # Try to delete sess1's set via sess2's endpoint
