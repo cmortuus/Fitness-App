@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { daysAgoLocalDateString, localDateString } from '$lib/date';
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import type { DashboardWidget } from '$lib/stores';
   import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, saveSettings } from '$lib/api';
@@ -58,7 +57,7 @@
       const [sessions, plans, nutrition, insightData] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
-        getDailySummary(localDateString()).catch(() => null),
+        getDailySummary(new Date().toISOString().slice(0, 10)).catch(() => null),
         getInsights().catch(() => []),
       ]);
       allSessions = sessions;
@@ -126,7 +125,7 @@
   }
 
   // ── Calendar helpers ───────────────────────────────────────────────────
-  function isoDate(d: Date) { return localDateString(d); }
+  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -176,14 +175,16 @@
 
   // ── Quick stats ────────────────────────────────────────────────────────
   let weeklyVolume = $derived((() => {
-    const weekStr = daysAgoLocalDateString(7);
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    const weekStr = isoDate(weekAgo);
     return allSessions
       .filter(s => s.date >= weekStr && s.status === 'completed')
       .reduce((sum, s) => sum + volDisplay(s.total_volume_kg ?? 0), 0);
   })());
 
   let weeklyWorkouts = $derived((() => {
-    return allSessions.filter(s => s.date >= daysAgoLocalDateString(7) && s.status === 'completed').length;
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    return allSessions.filter(s => s.date >= isoDate(weekAgo) && s.status === 'completed').length;
   })());
 
   // Streak: consecutive completed sessions without a skip/miss
@@ -201,7 +202,8 @@
   })());
 
   let weeklySets = $derived((() => {
-    const weekStr = daysAgoLocalDateString(7);
+    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+    const weekStr = isoDate(weekAgo);
     const weekSessions = allSessions.filter(s => s.date >= weekStr && s.status === 'completed');
     const planned = weekSessions.reduce((sum, s) => sum + (s.total_sets || 0), 0);
     const completed = weekSessions.reduce((sum, s) =>
@@ -585,9 +587,9 @@
        style="background: linear-gradient(135deg, rgba(37,99,235,0.2), rgba(139,92,246,0.1));">
       <div class="p-5 flex items-center justify-between gap-4">
         <div>
-          <p class="text-xs font-bold uppercase tracking-widest text-primary-400 mb-1">▶ In Progress</p>
-          <h3 class="text-xl font-bold text-white">{$currentSession.name ?? 'Active Workout'}</h3>
-          <p class="text-sm text-zinc-400 mt-1">Tap to continue</p>
+          <p class="text-xs font-bold uppercase tracking-widest text-primary-400 mb-1">▶ Continue Workout</p>
+          <h3 class="text-xl font-bold text-white">{$currentSession.name ?? 'Workout'}</h3>
+          <p class="text-sm text-zinc-400 mt-1">Resume where you left off</p>
         </div>
         <div class="w-14 h-14 rounded-2xl bg-primary-600/30 border border-primary-500/40
                     flex items-center justify-center text-2xl shrink-0
