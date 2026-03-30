@@ -55,6 +55,67 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
     }
 
 
+def session_matches_plan(session: WorkoutSession, plan: dict) -> bool:
+    if session.workout_plan_id == plan["id"]:
+        return True
+    return bool(session.name and session.name.startswith(f"{plan['name']} - "))
+
+
+def resolve_next_workout(sessions: list[WorkoutSession], plans: list[dict]) -> dict | None:
+    active_plans = [p for p in plans if not p["is_archived"] and not p["is_draft"]]
+    if not active_plans:
+        return None
+
+    def completed_sessions_for_plan(plan: dict) -> list[WorkoutSession]:
+        return [
+            s for s in sessions
+            if s.status == "completed"
+            and ((s.total_sets or 0) > 0 or (s.total_reps or 0) > 0)
+            and session_matches_plan(s, plan)
+        ]
+
+    recent_with_plan = next(
+        (
+            s for s in sessions
+            if s.status != "skipped" and any(session_matches_plan(s, plan) for plan in active_plans)
+        ),
+        None,
+    )
+
+    if recent_with_plan:
+        plan = next(
+            (p for p in active_plans if session_matches_plan(recent_with_plan, p)),
+            active_plans[0],
+        )
+    else:
+        plan = active_plans[0]
+
+    if not plan["days"]:
+        return None
+
+    completed_sessions = completed_sessions_for_plan(plan)
+    done_count = len(completed_sessions)
+    total_needed = plan["duration_weeks"] * len(plan["days"])
+    is_complete = done_count >= total_needed
+    next_day_idx = 0 if is_complete else done_count % len(plan["days"])
+    week_number = plan["duration_weeks"] if is_complete else (done_count // len(plan["days"])) + 1
+    day_number = next_day_idx + 1
+
+    return {
+        "plan": plan,
+        "day": plan["days"][next_day_idx],
+        "week_number": week_number,
+        "day_number": day_number,
+        "is_complete": is_complete,
+        "debug": {
+            "selected_plan_id": plan["id"],
+            "completed_session_count": done_count,
+            "total_sessions_needed": total_needed,
+            "recent_session_id": recent_with_plan.id if recent_with_plan else None,
+        },
+    }
+
+
 @router.get("/", response_model=list[WorkoutPlanResponse])
 async def list_plans(
     user: Annotated[User, Depends(get_current_user)],
@@ -68,6 +129,31 @@ async def list_plans(
     result = await db.execute(stmt.order_by(WorkoutPlan.created_at.desc()))
     plans = result.scalars().all()
     return [serialize_plan(p) for p in plans]
+
+
+@router.get("/next-workout")
+async def get_next_workout(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict | None:
+    """Return the canonical next workout for the current user."""
+    plans_result = await db.execute(
+        select(WorkoutPlan)
+        .where(WorkoutPlan.user_id == user.id, WorkoutPlan.is_draft.is_(False))
+        .order_by(WorkoutPlan.created_at.desc())
+    )
+    plans = [serialize_plan(p) for p in plans_result.scalars().all()]
+    if not plans:
+        return None
+
+    sessions_result = await db.execute(
+        select(WorkoutSession)
+        .where(WorkoutSession.user_id == user.id)
+        .order_by(WorkoutSession.date.desc(), WorkoutSession.id.desc())
+    )
+    sessions = sessions_result.scalars().all()
+
+    return resolve_next_workout(sessions, plans)
 
 
 @router.get("/exercises/recent", response_model=list[dict])

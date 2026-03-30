@@ -2,9 +2,9 @@
   import { onMount } from 'svelte';
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import type { DashboardWidget } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, saveSettings } from '$lib/api';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, getNextWorkout, saveSettings } from '$lib/api';
   import { localDateString } from '$lib/date';
-  import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
+  import type { DailySummary, Insight, NextWorkoutResolution, WorkoutSession } from '$lib/api';
 
   const KG_TO_LBS = 2.20462;
   function volDisplay(kg: number): number {
@@ -14,23 +14,12 @@
     return $settings.weightUnit === 'lbs' ? 'lbs' : 'kg';
   }
 
-  interface NextWorkout {
-    plan: WorkoutPlan;
-    day: PlannedDay;
-    weekNumber: number;
-    dayNumber: number;
-    isComplete: boolean;
-  }
-
   let allSessions    = $state<WorkoutSession[]>([]);
   let loading        = $state(true);
   let archiving      = $state(false);
   let nutritionSummary = $state<DailySummary | null>(null);
   let insights = $state<Insight[]>([]);
-
-  let nextWorkout = $derived(
-    loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
-  );
+  let nextWorkout = $state<NextWorkoutResolution | null>(null);
 
   let hasActiveCurrentSession = $derived(
     !!$currentSession && ($currentSession.status === 'in_progress' || !!$currentSession.started_at)
@@ -41,7 +30,7 @@
   $effect(() => {
     if (hasActiveCurrentSession) {
       nextWorkoutUrl.set('/workout/active');
-    } else if (nextWorkout && !nextWorkout.isComplete) {
+    } else if (nextWorkout && !nextWorkout.is_complete) {
       nextWorkoutUrl.set(`/workout/active?plan=${nextWorkout.plan.id}&day=${nextWorkout.day.day_number}`);
     } else {
       nextWorkoutUrl.set('/workout/active');
@@ -59,14 +48,16 @@
 
   onMount(async () => {
     try {
-      const [sessions, plans, nutrition, insightData] = await Promise.all([
+      const [sessions, plans, next, nutrition, insightData] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
+        getNextWorkout().catch(() => null),
         getDailySummary(localDateString()).catch(() => null),
         getInsights().catch(() => []),
       ]);
       allSessions = sessions;
       workoutPlans.set(plans);
+      nextWorkout = next;
       nutritionSummary = nutrition;
       insights = insightData;
     } catch (e) {
@@ -76,52 +67,14 @@
     }
   });
 
-  function resolveNextWorkout(sessions: WorkoutSession[], plans: WorkoutPlan[]): NextWorkout | null {
-    const activePlans = plans.filter(p => !p.is_archived);
-    if (!activePlans.length) return null;
-
-    function sessionsForPlan(plan: WorkoutPlan) {
-      return sessions.filter(s =>
-        s.status === 'completed' &&
-        (s.total_sets > 0 || s.total_reps > 0) &&
-        (s.workout_plan_id === plan.id || (s.name && s.name.startsWith(plan.name + ' - ')))
-      );
-    }
-
-    let plan: WorkoutPlan;
-    const recentWithPlan = sessions.find(s =>
-      s.status !== 'skipped' && (
-        activePlans.some(p => p.id === s.workout_plan_id) ||
-        activePlans.some(p => s.name?.startsWith(p.name + ' - '))
-      )
-    );
-    if (recentWithPlan) {
-      plan = activePlans.find(p =>
-        p.id === recentWithPlan.workout_plan_id ||
-        recentWithPlan.name?.startsWith(p.name + ' - ')
-      ) ?? activePlans[0];
-    } else {
-      plan = activePlans[0];
-    }
-
-    if (!plan.days.length) return null;
-
-    const doneCount   = sessionsForPlan(plan).length;
-    const totalNeeded = plan.duration_weeks * plan.days.length;
-    const isComplete  = doneCount >= totalNeeded;
-    const nextDayIdx  = isComplete ? 0 : doneCount % plan.days.length;
-    const weekNumber  = isComplete ? plan.duration_weeks : Math.floor(doneCount / plan.days.length) + 1;
-    const dayNumber   = nextDayIdx + 1;
-    return { plan, day: plan.days[nextDayIdx], weekNumber, dayNumber, isComplete };
-  }
-
   async function handleArchive(planId: number) {
     archiving = true;
     try {
       await archivePlan(planId);
-      const [sessions, plans] = await Promise.all([getSessions({ limit: 200 }), getPlans()]);
+      const [sessions, plans, next] = await Promise.all([getSessions({ limit: 200 }), getPlans(), getNextWorkout().catch(() => null)]);
       allSessions = sessions;
       workoutPlans.set(plans);
+      nextWorkout = next;
     } catch (e) {
       console.error('Failed to archive plan:', e);
     } finally {
@@ -604,7 +557,7 @@
   {:else if loading}
     <div class="card h-28 animate-pulse bg-zinc-800/50"></div>
 
-  {:else if nextWorkout?.isComplete}
+  {:else if nextWorkout?.is_complete}
     <div class="card border border-amber-500/30"
          style="background: linear-gradient(135deg, rgba(217,119,6,0.15), rgba(0,0,0,0));">
       <div class="flex items-start justify-between gap-4">
@@ -650,10 +603,10 @@
           <h3 class="text-2xl font-bold truncate">{nextWorkout.day.day_name}</h3>
           <div class="flex items-center gap-2 mt-2 flex-wrap">
             <span class="badge bg-primary-900/60 text-primary-300 border border-primary-700/50">
-              Week {nextWorkout.weekNumber}
+              Week {nextWorkout.week_number}
             </span>
             <span class="badge bg-zinc-800 text-zinc-300">
-              Day {nextWorkout.dayNumber}
+              Day {nextWorkout.day_number}
             </span>
             <span class="text-xs text-zinc-500">
               {nextWorkout.day.exercises.length} exercise{nextWorkout.day.exercises.length !== 1 ? 's' : ''}

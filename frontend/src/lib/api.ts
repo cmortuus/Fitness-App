@@ -250,6 +250,20 @@ export interface WorkoutPlan {
   is_archived: boolean;
 }
 
+export interface NextWorkoutResolution {
+  plan: WorkoutPlan;
+  day: PlannedDay;
+  week_number: number;
+  day_number: number;
+  is_complete: boolean;
+  debug: {
+    selected_plan_id: number;
+    completed_session_count: number;
+    total_sessions_needed: number;
+    recent_session_id: number | null;
+  };
+}
+
 export interface ProgressMetric {
   exercise_id: number;
   exercise_name: string;
@@ -457,6 +471,11 @@ export async function getRecommendations(daysBack: number = 30): Promise<Progres
 // Plans
 export async function getPlans(): Promise<WorkoutPlan[]> {
   const response = await api.get('/plans/');
+  return response.data;
+}
+
+export async function getNextWorkout(): Promise<NextWorkoutResolution | null> {
+  const response = await api.get('/plans/next-workout');
   return response.data;
 }
 
