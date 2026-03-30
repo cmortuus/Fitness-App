@@ -140,7 +140,9 @@ export async function getSettings(): Promise<Record<string, any>> {
 }
 
 export async function saveSettings(settings: Record<string, any>): Promise<void> {
-  await api.put('/auth/settings', settings);
+  await api.put('/auth/settings', settings, {
+    headers: { 'X-Client-Name': 'web' },
+  });
 }
 
 export function getStoredUser(): AuthUser | null {
