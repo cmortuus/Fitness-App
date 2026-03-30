@@ -2,8 +2,8 @@
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
   import { workoutPlans, exercises, settings } from '$lib/stores';
-  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate, getSessions } from '$lib/api';
-  import type { Exercise, WorkoutPlan, WorkoutTemplate, WorkoutSession, PlannedDay } from '$lib/api';
+  import { getPlans, deletePlan, getExercises, updatePlan, archivePlan, reusePlan, getTemplates, cloneTemplate, getSessions, updatePlanRirOverrides } from '$lib/api';
+  import type { Exercise, WorkoutPlan, WorkoutTemplate, WorkoutSession, PlannedDay, PlanRirOverrides } from '$lib/api';
 
   let avgSetDuration = $state(30); // seconds per set from history, default 30s
 
@@ -12,6 +12,9 @@
   let errorMsg     = $state<string | null>(null);
   let expandedPlan = $state<number | null>(null);
   let expandedDays = $state<Record<string, boolean>>({});
+  let rirPlan = $state<WorkoutPlan | null>(null);
+  let rirOverridesDraft = $state<PlanRirOverrides>({ plan: null, muscles: {}, exercises: {} });
+  let savingRir = $state(false);
 
   // Templates
   let templates = $state<WorkoutTemplate[]>([]);
@@ -112,6 +115,93 @@
 
   function getExerciseName(exerciseId: number): string {
     return allExercises.find(e => e.id === exerciseId)?.display_name || `Exercise ${exerciseId}`;
+  }
+
+  function getExercise(exerciseId: number): Exercise | undefined {
+    return allExercises.find(e => e.id === exerciseId);
+  }
+
+  function cloneOverrides(overrides?: PlanRirOverrides | null): PlanRirOverrides {
+    return {
+      plan: overrides?.plan ?? null,
+      muscles: { ...(overrides?.muscles ?? {}) },
+      exercises: { ...(overrides?.exercises ?? {}) },
+    };
+  }
+
+  function openRirModal(plan: WorkoutPlan) {
+    rirPlan = plan;
+    rirOverridesDraft = cloneOverrides(plan.rir_overrides);
+  }
+
+  function closeRirModal() {
+    rirPlan = null;
+    rirOverridesDraft = { plan: null, muscles: {}, exercises: {} };
+  }
+
+  function getPlanMuscles(plan: WorkoutPlan): string[] {
+    const muscles = new Set<string>();
+    for (const day of plan.days) {
+      for (const ex of day.exercises) {
+        const exercise = getExercise(ex.exercise_id);
+        for (const muscle of exercise?.primary_muscles ?? []) {
+          muscles.add(muscle);
+        }
+      }
+    }
+    return [...muscles].sort();
+  }
+
+  function getPlanExerciseRows(plan: WorkoutPlan): { id: number; name: string; muscles: string[] }[] {
+    const seen = new Set<number>();
+    const rows: { id: number; name: string; muscles: string[] }[] = [];
+    for (const day of plan.days) {
+      for (const ex of day.exercises) {
+        if (seen.has(ex.exercise_id)) continue;
+        seen.add(ex.exercise_id);
+        const exercise = getExercise(ex.exercise_id);
+        rows.push({
+          id: ex.exercise_id,
+          name: exercise?.display_name ?? `Exercise ${ex.exercise_id}`,
+          muscles: exercise?.primary_muscles ?? [],
+        });
+      }
+    }
+    return rows.sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  function setDraftPlanRir(value: string) {
+    rirOverridesDraft = { ...rirOverridesDraft, plan: value === '' ? null : Number(value) };
+  }
+
+  function setDraftMuscleRir(muscle: string, value: string) {
+    const muscles = { ...rirOverridesDraft.muscles };
+    if (value === '') delete muscles[muscle];
+    else muscles[muscle] = Number(value);
+    rirOverridesDraft = { ...rirOverridesDraft, muscles };
+  }
+
+  function setDraftExerciseRir(exerciseId: number, value: string) {
+    const exercises = { ...rirOverridesDraft.exercises };
+    const key = String(exerciseId);
+    if (value === '') delete exercises[key];
+    else exercises[key] = Number(value);
+    rirOverridesDraft = { ...rirOverridesDraft, exercises };
+  }
+
+  async function saveRirOverrides() {
+    if (!rirPlan) return;
+    savingRir = true;
+    try {
+      const updated = await updatePlanRirOverrides(rirPlan.id, rirOverridesDraft);
+      localPlans = localPlans.map(plan => plan.id === updated.id ? updated : plan);
+      workoutPlans.set(localPlans);
+      closeRirModal();
+    } catch (error) {
+      showError('Failed to save RIR overrides.');
+    } finally {
+      savingRir = false;
+    }
   }
 
   let filteredTemplates = $derived(
@@ -258,6 +348,10 @@
                         class="btn-secondary text-sm">
                   Edit Week
                 </button>
+                <button onclick={() => openRirModal(plan)}
+                        class="btn-secondary text-sm">
+                  RIR Targets
+                </button>
                 <button onclick={() => goto(`/workout/active?plan=${plan.id}&day=1`)}
                         class="btn-primary text-sm flex-1">
                   Start Workout
@@ -392,6 +486,85 @@
         <button onclick={() => handleClone(previewTmpl!)} disabled={cloning}
                 class="btn-primary w-full !py-3 disabled:opacity-50">
           {cloning ? 'Importing...' : 'Use This Template'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if rirPlan}
+  <div class="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center">
+    <div class="bg-zinc-900 w-full sm:max-w-2xl sm:rounded-2xl rounded-t-2xl max-h-[92vh] flex flex-col border border-white/8 shadow-2xl">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-zinc-800">
+        <div>
+          <h3 class="font-semibold text-white">RIR Targets</h3>
+          <p class="text-xs text-zinc-500 mt-0.5">{rirPlan.name}</p>
+        </div>
+        <button onclick={closeRirModal} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-4 py-4 space-y-5">
+        <div class="space-y-2">
+          <div>
+            <label class="label">Whole Plan</label>
+            <p class="text-xs text-zinc-500">Fallback target for every exercise unless a muscle or exercise override is set.</p>
+          </div>
+          <select class="input" value={rirOverridesDraft.plan ?? ''} onchange={(e) => setDraftPlanRir((e.currentTarget as HTMLSelectElement).value)}>
+            <option value="">Auto</option>
+            {#each [0, 1, 2, 3, 4, 5] as rir}
+              <option value={rir}>{rir === 5 ? '5+' : rir}</option>
+            {/each}
+          </select>
+        </div>
+
+        <div class="space-y-2">
+          <div>
+            <label class="label">Muscle Groups</label>
+            <p class="text-xs text-zinc-500">Applies to all matching exercises in the plan unless a direct exercise override is set.</p>
+          </div>
+          <div class="space-y-2">
+            {#each getPlanMuscles(rirPlan) as muscle}
+              <div class="flex items-center justify-between gap-3 rounded-lg bg-zinc-800/50 px-3 py-2">
+                <div class="text-sm text-zinc-300 capitalize">{muscle.replace(/_/g, ' ')}</div>
+                <select class="input w-28" value={rirOverridesDraft.muscles[muscle] ?? ''} onchange={(e) => setDraftMuscleRir(muscle, (e.currentTarget as HTMLSelectElement).value)}>
+                  <option value="">Auto</option>
+                  {#each [0, 1, 2, 3, 4, 5] as rir}
+                    <option value={rir}>{rir === 5 ? '5+' : rir}</option>
+                  {/each}
+                </select>
+              </div>
+            {/each}
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <div>
+            <label class="label">Exercises</label>
+            <p class="text-xs text-zinc-500">Highest priority override. Use this when only one lift needs to back off.</p>
+          </div>
+          <div class="space-y-2">
+            {#each getPlanExerciseRows(rirPlan) as row}
+              <div class="flex items-center justify-between gap-3 rounded-lg bg-zinc-800/50 px-3 py-2">
+                <div class="min-w-0">
+                  <div class="text-sm text-zinc-300 truncate">{row.name}</div>
+                  <div class="text-xs text-zinc-500 capitalize">{row.muscles.map(m => m.replace(/_/g, ' ')).join(', ') || 'No primary muscles'}</div>
+                </div>
+                <select class="input w-28 shrink-0" value={rirOverridesDraft.exercises[String(row.id)] ?? ''} onchange={(e) => setDraftExerciseRir(row.id, (e.currentTarget as HTMLSelectElement).value)}>
+                  <option value="">Auto</option>
+                  {#each [0, 1, 2, 3, 4, 5] as rir}
+                    <option value={rir}>{rir === 5 ? '5+' : rir}</option>
+                  {/each}
+                </select>
+              </div>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-3 px-4 py-4 border-t border-zinc-800">
+        <button onclick={closeRirModal} class="btn-secondary">Cancel</button>
+        <button onclick={saveRirOverrides} class="btn-primary" disabled={savingRir}>
+          {savingRir ? 'Saving…' : 'Save RIR Targets'}
         </button>
       </div>
     </div>

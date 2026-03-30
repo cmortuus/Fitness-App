@@ -41,6 +41,39 @@ def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> fl
     return round(new_w / 2.5) * 2.5
 
 
+def adjust_load_for_target_rir(
+    prior_weight: float | None,
+    prior_reps: int | None,
+    target_reps: int,
+    target_rir: int | None,
+    *,
+    is_assisted: bool = False,
+    body_weight_kg: float = 0.0,
+) -> float | None:
+    """Return an easier next-session load for the same target reps at the requested RIR."""
+    if (
+        target_rir is None
+        or target_rir <= 0
+        or prior_weight is None
+        or prior_weight <= 0
+        or prior_reps is None
+        or prior_reps <= 0
+        or target_reps <= 0
+    ):
+        return prior_weight
+
+    if is_assisted:
+        if body_weight_kg <= 0:
+            return prior_weight
+        prior_net = body_weight_kg - prior_weight
+        if prior_net <= 0:
+            return prior_weight
+        easier_net = epley_weight_for_reps(prior_net, prior_reps, target_reps + target_rir)
+        return max(0.0, round((body_weight_kg - easier_net) / 2.5) * 2.5)
+
+    return epley_weight_for_reps(prior_weight, prior_reps, target_reps + target_rir)
+
+
 def compute_overload(
     *,
     prior_weight: float,

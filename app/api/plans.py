@@ -13,7 +13,8 @@ from app.database import get_db
 from app.models.user import User
 from app.models.workout import WorkoutPlan, WorkoutSession, ExerciseSet
 from app.models.exercise import Exercise
-from app.schemas.requests import WorkoutPlanCreate, WorkoutPlanResponse
+from app.schemas.requests import WorkoutPlanCreate, WorkoutPlanResponse, PlanRirOverrides
+from app.services.plan_rir import normalize_rir_overrides
 
 router = APIRouter()
 
@@ -38,6 +39,7 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         # New format
         days = planned_data.get("days", [])
         number_of_days = planned_data.get("number_of_days") or len(days)
+    rir_overrides = normalize_rir_overrides(planned_data.get("rir_overrides"))
 
     return {
         "id": plan.id,
@@ -48,6 +50,7 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         "current_week": plan.current_week,
         "number_of_days": number_of_days,
         "days": days,
+        "rir_overrides": rir_overrides,
         "auto_progression": plan.auto_progression,
         "is_draft": plan.is_draft,
         "is_archived": plan.is_archived,
@@ -261,7 +264,8 @@ async def create_plan(
     # Convert days structure to JSON
     planned_data = {
         "number_of_days": plan_data.number_of_days,
-        "days": [d.model_dump() for d in plan_data.days]
+        "days": [d.model_dump() for d in plan_data.days],
+        "rir_overrides": normalize_rir_overrides(plan_data.rir_overrides.model_dump()),
     }
     planned_exercises_json = json.dumps(planned_data)
 
@@ -411,6 +415,39 @@ class PlanUpdate(BaseModel):
     days: list | None = None
     auto_progression: bool | None = None
     is_draft: bool | None = None
+
+
+@router.put("/{plan_id}/rir-overrides", response_model=WorkoutPlanResponse)
+async def update_plan_rir_overrides(
+    plan_id: int,
+    overrides: PlanRirOverrides,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout plan {plan_id} not found",
+        )
+
+    try:
+        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    except (json.JSONDecodeError, TypeError):
+        planned_data = {}
+
+    if isinstance(planned_data, list):
+        planned_data = {
+            "number_of_days": len(planned_data) or 1,
+            "days": planned_data,
+        }
+
+    planned_data["rir_overrides"] = normalize_rir_overrides(overrides.model_dump())
+    plan.planned_exercises = json.dumps(planned_data)
+    await db.flush()
+    await db.refresh(plan)
+    return serialize_plan(plan)
 
 
 @router.put("/{plan_id}", response_model=WorkoutPlanResponse)

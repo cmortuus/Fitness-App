@@ -14,7 +14,8 @@ from app.database import get_db
 from app.models.exercise import Exercise
 from app.models.user import User
 from app.models.workout import ExerciseFeedback, ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutSessionAudit, WorkoutStatus
-from app.services.progression import compute_overload
+from app.services.plan_rir import resolve_rir_override
+from app.services.progression import adjust_load_for_target_rir, compute_overload
 from app.schemas.requests import (
     SetCreate,
     SetResponse,
@@ -941,6 +942,7 @@ async def create_session_from_plan(
         prior_planned: int | None,
         target_reps: int,
         ex_model,
+        target_rir: int | None = None,
     ) -> tuple[float | None, int | None]:
         """Compute overload for one side (or a bilateral set) given prior values."""
         if prior_reps is None or prior_reps <= 0:
@@ -964,7 +966,7 @@ async def create_session_from_plan(
             planned      = target_reps
 
         is_assisted = bool(ex_model and ex_model.is_assisted)
-        return compute_overload(
+        suggested_weight, suggested_reps = compute_overload(
             prior_weight=prior_weight,
             prior_reps=prior_reps,
             planned_reps=planned,
@@ -975,6 +977,18 @@ async def create_session_from_plan(
             is_bodyweight=(not is_assisted) and (prior_weight is None or prior_weight <= 0),
             body_weight_kg=body_weight_kg,
         )
+        if target_rir is not None and target_rir > 0:
+            suggested_weight = adjust_load_for_target_rir(
+                prior_weight,
+                prior_reps,
+                target_reps if target_reps > 0 else (suggested_reps or planned),
+                target_rir,
+                is_assisted=is_assisted,
+                body_weight_kg=body_weight_kg,
+            )
+            if target_reps > 0:
+                suggested_reps = target_reps
+        return suggested_weight, suggested_reps
 
     def _overload_for_set(
         exercise_id: int, set_num: int, target_reps: int, ex_model,
@@ -1001,6 +1015,11 @@ async def create_session_from_plan(
             return None, None, None, None
 
         prior_set = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
+        target_rir = resolve_rir_override(
+            planned_data,
+            exercise_id,
+            ex_model.primary_muscles if ex_model else None,
+        )
 
         left_reps  = prior_set.get("reps_left")
         right_reps = prior_set.get("reps_right")
@@ -1016,7 +1035,7 @@ async def create_session_from_plan(
             weight_kg, _ = _overload_for_side(
                 prior_weight, ref_reps,
                 prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
-                target_reps, ex_model,
+                target_reps, ex_model, target_rir,
             )
             _, new_reps_left = _overload_for_side(
                 prior_weight, left_reps,
@@ -1038,7 +1057,7 @@ async def create_session_from_plan(
         # Bilateral: standard single-side logic
         weight_kg, planned_reps = _overload_for_side(
             prior_set["weight"], prior_set["reps"],
-            prior_set.get("planned_reps"), target_reps, ex_model,
+            prior_set.get("planned_reps"), target_reps, ex_model, target_rir,
         )
         return weight_kg, planned_reps, None, None
 
