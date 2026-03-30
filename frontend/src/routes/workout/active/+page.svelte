@@ -327,6 +327,31 @@
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
   const PLATES_KG = [20, 15, 10, 5, 2.5, 1.25];
 
+  function getExerciseSearchText(exercise: Exercise | undefined): string {
+    if (!exercise) return '';
+    return `${exercise.name ?? ''} ${exercise.display_name ?? ''}`.toLowerCase();
+  }
+
+  function isRackableEzBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('rackable') && (text.includes('ez_bar') || text.includes('ez bar') || text.includes('curl_bar') || text.includes('curl bar'));
+  }
+
+  function isEzBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('ez_bar') || text.includes('ez bar') || text.includes('curl_bar') || text.includes('curl bar');
+  }
+
+  function isAxleBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('axle_bar') || text.includes('axle bar');
+  }
+
+  function isSwissBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('swiss_bar') || text.includes('swiss bar');
+  }
+
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
     if (!$settings.showPlateMath) return false;
@@ -337,9 +362,9 @@
     // Smith machine variants
     if (n.includes('smith') || d.includes('smith')) return true;
     // EZ bar / curl bar variants (plate-loaded bars)
-    if (n.includes('ez_bar') || n.includes('ez bar') || d.includes('ez bar')) return true;
-    if (n.includes('axle_bar') || d.includes('axle bar')) return true;
-    if (n.includes('swiss_bar') || d.includes('swiss bar')) return true;
+    if (isEzBarExercise(exercise)) return true;
+    if (isAxleBarExercise(exercise)) return true;
+    if (isSwissBarExercise(exercise)) return true;
     if (n.includes('rackable') || d.includes('rackable')) return true;
     // T-bar row / landmine
     if (n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || d.includes('t-bar') || d.includes('t bar')) return true;
@@ -415,9 +440,8 @@
     }
     // Specialty bars
     const n = exercise.name.toLowerCase();
-    if (n.includes('ez_bar') || n.includes('ez bar') || n.includes('curl_bar')) {
-      return n.includes('rackable') ? (mw.ezBarRackable ?? 35) : (mw.ezBar ?? 25);
-    }
+    if (isRackableEzBarExercise(exercise)) return mw.ezBarRackable ?? 35;
+    if (isEzBarExercise(exercise)) return mw.ezBar ?? 25;
     if (n.includes('safety_squat') || n.includes('ssb')) return mw.safetySquatBar ?? 65;
     if (n.includes('trap_bar') || n.includes('hex_bar')) return mw.trapBar ?? 45;
     return mw.barbell ?? defaultBar;
