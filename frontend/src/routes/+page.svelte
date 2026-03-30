@@ -77,7 +77,7 @@
 
     function sessionsForPlan(plan: WorkoutPlan) {
       return sessions.filter(s =>
-        s.status !== 'skipped' &&
+        s.status === 'completed' &&
         (s.total_sets > 0 || s.total_reps > 0) &&
         (s.workout_plan_id === plan.id || (s.name && s.name.startsWith(plan.name + ' - ')))
       );
