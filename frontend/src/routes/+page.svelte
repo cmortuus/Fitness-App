@@ -20,6 +20,7 @@
   let nutritionSummary = $state<DailySummary | null>(null);
   let insights = $state<Insight[]>([]);
   let nextWorkout = $state<NextWorkoutResolution | null>(null);
+  let showNextWorkoutInspector = $state(false);
 
   let hasActiveCurrentSession = $derived(
     !!$currentSession && ($currentSession.status === 'in_progress' || !!$currentSession.started_at)
@@ -169,6 +170,16 @@
   })());
 
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
+  let nextWorkoutInspectorSessions = $derived(
+    nextWorkout
+      ? allSessions
+          .filter(s =>
+            s.workout_plan_id === nextWorkout.plan.id ||
+            (s.name && s.name.startsWith(`${nextWorkout.plan.name} - `))
+          )
+          .slice(0, 6)
+      : []
+  );
 
   // Last completed session with a plan — for "Repeat Last" button
   // ── Dashboard customization (Apple-style widget editing) ─────────────
@@ -618,6 +629,68 @@
                     group-hover:bg-primary-600/40 transition-colors">🏋️</div>
       </div>
     </a>
+
+    <div class="mt-3 card !py-3">
+      <button
+        onclick={() => showNextWorkoutInspector = !showNextWorkoutInspector}
+        class="w-full flex items-center justify-between text-left"
+      >
+        <div>
+          <p class="text-xs font-bold uppercase tracking-widest text-zinc-500">Inspector</p>
+          <p class="text-sm text-zinc-300">Why this workout was selected</p>
+        </div>
+        <span class="text-zinc-500 text-sm">{showNextWorkoutInspector ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {#if showNextWorkoutInspector}
+        <div class="mt-3 space-y-3">
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Selected plan</p>
+              <p class="text-white font-medium">{nextWorkout.plan.name}</p>
+              <p class="text-xs text-zinc-500 mt-1">Plan #{nextWorkout.debug.selected_plan_id}</p>
+            </div>
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Rule path</p>
+              <p class="text-white font-medium">
+                {#if nextWorkout.is_complete}
+                  Plan complete
+                {:else}
+                  Completed sessions modulo plan days
+                {/if}
+              </p>
+              <p class="text-xs text-zinc-500 mt-1">
+                {nextWorkout.debug.completed_session_count} / {nextWorkout.debug.total_sessions_needed} completed
+              </p>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Recent sessions considered</p>
+            {#if nextWorkoutInspectorSessions.length > 0}
+              <div class="space-y-2">
+                {#each nextWorkoutInspectorSessions as s}
+                  <div class="flex items-center justify-between gap-3 text-sm">
+                    <div class="min-w-0">
+                      <p class="text-zinc-200 truncate">{s.name ?? 'Workout'}</p>
+                      <p class="text-xs text-zinc-500">
+                        {fmtDate(s.date)} · {s.status}
+                        {#if nextWorkout.debug.recent_session_id === s.id}
+                          · most recent matching session
+                        {/if}
+                      </p>
+                    </div>
+                    <span class="text-xs text-zinc-500 shrink-0">#{s.id}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <p class="text-sm text-zinc-500">No sessions matched this plan yet.</p>
+            {/if}
+          </div>
+        </div>
+      {/if}
+    </div>
 
   {/if}
 
