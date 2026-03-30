@@ -2,7 +2,6 @@
   import { onMount, onDestroy, tick } from 'svelte';
   import { goto } from '$app/navigation';
   import { beforeNavigate } from '$app/navigation';
-  import { localDateString } from '$lib/date';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
@@ -691,7 +690,7 @@
       let raw;
       try {
         raw = await createSession({
-          date: localDateString(),
+          date: new Date().toISOString().split('T')[0],
           name: `Workout – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
         });
       } catch (e: any) {
@@ -1819,6 +1818,10 @@
     goto('/');
   }
 
+  function blurNumericInputOnWheel(event: WheelEvent) {
+    (event.currentTarget as HTMLInputElement | null)?.blur();
+  }
+
   // ─── Conflict state (existing in-progress session blocks starting a new one) ──
   let conflictSession = $state<WorkoutSession | null>(null);
   let conflictRetry = $state<(() => Promise<void>) | null>(null); // re-run after abandoning
@@ -2454,6 +2457,7 @@
                             class="set-input"
                             onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
                             onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
+                            onwheel|preventDefault={blurNumericInputOnWheel}
                           />
                           {#if side === 'left'}
                             {#if isAssistedEx && set.weightLbs !== null}
@@ -2497,6 +2501,7 @@
                           disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min="0"
                           placeholder={side === 'left' ? 'L' : 'R'}
                           class="set-input"
+                          onwheel|preventDefault={blurNumericInputOnWheel}
                         />
 
                         <!-- Complete/Skip buttons (per-side) -->
@@ -2551,8 +2556,8 @@
                     {#each set.drops as drop, di}
                       <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
                         <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
-                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
-                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
+                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" onwheel|preventDefault={blurNumericInputOnWheel} />
+                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" onwheel|preventDefault={blurNumericInputOnWheel} />
                       </div>
                     {/each}
                     <button onclick={() => { set.drops = [...set.drops, { weightLbs: null, reps: null }]; uiExercises = [...uiExercises]; }}
@@ -2633,6 +2638,7 @@
                         class="set-input"
                         onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
                         onblur={() => { setTimeout(() => { if (focusedWeightSetId === set.localId) { focusedWeightSetId = null; focusedExerciseId = null; } }, 200); }}
+                        onwheel|preventDefault={blurNumericInputOnWheel}
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
@@ -2673,6 +2679,7 @@
                         }}
                         disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
                         class="set-input"
+                        onwheel|preventDefault={blurNumericInputOnWheel}
                       />
                       {#if set.setType === 'standard_partials'}
                         <input
@@ -2684,6 +2691,7 @@
                           }}
                           disabled={set.done} min="0" placeholder="partials"
                           class="set-input !text-teal-400 !border-teal-500/30 text-xs"
+                          onwheel|preventDefault={blurNumericInputOnWheel}
                         />
                       {/if}
                     </div>
@@ -2746,8 +2754,8 @@
                     {#each set.drops as drop, di}
                       <div class="flex items-center gap-2 pl-8 py-1 bg-zinc-800/30 rounded">
                         <span class="text-[10px] text-zinc-600 w-5">↓{di+1}</span>
-                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" />
-                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" />
+                        <input type="number" inputmode="decimal" bind:value={drop.weightLbs} class="input !py-1 !px-2 w-20 text-center text-sm" placeholder="lbs" onwheel|preventDefault={blurNumericInputOnWheel} />
+                        <input type="number" bind:value={drop.reps} class="input !py-1 !px-2 w-16 text-center text-sm" placeholder="reps" onwheel|preventDefault={blurNumericInputOnWheel} />
                       </div>
                     {/each}
                     <button onclick={() => { set.drops = [...set.drops, { weightLbs: null, reps: null }]; uiExercises = [...uiExercises]; }}
