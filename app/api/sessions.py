@@ -240,6 +240,47 @@ async def complete_session(
     return serialize_session(workout_session)
 
 
+@router.post("/{session_id}/reset-to-planned", response_model=WorkoutSessionResponse)
+async def reset_session_to_planned(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Reset a session back to a clean planned state for repair/debug workflows."""
+    workout_session = await _get_session_with_sets(db, session_id, user_id=user.id)
+    if not workout_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+
+    workout_session.status = WorkoutStatus.PLANNED
+    workout_session.started_at = None
+    workout_session.completed_at = None
+    workout_session.total_volume_kg = 0
+    workout_session.total_sets = 0
+    workout_session.total_reps = 0
+    workout_session.duration_minutes = None
+
+    for exercise_set in workout_session.sets:
+        exercise_set.actual_reps = None
+        exercise_set.actual_weight_kg = None
+        exercise_set.reps_left = None
+        exercise_set.reps_right = None
+        exercise_set.started_at = None
+        exercise_set.completed_at = None
+        exercise_set.skipped_at = None
+        exercise_set.sub_sets = None
+        exercise_set.draft_weight_kg = None
+        exercise_set.draft_reps = None
+        exercise_set.draft_reps_left = None
+        exercise_set.draft_reps_right = None
+
+    await db.flush()
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
+    return serialize_session(workout_session)
+
+
 @router.patch("/{session_id}", response_model=WorkoutSessionResponse)
 async def update_session(
     session_id: int,

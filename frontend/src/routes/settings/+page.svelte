@@ -909,6 +909,18 @@
           Update Now
         </button>
       </div>
+      <div class="flex items-center justify-between pt-2 border-t border-zinc-800">
+        <div>
+          <p class="text-sm text-zinc-300">Session repair tool</p>
+          <p class="text-xs text-zinc-500">Inspect and repair bad planned or in-progress workout state</p>
+        </div>
+        <a
+          href="/settings/session-repair"
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+        >
+          Open
+        </a>
+      </div>
     </div>
   {/if}
 

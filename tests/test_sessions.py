@@ -246,3 +246,44 @@ class TestSessionLifecycle:
         set_id = sess1["sets"][0]["id"]
         r = await client.delete(f"/api/sessions/{sess2['id']}/sets/{set_id}")
         assert r.status_code == 404
+
+    async def test_reset_session_to_planned_clears_progress_and_drafts(self, client: AsyncClient):
+        """Resetting a session should clear started/completed state and set progress."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+        set_id = sess["sets"][0]["id"]
+
+        r = await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 100.0,
+                "actual_reps": 8,
+                "draft_weight_kg": 95.0,
+                "draft_reps": 9,
+                "started_at": "2024-01-01T09:00:00",
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert r.status_code == 200
+
+        r2 = await client.post(f"/api/sessions/{sess['id']}/reset-to-planned")
+        assert r2.status_code == 200
+        data = r2.json()
+        assert data["status"] == "planned"
+        assert data["started_at"] is None
+        assert data["completed_at"] is None
+        assert data["total_volume_kg"] == 0
+        assert data["total_sets"] == 0
+        assert data["total_reps"] == 0
+        assert data["sets"][0]["actual_weight_kg"] is None
+        assert data["sets"][0]["actual_reps"] is None
+        assert data["sets"][0]["draft_weight_kg"] is None
+        assert data["sets"][0]["draft_reps"] is None
+        assert data["sets"][0]["started_at"] is None
+        assert data["sets"][0]["completed_at"] is None
+
+    async def test_reset_session_to_planned_not_found(self, client: AsyncClient):
+        """Resetting an unknown session should return 404."""
+        r = await client.post("/api/sessions/999999/reset-to-planned")
+        assert r.status_code == 404

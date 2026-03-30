@@ -171,14 +171,16 @@
 
   let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
   let nextWorkoutInspectorSessions = $derived(
-    nextWorkout
-      ? allSessions
-          .filter(s =>
-            s.workout_plan_id === nextWorkout.plan.id ||
-            (s.name && s.name.startsWith(`${nextWorkout.plan.name} - `))
-          )
-          .slice(0, 6)
-      : []
+    (() => {
+      const activeNextWorkout = nextWorkout;
+      if (!activeNextWorkout) return [];
+      return allSessions
+        .filter(s =>
+          s.workout_plan_id === activeNextWorkout.plan.id ||
+          (s.name && s.name.startsWith(`${activeNextWorkout.plan.name} - `))
+        )
+        .slice(0, 6);
+    })()
   );
 
   // Last completed session with a plan — for "Repeat Last" button
@@ -556,7 +558,7 @@
       <div class="p-5 flex items-center justify-between gap-4">
         <div>
           <p class="text-xs font-bold uppercase tracking-widest text-primary-400 mb-1">▶ Continue Workout</p>
-          <h3 class="text-xl font-bold text-white">{$currentSession.name ?? 'Workout'}</h3>
+          <h3 class="text-xl font-bold text-white">{$currentSession?.name ?? 'Workout'}</h3>
           <p class="text-sm text-zinc-400 mt-1">Resume where you left off</p>
         </div>
         <div class="w-14 h-14 rounded-2xl bg-primary-600/30 border border-primary-500/40
