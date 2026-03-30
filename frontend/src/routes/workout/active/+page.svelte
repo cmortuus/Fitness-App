@@ -2965,28 +2965,28 @@
     </div><!-- /scrollable -->
 
     <!-- ─── Rest timer banner (always visible) ──────────────────────────────── -->
-    <div class="sticky bottom-0 z-30 flex items-center px-4 py-3 border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
+    <div class="sticky bottom-0 z-30 flex items-center px-4 {restActive ? 'py-2.5' : 'py-2'} border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
       {#if restActive}
         <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
+          <div class="w-7 h-7 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
             <span class="text-primary-400 text-xs font-bold">REST</span>
           </div>
-          <span class="text-3xl font-mono font-bold tracking-tight text-white">{formatRest(restSecs)}</span>
+          <span class="text-[1.65rem] font-mono font-bold tracking-tight text-white leading-none">{formatRest(restSecs)}</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button onclick={() => { restEndTime = Math.max(Date.now() + 1000, restEndTime - 15000); restSecs = Math.max(1, Math.ceil((restEndTime - Date.now()) / 1000)); }}
-                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">−15s</button>
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[38px]">−15s</button>
           <button onclick={() => { restEndTime += 15000; restSecs = Math.ceil((restEndTime - Date.now()) / 1000); }}
-                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">+15s</button>
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[38px]">+15s</button>
           <button onclick={skipRest}
-                  class="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[40px]">Skip</button>
+                  class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[38px]">Skip</button>
         </div>
       {:else}
         <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
+          <div class="w-7 h-7 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
             <span class="text-zinc-500 text-xs font-bold">REST</span>
           </div>
-          <span class="text-sm text-zinc-500">Ready</span>
+          <span class="text-xs text-zinc-500">Ready</span>
         </div>
       {/if}
     </div>
