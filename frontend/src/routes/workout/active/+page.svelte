@@ -393,6 +393,15 @@
     return isNamedOneSidedPlateExercise(exercise);
   }
 
+  function clearPlateBannerFocus() {
+    focusedWeightSetId = null;
+    focusedExerciseId = null;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement) {
+      active.blur();
+    }
+  }
+
   // Derived: plate banner data for the currently focused weight input
   let plateBanner = $derived.by(() => {
     if (!focusedWeightSetId || !focusedExerciseId) return null;
@@ -1429,6 +1438,7 @@
   let highlightTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handlePostSetCompletion(exUiId: string) {
+    clearPlateBannerFocus();
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (!ex?.groupId) {
       startRestTimer(exUiId);
