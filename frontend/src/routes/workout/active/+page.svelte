@@ -8,7 +8,7 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback, syncSessionToPlan, patchSession,
+    saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession,
   } from '$lib/api';
   import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
@@ -235,6 +235,130 @@
     suggestion?: string;
     suggestion_detail?: string;
   }>>({});
+
+  type PersistedFeedbackState = {
+    recoveryAskedMuscles: string[];
+    effortSubmitted: number[];
+    feedbackData: Record<number, {
+      recovery_rating?: string;
+      rir?: number;
+      pump_rating?: string;
+      suggestion?: string;
+      suggestion_detail?: string;
+    }>;
+    dismissedRecoveryExerciseIds: number[];
+    dismissedEffortExerciseIds: number[];
+  };
+
+  function feedbackStorageKey(id: number): string {
+    return `hgt_session_feedback_${id}`;
+  }
+
+  function saveFeedbackDraftState() {
+    if (typeof localStorage === 'undefined' || !sessionId) return;
+    const dismissedRecoveryExerciseIds = Object.entries(showRecoveryPrompt)
+      .filter(([, visible]) => visible === false)
+      .map(([uiId]) => uiExercises.find(ex => ex.uiId === uiId)?.exerciseId)
+      .filter((exerciseId): exerciseId is number => exerciseId != null);
+    const dismissedEffortExerciseIds = Object.entries(showEffortPrompt)
+      .filter(([, visible]) => visible === false)
+      .map(([uiId]) => uiExercises.find(ex => ex.uiId === uiId)?.exerciseId)
+      .filter((exerciseId): exerciseId is number => exerciseId != null);
+
+    const payload: PersistedFeedbackState = {
+      recoveryAskedMuscles: [...recoveryAskedMuscles],
+      effortSubmitted: [...effortSubmitted],
+      feedbackData,
+      dismissedRecoveryExerciseIds,
+      dismissedEffortExerciseIds,
+    };
+    localStorage.setItem(feedbackStorageKey(sessionId), JSON.stringify(payload));
+  }
+
+  async function restoreFeedbackState(sessId: number) {
+    let nextRecoveryAskedMuscles = new Set<string>();
+    let nextEffortSubmitted = new Set<number>();
+    let nextFeedbackData: Record<number, {
+      recovery_rating?: string;
+      rir?: number;
+      pump_rating?: string;
+      suggestion?: string;
+      suggestion_detail?: string;
+    }> = {};
+    let dismissedRecoveryExerciseIds = new Set<number>();
+    let dismissedEffortExerciseIds = new Set<number>();
+
+    try {
+      const saved = await getExerciseFeedback(sessId);
+      for (const entry of saved) {
+        nextFeedbackData[entry.exercise_id] = {
+          recovery_rating: entry.recovery_rating ?? undefined,
+          rir: entry.rir ?? undefined,
+          pump_rating: entry.pump_rating ?? undefined,
+          suggestion: entry.suggestion ?? undefined,
+          suggestion_detail: entry.suggestion_detail ?? undefined,
+        };
+        if (entry.recovery_rating) {
+          const exercise = allExercises.find(e => e.id === entry.exercise_id);
+          const muscle = exercise?.primary_muscles?.[0];
+          if (muscle) nextRecoveryAskedMuscles.add(muscle);
+          dismissedRecoveryExerciseIds.add(entry.exercise_id);
+        }
+        if (entry.rir != null || entry.pump_rating || entry.suggestion) {
+          nextEffortSubmitted.add(entry.exercise_id);
+          dismissedEffortExerciseIds.add(entry.exercise_id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load saved feedback:', e);
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(feedbackStorageKey(sessId));
+      if (raw) {
+        try {
+          const parsed: PersistedFeedbackState = JSON.parse(raw);
+          nextRecoveryAskedMuscles = new Set([
+            ...nextRecoveryAskedMuscles,
+            ...(parsed.recoveryAskedMuscles ?? []),
+          ]);
+          nextEffortSubmitted = new Set([
+            ...nextEffortSubmitted,
+            ...(parsed.effortSubmitted ?? []),
+          ]);
+          nextFeedbackData = { ...nextFeedbackData, ...(parsed.feedbackData ?? {}) };
+          dismissedRecoveryExerciseIds = new Set([
+            ...dismissedRecoveryExerciseIds,
+            ...(parsed.dismissedRecoveryExerciseIds ?? []),
+          ]);
+          dismissedEffortExerciseIds = new Set([
+            ...dismissedEffortExerciseIds,
+            ...(parsed.dismissedEffortExerciseIds ?? []),
+          ]);
+        } catch (e) {
+          console.error('Failed to parse saved feedback draft:', e);
+        }
+      }
+    }
+
+    const nextShowRecoveryPrompt: Record<string, boolean> = {};
+    const nextShowEffortPrompt: Record<string, boolean> = {};
+    for (const ex of uiExercises) {
+      if (dismissedRecoveryExerciseIds.has(ex.exerciseId)) nextShowRecoveryPrompt[ex.uiId] = false;
+      if (dismissedEffortExerciseIds.has(ex.exerciseId)) nextShowEffortPrompt[ex.uiId] = false;
+    }
+
+    recoveryAskedMuscles = nextRecoveryAskedMuscles;
+    effortSubmitted = nextEffortSubmitted;
+    feedbackData = nextFeedbackData;
+    showRecoveryPrompt = nextShowRecoveryPrompt;
+    showEffortPrompt = nextShowEffortPrompt;
+  }
+
+  function clearFeedbackDraftState(id: number | null) {
+    if (typeof localStorage === 'undefined' || !id) return;
+    localStorage.removeItem(feedbackStorageKey(id));
+  }
 
   function getMuscleGroup(exerciseId: number): string {
     const ex = allExercises.find(e => e.id === exerciseId);
@@ -569,7 +693,10 @@
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        if (sessionId) saveDrafts();
+        if (sessionId) {
+          saveDrafts();
+          saveFeedbackDraftState();
+        }
       } else {
         // App came back to foreground — catch up the rest timer
         if (restActive && restEndTime > 0) {
@@ -586,13 +713,19 @@
       }
     });
     window.addEventListener('beforeunload', () => {
-      if (sessionId) saveDrafts();
+      if (sessionId) {
+        saveDrafts();
+        saveFeedbackDraftState();
+      }
     });
   }
 
   // Save drafts before navigating away — session will auto-resume when you come back
   beforeNavigate(() => {
-    if (sessionId) saveDrafts();
+    if (sessionId) {
+      saveDrafts();
+      saveFeedbackDraftState();
+    }
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────
@@ -892,6 +1025,8 @@
           groupType: null,
         };
       });
+
+      await restoreFeedbackState(sess.id);
     } catch (e) {
       error = 'Failed to resume workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
@@ -1717,6 +1852,7 @@
   // ─── Finish workout ───────────────────────────────────────────────────────
   async function doFinish() {
     if (!sessionId) { goto('/'); return; }
+    const finishedSessionId = sessionId;
     finishing = true;
     try {
       await completeSession(sessionId);
@@ -1746,6 +1882,7 @@
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
+    clearFeedbackDraftState(finishedSessionId);
     // Compute PRs before clearing UI state
     prs = detectPRs();
     // Write workout to HealthKit (no-op on web/PWA)
@@ -1760,6 +1897,7 @@
 
   async function doDiscard() {
     if (!sessionId) { goto('/'); return; }
+    const discardedSessionId = sessionId;
     const confirmed = confirm('Discard this workout? All progress will be permanently deleted.');
     if (!confirmed) return;
     try {
@@ -1770,6 +1908,7 @@
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
+    clearFeedbackDraftState(discardedSessionId);
     goto('/');
   }
 
