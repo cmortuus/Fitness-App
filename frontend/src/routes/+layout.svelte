@@ -47,8 +47,7 @@
 
       // Ensure branch cookie matches DB preference (survives cache clears)
       if (typeof document !== 'undefined') {
-        const pref = $settings as any;
-        const wantsDev = pref.branchPreference === 'dev';
+        const wantsDev = $settings.branchPreference === 'dev';
         const hasCookie = document.cookie.includes('gymtracker_branch=dev');
         if (wantsDev && !hasCookie) {
           document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
