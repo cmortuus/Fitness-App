@@ -24,6 +24,7 @@ APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$APP_DIR"
 BACKUP_DIR="$APP_DIR/backups"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+LOG_TZ="${DEPLOY_LOG_TZ:-America/New_York}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,9 +32,17 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-log()  { echo -e "${GREEN}[deploy $(date '+%Y-%m-%d %H:%M:%S')]${NC} $*"; }
-warn() { echo -e "${YELLOW}[warn $(date '+%H:%M:%S')]${NC} $*"; }
-err()  { echo -e "${RED}[error $(date '+%H:%M:%S')]${NC} $*" >&2; }
+log_timestamp() {
+  TZ="$LOG_TZ" date '+%Y-%m-%d %H:%M:%S %Z'
+}
+
+short_log_timestamp() {
+  TZ="$LOG_TZ" date '+%H:%M:%S %Z'
+}
+
+log()  { echo -e "${GREEN}[deploy $(log_timestamp)]${NC} $*"; }
+warn() { echo -e "${YELLOW}[warn $(short_log_timestamp)]${NC} $*"; }
+err()  { echo -e "${RED}[error $(short_log_timestamp)]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[info]${NC} $*"; }
 
 # ── Check if Docker is running ────────────────────────────────────────────────
