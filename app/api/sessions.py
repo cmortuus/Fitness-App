@@ -93,37 +93,14 @@ def serialize_session(workout_session: WorkoutSession) -> dict:
     }
 
 
-async def _sync_session_totals_and_status(
-    db: AsyncSession,
-    session: WorkoutSession,
-    *,
-    all_sets: list[ExerciseSet] | None = None,
-) -> None:
-    """Keep aggregate session fields aligned with the current set state."""
-    if all_sets is None:
-        all_sets_result = await db.execute(
-            select(ExerciseSet).where(ExerciseSet.workout_session_id == session.id)
-        )
-        all_sets = all_sets_result.scalars().all()
+def _set_total_reps(exercise_set: ExerciseSet) -> int:
+    if exercise_set.actual_reps is not None:
+        return exercise_set.actual_reps
+    return (exercise_set.reps_left or 0) + (exercise_set.reps_right or 0)
 
-    session.total_sets = len(all_sets)
-    session.total_reps = sum(s.actual_reps or 0 for s in all_sets)
-    session.total_volume_kg = sum(
-        (s.actual_reps or 0) * (s.actual_weight_kg or 0) for s in all_sets
-    )
 
-    if session.status == WorkoutStatus.COMPLETED:
-        return
-
-    completed_sets = [s for s in all_sets if s.completed_at is not None]
-    if completed_sets:
-        session.status = WorkoutStatus.IN_PROGRESS
-        if session.started_at is None:
-            first_completed_at = min(s.completed_at for s in completed_sets if s.completed_at is not None)
-            session.started_at = first_completed_at or datetime.utcnow()
-    else:
-        session.status = WorkoutStatus.PLANNED
-        session.started_at = None
+def _set_total_volume_kg(exercise_set: ExerciseSet) -> float:
+    return _set_total_reps(exercise_set) * (exercise_set.actual_weight_kg or 0)
 
 
 @router.get("/", response_model=list[WorkoutSessionResponse])
@@ -197,7 +174,7 @@ async def start_session(
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Open a workout session without starting the timer yet."""
+    """Start a workout session."""
     result = await db.execute(
         select(WorkoutSession)
         .options(selectinload(WorkoutSession.sets))
@@ -229,6 +206,8 @@ async def start_session(
             },
         )
 
+    workout_session.status = WorkoutStatus.IN_PROGRESS
+    workout_session.started_at = datetime.utcnow()
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
@@ -474,12 +453,19 @@ async def add_set(
     db.add(exercise_set)
     await db.flush()
 
+    # Update session totals
     session_result = await db.execute(
         select(WorkoutSession).where(WorkoutSession.id == session_id)
     )
     session = session_result.scalar_one_or_none()
     if session:
-        await _sync_session_totals_and_status(db, session)
+        all_sets_result = await db.execute(
+            select(ExerciseSet).where(ExerciseSet.workout_session_id == session_id)
+        )
+        all_sets = all_sets_result.scalars().all()
+        session.total_sets = len(all_sets)
+        session.total_reps = sum(_set_total_reps(s) for s in all_sets)
+        session.total_volume_kg = sum(_set_total_volume_kg(s) for s in all_sets)
         await db.flush()
 
     await db.refresh(exercise_set)
@@ -524,16 +510,20 @@ async def update_set(
             value = value.replace(tzinfo=None)
         setattr(exercise_set, field, value)
 
+    # Update session totals
     session_result = await db.execute(
         select(WorkoutSession).where(WorkoutSession.id == session_id)
     )
     session = session_result.scalar_one_or_none()
     if session:
+        # Recalculate totals from all sets
         all_sets_result = await db.execute(
             select(ExerciseSet).where(ExerciseSet.workout_session_id == session_id)
         )
         all_sets = all_sets_result.scalars().all()
-        await _sync_session_totals_and_status(db, session, all_sets=all_sets)
+        session.total_sets = len(all_sets)
+        session.total_reps = sum(_set_total_reps(s) for s in all_sets)
+        session.total_volume_kg = sum(_set_total_volume_kg(s) for s in all_sets)
 
     await db.flush()
     await db.refresh(exercise_set)
@@ -548,16 +538,15 @@ async def delete_set(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete a set from a workout session."""
+    # Verify session belongs to user
     sess_result = await db.execute(
         select(WorkoutSession).where(WorkoutSession.id == session_id, WorkoutSession.user_id == user.id)
     )
-    session = sess_result.scalar_one_or_none()
-    if not session:
+    if not sess_result.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workout session {session_id} not found",
         )
-
     result = await db.execute(
         select(ExerciseSet).where(
             ExerciseSet.id == set_id,
@@ -572,14 +561,22 @@ async def delete_set(
         )
     await db.delete(exercise_set)
 
-    remaining_result = await db.execute(
-        select(ExerciseSet).where(
-            ExerciseSet.workout_session_id == session_id,
-            ExerciseSet.id != set_id,
-        )
+    # Recalculate session totals after deletion
+    session_result = await db.execute(
+        select(WorkoutSession).where(WorkoutSession.id == session_id)
     )
-    remaining = remaining_result.scalars().all()
-    await _sync_session_totals_and_status(db, session, all_sets=remaining)
+    session = session_result.scalar_one_or_none()
+    if session:
+        remaining_result = await db.execute(
+            select(ExerciseSet).where(
+                ExerciseSet.workout_session_id == session_id,
+                ExerciseSet.id != set_id,
+            )
+        )
+        remaining = remaining_result.scalars().all()
+        session.total_sets = len(remaining)
+        session.total_reps = sum(_set_total_reps(s) for s in remaining)
+        session.total_volume_kg = sum(_set_total_volume_kg(s) for s in remaining)
 
     await db.flush()
 
