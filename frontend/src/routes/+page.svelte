@@ -26,6 +26,17 @@
     !!$currentSession && ($currentSession.status === 'in_progress' || !!$currentSession.started_at)
   );
 
+  function reconcileCurrentSession(sessions: WorkoutSession[]) {
+    if (!$currentSession) return;
+    const fresh = sessions.find((session) => session.id === $currentSession?.id) ?? null;
+    const isActive = !!fresh && (fresh.status === 'in_progress' || (!!fresh.started_at && !fresh.completed_at));
+    if (!isActive) {
+      currentSession.set(null);
+      return;
+    }
+    currentSession.set(fresh);
+  }
+
   // Keep the global nextWorkoutUrl store in sync so the bottom nav Workout
   // tab deep-links straight to the right plan + day.
   $effect(() => {
@@ -57,6 +68,7 @@
         getInsights().catch(() => []),
       ]);
       allSessions = sessions;
+      reconcileCurrentSession(sessions);
       workoutPlans.set(plans);
       nextWorkout = next;
       nutritionSummary = nutrition;
@@ -74,6 +86,7 @@
       await archivePlan(planId);
       const [sessions, plans, next] = await Promise.all([getSessions({ limit: 200 }), getPlans(), getNextWorkout().catch(() => null)]);
       allSessions = sessions;
+      reconcileCurrentSession(sessions);
       workoutPlans.set(plans);
       nextWorkout = next;
     } catch (e) {
