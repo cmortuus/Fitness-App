@@ -38,6 +38,9 @@ export interface ProgressionSettings {
 export interface DashboardWidget {
   id: string;
   enabled: boolean;
+  type?: 'standard' | 'miniGraph';
+  exerciseId?: number | null;
+  exerciseName?: string | null;
 }
 
 export interface SettingsMeta {
@@ -123,6 +126,7 @@ const defaultSettings: AppSettings = {
   dashboardWidgets: [
     { id: 'stats', enabled: true },
     { id: 'nextWorkout', enabled: true },
+    { id: 'nextWorkoutInspector', enabled: true },
     { id: 'nutrition', enabled: true },
     { id: 'insights', enabled: true },
     { id: 'calendar', enabled: true },
