@@ -191,7 +191,11 @@
           style="padding-top: env(safe-area-inset-top);"
   >
     <div class="flex items-center justify-between px-4 h-14">
-      <span class="text-lg font-bold gradient-text tracking-tight">GymTracker</span>
+      <a href="/"
+         class="text-lg font-bold gradient-text tracking-tight hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary-500/60 rounded-sm"
+      >
+        GymTracker
+      </a>
 
       <div class="flex items-center gap-3">
         <!-- Desktop nav links (hidden on mobile) -->
