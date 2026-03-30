@@ -30,50 +30,66 @@ class WorkoutSyncService {
 
     /// Fetch recent completed sessions and sync unsynced ones to HealthKit
     func syncRecentWorkouts() async {
-        guard isSyncEnabled else { return }
+        guard isSyncEnabled else {
+            print("[WorkoutSync] Skipping sync because workout sync is disabled")
+            return
+        }
         var authorized = HealthKitManager.shared.isAuthorized
+        print("[WorkoutSync] Starting recent workout sync. authorized=\(authorized) cachedSyncedCount=\(syncedIds.count)")
         if !authorized {
+            print("[WorkoutSync] Requesting HealthKit authorization before workout sync")
             authorized = await HealthKitManager.shared.requestAuthorization()
         }
-        guard authorized else { return }
+        guard authorized else {
+            print("[WorkoutSync] Aborting sync because HealthKit authorization was not granted")
+            return
+        }
 
         do {
             // Fetch recent completed sessions
             let sessions: [WorkoutSession] = try await APIClient.shared.get("/sessions/",
                 query: [.init(name: "limit", value: "20")])
             let completed = sessions.filter { $0.status == "completed" && $0.completed_at != nil }
+            print("[WorkoutSync] Fetched \(sessions.count) recent sessions, \(completed.count) eligible completed sessions")
 
             var newlySynced = 0
             for session in completed {
-                if !syncedIds.contains(session.id) {
-                    await writeSessionToHealthKit(session)
+                if syncedIds.contains(session.id) {
+                    print("[WorkoutSync] Skipping session \(session.id) '\(session.name ?? "Workout")' because it is already marked synced")
+                    continue
+                }
+
+                let didSync = await writeSessionToHealthKit(session)
+                if didSync {
                     syncedIds.insert(session.id)
                     newlySynced += 1
                 }
             }
 
             UserDefaults.standard.set(Date(), forKey: "healthkit_last_sync")
-            if newlySynced > 0 {
-                print("[WorkoutSync] Synced \(newlySynced) workouts to HealthKit")
-            }
+            print("[WorkoutSync] Sync finished. newlySynced=\(newlySynced)")
         } catch {
             print("[WorkoutSync] Error: \(error)")
         }
     }
 
-    private func writeSessionToHealthKit(_ session: WorkoutSession) async {
+    private func writeSessionToHealthKit(_ session: WorkoutSession) async -> Bool {
         // Parse dates
         let iso = ISO8601DateFormatter()
         iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let isoBasic = ISO8601DateFormatter()
 
         guard let startStr = session.started_at,
-              let start = iso.date(from: startStr) ?? isoBasic.date(from: startStr) else { return }
+              let start = iso.date(from: startStr) ?? isoBasic.date(from: startStr) else {
+            print("[WorkoutSync] Skipping session \(session.id) '\(session.name ?? "Workout")' because started_at is missing or unparsable: \(session.started_at ?? "nil")")
+            return false
+        }
         let end: Date
         if let endStr = session.completed_at,
            let parsed = iso.date(from: endStr) ?? isoBasic.date(from: endStr) {
             end = parsed
         } else {
+            print("[WorkoutSync] Session \(session.id) '\(session.name ?? "Workout")' has missing/unparsable completed_at (\(session.completed_at ?? "nil")); defaulting end time to +1 hour")
             end = start.addingTimeInterval(3600) // default 1 hour
         }
 
@@ -84,8 +100,10 @@ class WorkoutSyncService {
         // Simple calorie estimation: avg MET 5.0 for strength training
         let hours = duration / 3600.0
         let calories = max(1, 5.0 * max(bodyWeightKg, 75.0) * hours)
+        print("[WorkoutSync] Writing session \(session.id) '\(session.name ?? "Workout")' to HealthKit start=\(start) end=\(end) durationSeconds=\(Int(duration)) sets=\(totalSets) calories=\(Int(calories))")
 
-        await HealthKitManager.shared.writeWorkoutFromAPI(
+        return await HealthKitManager.shared.writeWorkoutFromAPI(
+            sessionId: session.id,
             name: session.name ?? "Workout",
             startDate: start,
             endDate: end,

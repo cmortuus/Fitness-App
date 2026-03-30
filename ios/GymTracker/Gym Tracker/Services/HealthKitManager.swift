@@ -215,14 +215,18 @@ final class HealthKitManager: @unchecked Sendable {
     /// Formula: kcal = MET × bodyWeightKg × durationHours
     /// Write a workout from API session data to HealthKit
     func writeWorkoutFromAPI(
+        sessionId: Int? = nil,
         name: String,
         startDate: Date,
         endDate: Date,
         totalCalories: Double,
         totalSets: Int,
         totalVolume: Double
-    ) async {
-        guard isAuthorized else { return }
+    ) async -> Bool {
+        guard isAuthorized else {
+            print("[HealthKit] Refusing workout sync for session \(sessionId.map(String.init) ?? "?") because HealthKit is not authorized")
+            return false
+        }
 
         let calorieQuantity = HKQuantity(unit: .kilocalorie(), doubleValue: totalCalories)
 
@@ -242,6 +246,7 @@ final class HealthKitManager: @unchecked Sendable {
         )
 
         do {
+            print("[HealthKit] Saving workout session \(sessionId.map(String.init) ?? "?") '\(name)' start=\(startDate) end=\(endDate) totalSets=\(totalSets) totalVolumeKg=\(totalVolume)")
             try await store.save(workout)
 
             let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
@@ -253,9 +258,11 @@ final class HealthKitManager: @unchecked Sendable {
             )
             try await store.addSamples([energySample], to: workout)
 
-            print("[HealthKit] Synced workout '\(name)': \(Int(totalCalories)) kcal")
+            print("[HealthKit] Synced workout session \(sessionId.map(String.init) ?? "?") '\(name)': \(Int(totalCalories)) kcal")
+            return true
         } catch {
-            print("[HealthKit] Save workout error: \(error)")
+            print("[HealthKit] Save workout error for session \(sessionId.map(String.init) ?? "?") '\(name)': \(error)")
+            return false
         }
     }
 }
