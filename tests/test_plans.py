@@ -2,7 +2,7 @@
 import pytest
 from httpx import AsyncClient
 
-from tests.conftest import create_exercise, create_plan
+from tests.conftest import create_exercise, create_plan, start_session_from_plan, log_set
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
 
@@ -92,6 +92,80 @@ class TestPlansCRUD:
         assert r.status_code == 200
         data = r.json()
         assert data["is_archived"] is True
+
+    async def test_next_workout_defaults_to_first_day(self, client: AsyncClient):
+        """GET /plans/next-workout returns day 1 when nothing is completed yet."""
+        ex = await create_exercise(client)
+        r = await client.post(
+            "/api/plans/",
+            json={
+                "name": "Two Day Plan",
+                "block_type": "hypertrophy",
+                "duration_weeks": 4,
+                "number_of_days": 2,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Monday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 3, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                    {
+                        "day_number": 2,
+                        "day_name": "Tuesday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 3, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        next_r = await client.get("/api/plans/next-workout")
+        assert next_r.status_code == 200
+        data = next_r.json()
+        assert data["plan"]["name"] == "Two Day Plan"
+        assert data["day"]["day_name"] == "Monday"
+        assert data["day_number"] == 1
+        assert data["week_number"] == 1
+        assert data["is_complete"] is False
+
+    async def test_next_workout_advances_after_completed_day(self, client: AsyncClient):
+        """GET /plans/next-workout advances to the next day after a completion."""
+        ex = await create_exercise(client)
+        r = await client.post(
+            "/api/plans/",
+            json={
+                "name": "Two Day Plan",
+                "block_type": "hypertrophy",
+                "duration_weeks": 4,
+                "number_of_days": 2,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Monday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 1, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                    {
+                        "day_number": 2,
+                        "day_name": "Tuesday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 1, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+        plan = r.json()
+
+        sess = await start_session_from_plan(client, plan["id"], day=1)
+        await log_set(client, sess["id"], sess["sets"][0]["id"], 100.0, 8)
+        complete_r = await client.post(f"/api/sessions/{sess['id']}/complete")
+        assert complete_r.status_code == 200, complete_r.text
+
+        next_r = await client.get("/api/plans/next-workout")
+        assert next_r.status_code == 200
+        data = next_r.json()
+        assert data["day"]["day_name"] == "Tuesday"
+        assert data["day_number"] == 2
+        assert data["week_number"] == 1
 
     async def test_reuse_plan(self, client: AsyncClient):
         """POST /plans/{id}/reuse creates new unarchived copy."""
