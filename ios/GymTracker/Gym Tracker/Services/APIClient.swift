@@ -4,6 +4,11 @@ import Foundation
 final class APIClient: Sendable {
     static let shared = APIClient()
 
+    private enum BranchPreference: String {
+        case main
+        case dev
+    }
+
     private let baseURL: String = {
         if let url = Bundle.main.object(forInfoDictionaryKey: "API_BASE_URL") as? String, !url.isEmpty {
             return url
@@ -18,14 +23,6 @@ final class APIClient: Sendable {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 15
-        // Route to the dev container via nginx cookie
-        let cookie = HTTPCookie(properties: [
-            .domain: "lethal.dev",
-            .path: "/",
-            .name: "gymtracker_branch",
-            .value: "dev",
-        ])!
-        config.httpCookieStorage?.setCookie(cookie)
         session = URLSession(configuration: config)
 
         decoder = JSONDecoder()
@@ -53,6 +50,7 @@ final class APIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyBranchRouting(to: &request)
 
         // Attach auth token (access MainActor property)
         if !skipAuth {
@@ -117,6 +115,7 @@ final class APIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyBranchRouting(to: &request)
 
         let token = await AuthService.shared.accessToken
         if let token {
@@ -185,6 +184,22 @@ final class APIClient: Sendable {
     private func encodeToDictionary(_ value: any Encodable) throws -> Any {
         let data = try encoder.encode(EncodableWrapper(value))
         return try JSONSerialization.jsonObject(with: data)
+    }
+
+    private func applyBranchRouting(to request: inout URLRequest) {
+        guard request.url?.host == "lethal.dev" else { return }
+
+        switch currentBranchPreference() {
+        case .dev:
+            request.setValue("gymtracker_branch=dev", forHTTPHeaderField: "Cookie")
+        case .main:
+            request.setValue(nil, forHTTPHeaderField: "Cookie")
+        }
+    }
+
+    private func currentBranchPreference() -> BranchPreference {
+        let raw = UserDefaults.standard.string(forKey: "branchPreference") ?? BranchPreference.main.rawValue
+        return BranchPreference(rawValue: raw) ?? .main
     }
 }
 

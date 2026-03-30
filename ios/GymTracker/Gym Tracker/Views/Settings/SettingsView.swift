@@ -4,6 +4,7 @@ import HealthKit
 // MARK: - UserDefaults Keys (shared across views via @AppStorage)
 
 enum SettingsKey {
+    static let branchPreference    = "branchPreference"
     static let weightUnit          = "weightUnit"
     static let heightUnit          = "heightUnit"
     static let heightInches        = "heightInches"
@@ -57,6 +58,7 @@ enum SettingsKey {
 
 /// JSON structure matching the web app's settings format for cross-platform sync.
 struct SettingsJSON: Codable {
+    var branchPreference: String?
     var weightUnit: String?
     var heightUnit: String?
     var progressionStyle: String?
@@ -97,6 +99,7 @@ enum SettingsSync {
             let remote: SettingsJSON = try await APIClient.shared.get("/auth/settings")
             let ud = UserDefaults.standard
 
+            if let v = remote.branchPreference { ud.set(v, forKey: SettingsKey.branchPreference) }
             if let v = remote.weightUnit { ud.set(v, forKey: SettingsKey.weightUnit) }
             if let v = remote.heightUnit { ud.set(v, forKey: SettingsKey.heightUnit) }
             if let v = remote.progressionStyle { ud.set(v, forKey: SettingsKey.progressionStyle) }
@@ -195,6 +198,7 @@ enum SettingsSync {
         ]
 
         let settings = SettingsJSON(
+            branchPreference: ud.string(forKey: SettingsKey.branchPreference) ?? "main",
             weightUnit: ud.string(forKey: SettingsKey.weightUnit) ?? "lbs",
             heightUnit: ud.string(forKey: SettingsKey.heightUnit) ?? "ft",
             progressionStyle: ud.string(forKey: SettingsKey.progressionStyle) ?? "rep",
