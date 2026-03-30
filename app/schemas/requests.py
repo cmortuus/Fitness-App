@@ -106,7 +106,7 @@ class SetUpdate(BaseModel):
     reps_left: int | None = None
     reps_right: int | None = None
     set_type: str | None = None
-    sub_sets: str | None = None  # JSON for drop set entries
+    sub_sets: list | str | None = None
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None

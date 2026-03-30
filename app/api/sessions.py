@@ -634,6 +634,8 @@ async def update_set(
         # Strip timezone info — DB uses naive timestamps
         if isinstance(value, datetime) and value.tzinfo is not None:
             value = value.replace(tzinfo=None)
+        if field == "sub_sets" and isinstance(value, list):
+            value = json.dumps(value)
         setattr(exercise_set, field, value)
 
     # Update session totals

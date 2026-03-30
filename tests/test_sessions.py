@@ -98,6 +98,28 @@ class TestSessionLifecycle:
         assert data["actual_weight_kg"] == 80.0
         assert data["actual_reps"] == 10
 
+    async def test_log_set_with_partials(self, client: AsyncClient):
+        """PATCH /sessions/{id}/sets/{set_id} accepts partial-rep sub_sets payloads."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+
+        set_id = sess["sets"][0]["id"]
+        r = await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 35.0,
+                "actual_reps": 10,
+                "set_type": "standard_partials",
+                "sub_sets": [{"weight_kg": 35.0, "reps": 4, "type": "partial"}],
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert r.status_code == 200
+        data = r.json()
+        assert data["set_type"] == "standard_partials"
+        assert data["sub_sets"] == [{"weight_kg": 35.0, "reps": 4, "type": "partial"}]
+
     async def test_unilateral_set_updates_session_rep_totals(self, client: AsyncClient):
         """Unilateral reps should contribute to session total_reps and volume."""
         ex = await create_exercise(client, is_unilateral=True)
