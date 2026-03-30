@@ -334,13 +334,21 @@
     if (!exercise) return false;
     if (!$settings.showPlateMath) return false;
     if (exercise.equipment_type === 'barbell' || exercise.equipment_type === 'plate_loaded') return true;
-    // Fallback: check name prefix for exercises that haven't been re-seeded yet
+    // Fallback: check name for plate-loaded exercises with wrong equipment_type
     const n = exercise.name?.toLowerCase() ?? '';
-    const prefix = n.split('_')[0];
-    if (['barbell', 'smith', 'tbar', 'belt', 'plate'].includes(prefix)) return true;
-    // Multi-word prefixes and variants
-    if (n.startsWith('t_bar') || n.startsWith('t-bar') || n.includes('t bar') || n.includes('landmine')) return true;
-    if (n.startsWith('plate_loaded')) return true;
+    const d = (exercise.display_name ?? '').toLowerCase();
+    // Smith machine variants
+    if (n.includes('smith') || d.includes('smith')) return true;
+    // EZ bar / curl bar variants (plate-loaded bars)
+    if (n.includes('ez_bar') || n.includes('ez bar') || d.includes('ez bar')) return true;
+    if (n.includes('axle_bar') || d.includes('axle bar')) return true;
+    if (n.includes('swiss_bar') || d.includes('swiss bar')) return true;
+    if (n.includes('rackable') || d.includes('rackable')) return true;
+    // T-bar row / landmine
+    if (n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || d.includes('t-bar') || d.includes('t bar')) return true;
+    if (n.includes('landmine') || d.includes('landmine')) return true;
+    // Belt squat, plate loaded prefix
+    if (n.includes('belt_squat') || n.startsWith('plate_loaded') || d.includes('belt squat')) return true;
     return false;
   }
 
