@@ -169,6 +169,7 @@ export interface Exercise {
   equipment_type: 'barbell' | 'dumbbell' | 'cable' | 'machine' | 'plate_loaded' | 'bodyweight' | 'band' | 'kettlebell' | 'other';
   is_unilateral: boolean;
   is_assisted: boolean;
+  is_prime: boolean;
   description: string | null;
   primary_muscles: string[];
   secondary_muscles: string[];
@@ -435,6 +436,8 @@ export async function createExercise(data: {
   display_name: string;
   movement_type?: 'compound' | 'isolation';
   body_region?: 'upper' | 'lower' | 'full_body';
+  equipment_type?: string;
+  is_prime?: boolean;
   description?: string;
   primary_muscles?: string[];
   secondary_muscles?: string[];

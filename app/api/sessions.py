@@ -83,6 +83,7 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "reps_right": exercise_set.reps_right,
         "set_type": exercise_set.set_type or "standard",
         "sub_sets": json.loads(exercise_set.sub_sets) if exercise_set.sub_sets else None,
+        "peg_weights": json.loads(exercise_set.peg_weights) if exercise_set.peg_weights else None,
         "notes": exercise_set.notes,
         "started_at": exercise_set.started_at,
         "completed_at": exercise_set.completed_at,
@@ -656,7 +657,18 @@ async def update_set(
             value = value.replace(tzinfo=None)
         if field == "sub_sets" and isinstance(value, list):
             value = json.dumps(value)
+        if field == "peg_weights" and isinstance(value, (dict, list)):
+            value = json.dumps(value)
         setattr(exercise_set, field, value)
+
+    # Auto-calculate total weight from peg_weights if provided
+    if "peg_weights" in update_data and exercise_set.peg_weights:
+        try:
+            pegs = json.loads(exercise_set.peg_weights) if isinstance(exercise_set.peg_weights, str) else exercise_set.peg_weights
+            per_side = sum(pegs.get(f"peg{i}", 0) for i in range(1, 4))
+            exercise_set.actual_weight_kg = round(per_side * 2, 2)
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
     # Update session totals
     session_result = await db.execute(

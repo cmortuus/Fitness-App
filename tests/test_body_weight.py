@@ -23,9 +23,9 @@ class TestBodyWeightCRUD:
 
     async def test_list_returns_newest_first(self, client: AsyncClient):
         """Multiple entries are returned newest-first."""
-        await client.post("/api/body-weight/", json={"weight_kg": 80.0})
-        await client.post("/api/body-weight/", json={"weight_kg": 81.0})
-        await client.post("/api/body-weight/", json={"weight_kg": 82.0})
+        await client.post("/api/body-weight/", json={"weight_kg": 80.0, "recorded_at": "2026-03-28T08:00:00"})
+        await client.post("/api/body-weight/", json={"weight_kg": 81.0, "recorded_at": "2026-03-29T08:00:00"})
+        await client.post("/api/body-weight/", json={"weight_kg": 82.0, "recorded_at": "2026-03-30T08:00:00"})
 
         r = await client.get("/api/body-weight/")
         assert r.status_code == 200
@@ -72,8 +72,8 @@ class TestBodyWeightCRUD:
 
     async def test_limit_parameter(self, client: AsyncClient):
         """GET /body-weight/?limit=2 returns at most 2 entries."""
-        for w in [70.0, 71.0, 72.0, 73.0]:
-            await client.post("/api/body-weight/", json={"weight_kg": w})
+        for i, w in enumerate([70.0, 71.0, 72.0, 73.0]):
+            await client.post("/api/body-weight/", json={"weight_kg": w, "recorded_at": f"2026-03-{25+i}T08:00:00"})
 
         r = await client.get("/api/body-weight/", params={"limit": 2})
         assert r.status_code == 200

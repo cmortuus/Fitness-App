@@ -13,6 +13,7 @@
   import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
+  import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
   import html2canvas from 'html2canvas';
   import { writeWorkout } from '$lib/healthkit';
 
@@ -97,6 +98,7 @@
     setType: string;  // 'standard' | 'standard_partials' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
     partialReps: number | null;  // for standard_partials — partial ROM reps after full ROM
     drops: { weightLbs: number | null; reps: number | null }[];  // for drop sets only
+    pegWeights: { peg1: number; peg2: number; peg3: number } | null;  // Prime machines: per-side weight per peg
   }
 
   interface UIExercise {
@@ -517,6 +519,32 @@
     return isNamedOneSidedPlateExercise(exercise);
   }
 
+  /** True if exercise is a Prime plate-loaded machine (3-peg tracking) */
+  function isPrimePlateLoaded(exercise: Exercise | undefined): boolean {
+    if (!exercise) return false;
+    return exercise.is_prime && exercise.equipment_type === 'plate_loaded';
+  }
+
+  /** Distribute total per-side weight across 3 pegs (peg3 first, then peg2, then peg1).
+   *  Uses plate increments for clean distribution. */
+  function distributeToPegs(totalPerSide: number): { peg1: number; peg2: number; peg3: number } {
+    const increment = $settings.weightUnit === 'lbs' ? 5 : 2.5;
+    // For now, unlimited peg capacity — fill peg3 first
+    // Round total to increment
+    const rounded = Math.round(totalPerSide / increment) * increment;
+    // Simple strategy: put everything on peg3
+    // In practice, users will adjust per-peg manually and overload will
+    // suggest incrementing peg3 first
+    return { peg1: 0, peg2: 0, peg3: Math.max(0, rounded) };
+  }
+
+  /** Update total weight from peg values */
+  function syncWeightFromPegs(set: UISet) {
+    if (!set.pegWeights) return;
+    const perSide = set.pegWeights.peg1 + set.pegWeights.peg2 + set.pegWeights.peg3;
+    set.weightLbs = roundWeight(perSide * 2);
+  }
+
   function clearPlateBannerFocus() {
     focusedWeightSetId = null;
     focusedExerciseId = null;
@@ -533,6 +561,8 @@
       if (ex.exerciseId !== focusedExerciseId) continue;
       const exercise = allExercises.find((e: Exercise) => e.id === ex.exerciseId);
       if (!exercise || !shouldShowPlates(exercise)) return null;
+      // Prime machines use PrimePegVisual instead
+      if (isPrimePlateLoaded(exercise)) return null;
       for (let i = 0; i < ex.sets.length; i++) {
         const set = ex.sets[i];
         if (set.localId === focusedWeightSetId) {
@@ -547,6 +577,28 @@
             isLbs: $settings.weightUnit === 'lbs',
             oneSided: isOneSidedPlateExercise(exercise),
             prevWeight: prevWeight && prevWeight > bw ? prevWeight : null,
+          };
+        }
+      }
+    }
+    return null;
+  });
+
+  // Derived: Prime peg banner data for the currently focused weight input
+  let primePegBanner = $derived.by(() => {
+    if (!focusedWeightSetId || !focusedExerciseId) return null;
+    for (const ex of uiExercises) {
+      if (ex.exerciseId !== focusedExerciseId) continue;
+      const exercise = allExercises.find((e: Exercise) => e.id === ex.exerciseId);
+      if (!exercise || !isPrimePlateLoaded(exercise)) return null;
+      for (let i = 0; i < ex.sets.length; i++) {
+        const set = ex.sets[i];
+        if (set.localId === focusedWeightSetId && set.pegWeights) {
+          const prevPegs = i > 0 ? ex.sets[i - 1].pegWeights : null;
+          return {
+            pegWeights: set.pegWeights,
+            isLbs: $settings.weightUnit === 'lbs',
+            prevPegWeights: prevPegs,
           };
         }
       }
@@ -896,6 +948,11 @@
                 weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
                 reps: d.reps ?? null,
               })) : [],
+              pegWeights: bset?.peg_weights ? {
+                peg1: fromKg(bset.peg_weights.peg1 ?? 0),
+                peg2: fromKg(bset.peg_weights.peg2 ?? 0),
+                peg3: fromKg(bset.peg_weights.peg3 ?? 0),
+              } : null,
             });
           }
           return {
@@ -1054,6 +1111,11 @@
               weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
               reps: d.reps ?? null,
             })) : [],
+            pegWeights: bset.peg_weights ? {
+              peg1: fromKg(bset.peg_weights.peg1 ?? 0),
+              peg2: fromKg(bset.peg_weights.peg2 ?? 0),
+              peg3: fromKg(bset.peg_weights.peg3 ?? 0),
+            } : null,
           };
         });
 
@@ -1195,6 +1257,11 @@
               draft_reps_left: set.repsLeft,
               draft_reps_right: set.repsRight,
             }),
+            ...(set.pegWeights && { peg_weights: JSON.stringify({
+              peg1: toKg(set.pegWeights.peg1),
+              peg2: toKg(set.pegWeights.peg2),
+              peg3: toKg(set.pegWeights.peg3),
+            }) }),
           });
         } catch { /* ignore individual failures */ }
       }
@@ -1267,6 +1334,11 @@
         ...(notes && { notes }),
         ...(set.setType !== 'standard' && { set_type: set.setType }),
         ...(subSetsData && subSetsData.length > 0 && { sub_sets: subSetsData }),
+        ...(set.pegWeights && { peg_weights: JSON.stringify({
+          peg1: toKg(set.pegWeights.peg1),
+          peg2: toKg(set.pegWeights.peg2),
+          peg3: toKg(set.pegWeights.peg3),
+        }) }),
       });
 
       set.reps = effectiveReps; // sync reps field for drop-off calc
@@ -1462,7 +1534,7 @@
       initWeight: null,
       initReps: null,
       setType: ex.sets[0]?.setType || 'standard',
-      partialReps: null, drops: [],
+      partialReps: null, drops: [], pegWeights: null,
     }];
     uiExercises = [...uiExercises];
   }
@@ -1513,7 +1585,7 @@
           repsRight: ex.isUnilateral ? w.reps : null,
           done: false, skipped: false, doneLeft: false, doneRight: false,
           saving: false, oneRM: null, initWeight: null, initReps: null,
-          setType: 'warmup', partialReps: null, drops: [],
+          setType: 'warmup', partialReps: null, drops: [], pegWeights: null,
         });
       }
       ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
@@ -1553,7 +1625,7 @@
         initWeight: null,
         initReps: null,
         setType: 'warmup',
-        partialReps: null, drops: [],
+        partialReps: null, drops: [], pegWeights: null,
       });
     }
 
@@ -1847,12 +1919,28 @@
       .replace(/[^\w\s]/g, '')
       .replace(/\s+/g, '_');
 
+    // Detect Prime machines and prompt for equipment type
+    let equipmentType: string | undefined;
+    let isPrime = false;
+    if (systemName.includes('prime')) {
+      const isPlateLoaded = confirm(
+        'This looks like a Prime Fitness machine.\n\n' +
+        'Is it plate-loaded (has weight pegs)?\n\n' +
+        'OK = Plate-loaded (3-peg tracking)\n' +
+        'Cancel = Selectorized (pin-loaded stack)'
+      );
+      isPrime = true;
+      equipmentType = isPlateLoaded ? 'plate_loaded' : 'machine';
+    }
+
     try {
       const newExercise = await createExercise({
         name: systemName,
         display_name: capitalizedDisplayName,
         movement_type: customMovementType,
         body_region: customBodyRegion,
+        ...(equipmentType && { equipment_type: equipmentType }),
+        ...(isPrime && { is_prime: true }),
         primary_muscles: customPrimaryMuscles,
         secondary_muscles: customSecondaryMuscles,
       });
@@ -1886,7 +1974,7 @@
           saving: false,
           oneRM: null, initWeight: null, initReps: null,
           setType: 'standard' as string,
-          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[],
+          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
         }));
         // Delete old backend sets
         for (const s of oldEx.sets) {
@@ -1922,7 +2010,7 @@
         oneRM: null, initWeight: null, initReps: null,
         setType: 'standard' as string,
         partialReps: null,
-        drops: [] as { weightLbs: number | null; reps: number | null }[],
+        drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
       }));
       uiExercises = [...uiExercises, {
         uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
@@ -2895,6 +2983,10 @@
                           if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                             set.reps = epleyReps(set.oneRM, val);
                           }
+                          // Auto-distribute to pegs for Prime machines
+                          if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
+                            set.pegWeights = distributeToPegs(val / 2);
+                          }
                           // Propagate to subsequent sets only while each next set
                           // had the same weight as the set just edited (chain stops at first mismatch)
                           const idx = ex.sets.indexOf(set);
@@ -2902,6 +2994,9 @@
                             const s = ex.sets[i];
                             if (!s.done && s.weightLbs === oldWeight) {
                               s.weightLbs = val;
+                              if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
+                                s.pegWeights = distributeToPegs(val / 2);
+                              }
                               if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                 s.reps = epleyReps(s.oneRM, val);
                               }
@@ -3035,6 +3130,52 @@
                             class="ml-8 text-xs text-primary-400 hover:text-primary-300 py-1">
                       + Add Drop
                     </button>
+                  {/if}
+                  <!-- Prime machine peg weight breakdown -->
+                  {#if isPrimePlateLoaded(exercise) && !set.done && !set.skipped}
+                    {@const pegs = set.pegWeights ?? { peg1: 0, peg2: 0, peg3: 0 }}
+                    <div class="col-span-full px-2 mt-1 mb-1">
+                      <div class="bg-zinc-800/50 rounded-lg px-3 py-2">
+                        <p class="text-[10px] text-zinc-500 mb-1.5 font-medium">Per-side peg weights ({unit})</p>
+                        <div class="flex items-center gap-2">
+                          {#each ['peg1', 'peg2', 'peg3'] as pegKey, pi}
+                            <div class="flex flex-col items-center gap-0.5 flex-1">
+                              <span class="text-[9px] text-zinc-500">Peg {pi + 1}</span>
+                              <input
+                                type="number" inputmode="decimal"
+                                value={pegs[pegKey as keyof typeof pegs] || ''}
+                                oninput={(e) => {
+                                  const v = (e.target as HTMLInputElement).value;
+                                  const val = v === '' ? 0 : Math.abs(parseFloat(v));
+                                  if (!set.pegWeights) set.pegWeights = { peg1: 0, peg2: 0, peg3: 0 };
+                                  set.pegWeights[pegKey as keyof typeof set.pegWeights] = val;
+                                  syncWeightFromPegs(set);
+                                  uiExercises = [...uiExercises];
+                                }}
+                                disabled={set.done}
+                                class="set-input !w-full !text-xs !py-1"
+                                placeholder="0"
+                                onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
+                              />
+                            </div>
+                          {/each}
+                          <div class="flex flex-col items-center gap-0.5">
+                            <span class="text-[9px] text-zinc-400">Total</span>
+                            <span class="text-xs text-zinc-300 font-mono py-1">
+                              {roundWeight((pegs.peg1 + pegs.peg2 + pegs.peg3) * 2)}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          class="text-[10px] text-primary-400 hover:text-primary-300 mt-1"
+                          onclick={() => {
+                            const totalPerSide = (set.weightLbs ?? 0) / 2;
+                            set.pegWeights = distributeToPegs(totalPerSide);
+                            uiExercises = [...uiExercises];
+                          }}
+                        >Auto-distribute from total</button>
+                      </div>
+                    </div>
                   {/if}
                 {/if}
               {/each}
@@ -3555,6 +3696,14 @@
       isLbs={plateBanner.isLbs}
       oneSided={plateBanner.oneSided}
       prevWeight={plateBanner.prevWeight}
+    />
+  </div>
+{:else if primePegBanner}
+  <div class="fixed bottom-0 left-0 right-0 z-40 bg-zinc-900/95 border-t border-zinc-700 px-4 py-2 backdrop-blur-sm">
+    <PrimePegVisual
+      pegWeights={primePegBanner.pegWeights}
+      isLbs={primePegBanner.isLbs}
+      prevPegWeights={primePegBanner.prevPegWeights}
     />
   </div>
 {/if}

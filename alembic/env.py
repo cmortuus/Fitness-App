@@ -1,8 +1,7 @@
 """Alembic migration environment for home-gym-tracker.
 
-Uses a synchronous SQLite connection for migration execution (Alembic does not
-support async natively) while still reading the DATABASE_URL from app config so
-the same database file is always targeted.
+Uses a synchronous PostgreSQL connection for migration execution (Alembic does
+not support async natively) while still reading the DATABASE_URL from app config.
 """
 import re
 from logging.config import fileConfig
@@ -32,16 +31,14 @@ target_metadata = Base.metadata
 def _sync_url(url: str) -> str:
     """Convert an async SQLAlchemy URL to a synchronous one.
 
-    aiosqlite  → pysqlite  (sqlite+aiosqlite://... → sqlite://...)
-    asyncpg    → psycopg2  (postgresql+asyncpg://... → postgresql://...)
+    asyncpg → psycopg2  (postgresql+asyncpg://... → postgresql://...)
     """
-    url = re.sub(r"^sqlite\+aiosqlite", "sqlite", url)
     url = re.sub(r"^postgresql\+asyncpg", "postgresql", url)
     return url
 
 
 def _get_url() -> str:
-    """Read DATABASE_URL from env / app config, defaulting to homegym.db."""
+    """Read DATABASE_URL from env / app config."""
     from app.config import get_settings
     return _sync_url(get_settings().database_url)
 
@@ -54,7 +51,7 @@ def run_migrations_offline() -> None:
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
-        render_as_batch=True,   # required for SQLite ALTER TABLE support
+        compare_type=True,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -75,7 +72,7 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=True,   # required for SQLite ALTER TABLE support
+            compare_type=True,
         )
         with context.begin_transaction():
             context.run_migrations()
