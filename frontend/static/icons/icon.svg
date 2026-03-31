@@ -1,16 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="96" fill="#0f172a"/>
-  <g transform="translate(256,256) rotate(-30)">
-    <!-- Bar -->
-    <rect x="-140" y="-8" width="280" height="16" rx="4" fill="#818cf8"/>
-    <!-- Left plates -->
-    <rect x="-170" y="-40" width="30" height="80" rx="6" fill="#818cf8"/>
-    <rect x="-195" y="-32" width="20" height="64" rx="4" fill="#6366f1"/>
-    <!-- Right plates -->
-    <rect x="140" y="-40" width="30" height="80" rx="6" fill="#818cf8"/>
-    <rect x="175" y="-32" width="20" height="64" rx="4" fill="#6366f1"/>
-    <!-- Collars -->
-    <rect x="-205" y="-12" width="10" height="24" rx="2" fill="#a5b4fc"/>
-    <rect x="195" y="-12" width="10" height="24" rx="2" fill="#a5b4fc"/>
-  </g>
+  <rect width="512" height="512" rx="96" fill="#0f0f0f"/>
+  <circle cx="256" cy="256" r="140" fill="none" stroke="#0170B9" stroke-width="18" opacity="0.3"/>
+  <circle cx="256" cy="256" r="100" fill="none" stroke="#0170B9" stroke-width="18" opacity="0.6"/>
+  <circle cx="256" cy="256" r="60" fill="none" stroke="#0170B9" stroke-width="18" opacity="0.9"/>
+  <circle cx="256" cy="256" r="20" fill="#0170B9"/>
 </svg>
