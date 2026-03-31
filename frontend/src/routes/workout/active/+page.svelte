@@ -2995,7 +2995,7 @@
                             if (!s.done && s.weightLbs === oldWeight) {
                               s.weightLbs = val;
                               if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
-                                s.pegWeights = distributeToPegs(val / 2);
+                                s.pegWeights = distributeToPegs(val);
                               }
                               if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                 s.reps = epleyReps(s.oneRM, val);
