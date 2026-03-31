@@ -82,40 +82,39 @@
 </script>
 
 {#if total > 0}
-  <div class="flex flex-col gap-1 mt-1">
+  <div class="flex items-end justify-center gap-4 mt-1">
     {#each pegEntries as peg}
-      <div class="flex items-center gap-1">
-        <!-- Peg label -->
-        <span class="text-[9px] text-zinc-400 w-8 text-right font-mono">{peg.label}</span>
-        <!-- Machine body (mount point) -->
-        <div style="width: 6px; height: {peg.plates.length > 0 ? '12px' : '4px'}; background: #3f3f46; border-radius: 1px;"></div>
-        <!-- Peg rod -->
-        <div style="width: 16px; height: 3px; background: #71717a; border-radius: 0 1px 1px 0;"></div>
-        <!-- Plates on this peg -->
-        {#if peg.plates.length > 0}
-          {#each peg.plates as plate}
-            {#each Array(plate.count) as _}
-              <div
-                style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
-                title="{plate.weight} {unit}"
-              ></div>
-            {/each}
-          {/each}
-        {:else if peg.weight > 0}
-          <!-- weight doesn't break into exact plates -->
-          <span class="text-[8px] text-zinc-500 italic">~</span>
-        {/if}
+      <div class="flex flex-col items-center gap-0.5">
         <!-- Weight value -->
-        <span class="text-[9px] text-zinc-300 ml-1 font-mono">
+        <span class="text-[9px] text-zinc-300 font-mono">
           {peg.weight > 0 ? peg.weight : '—'}
           {#if peg.delta}
             <span class="{peg.delta.startsWith('+') ? 'text-green-400' : 'text-red-400'}">{peg.delta}</span>
           {/if}
         </span>
+        <!-- Plates stacked vertically (bottom-up) -->
+        <div class="flex flex-col-reverse items-center gap-0.5">
+          {#if peg.plates.length > 0}
+            {#each peg.plates as plate}
+              {#each Array(plate.count) as _}
+                <div
+                  style="width: {plate.height}; height: 5px; background: {plate.color}; border-radius: 1px;"
+                  title="{plate.weight} {unit}"
+                ></div>
+              {/each}
+            {/each}
+          {/if}
+        </div>
+        <!-- Peg rod (vertical) -->
+        <div style="width: 3px; height: 16px; background: #71717a; border-radius: 1px 1px 0 0;"></div>
+        <!-- Machine body (base) -->
+        <div style="width: 14px; height: 4px; background: #3f3f46; border-radius: 1px;"></div>
+        <!-- Peg label -->
+        <span class="text-[9px] text-zinc-400 font-mono">{peg.label}</span>
       </div>
     {/each}
-    <p class="text-[9px] text-zinc-500 text-center mt-0.5">
-      {total} {unit} total
-    </p>
   </div>
+  <p class="text-[9px] text-zinc-500 text-center mt-0.5">
+    {total} {unit} total
+  </p>
 {/if}
