@@ -306,6 +306,10 @@ class FoodItemCreate(BaseModel):
     micronutrients: dict | None = None
 
 
+class FoodItemUpdate(FoodItemCreate):
+    pass
+
+
 class NutritionEntryCreate(BaseModel):
     food_item_id: int | None = None
     name: str
