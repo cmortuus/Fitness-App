@@ -55,6 +55,7 @@ class Exercise(Base):
     equipment_type: Mapped[str] = mapped_column(String(30), default="other", nullable=False, server_default="other")
     is_unilateral: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_assisted:   Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_prime:      Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, server_default="0")
 
     # Description and technique cues
     description: Mapped[str | None] = mapped_column(Text, nullable=True)

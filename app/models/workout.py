@@ -61,6 +61,7 @@ class ExerciseSet(Base):
     # Set type and sub-sets (for drop sets)
     set_type: Mapped[str] = mapped_column(String(20), nullable=False, default="standard")
     sub_sets: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON for drop set entries
+    peg_weights: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {"peg1":kg,"peg2":kg,"peg3":kg} per side
 
     # Draft values — in-progress inputs not yet completed (for cross-device sync)
     draft_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)

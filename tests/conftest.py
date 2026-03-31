@@ -1,20 +1,21 @@
 """Shared test fixtures."""
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from app.main import app
 from app.database import Base, get_db
 
-# Use a named shared-cache in-memory SQLite database for tests.
-# The URI "file:testdb?mode=memory&cache=shared" allows multiple aiosqlite
-# connections to share the same in-memory database so that tables created
-# in setup_db are visible to subsequent sessions/requests.
-TEST_DATABASE_URL = (
-    "sqlite+aiosqlite:///file:testmemdb?mode=memory&cache=shared&uri=true"
+import os
+
+# Use a dedicated test database in PostgreSQL.
+TEST_DATABASE_URL = os.environ.get(
+    "TEST_DATABASE_URL",
+    "postgresql+asyncpg://homegym:homegym_secret@localhost:5432/homegym_test",
 )
 
-test_engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+test_engine = create_async_engine(TEST_DATABASE_URL, echo=False, poolclass=NullPool)
 TestSessionFactory = async_sessionmaker(
     test_engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
 )
@@ -35,12 +36,17 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
-    """Create all tables before each test, drop after."""
+    """Create all tables before each test, truncate after."""
     async with test_engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
+    # Truncate all tables and reset sequences for clean isolation
     async with test_engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
+        tables = ", ".join(
+            f'"{t.name}"' for t in reversed(Base.metadata.sorted_tables)
+        )
+        if tables:
+            await conn.exec_driver_sql(f"TRUNCATE {tables} RESTART IDENTITY CASCADE")
 
 
 @pytest_asyncio.fixture
