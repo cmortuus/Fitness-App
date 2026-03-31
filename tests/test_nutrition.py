@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 
+from app.models.nutrition import FoodItem
 from app.models.nutrition import NutritionEntry
 
 
@@ -36,3 +37,42 @@ async def test_list_entries_returns_newest_first(client, db):
 
     breakfast = response.json()["meals"]["breakfast"]
     assert [entry["name"] for entry in breakfast] == ["Blueberries", "Greek Yogurt"]
+
+
+async def test_update_custom_food(client, db):
+    food = FoodItem(
+        user_id=1,
+        name="Chicken Breast",
+        brand="Store Brand",
+        source="custom",
+        is_custom=True,
+        calories_per_100g=165,
+        protein_per_100g=31,
+        carbs_per_100g=0,
+        fat_per_100g=3.6,
+        serving_size_g=100,
+        serving_label="100g",
+    )
+    db.add(food)
+    await db.commit()
+    await db.refresh(food)
+
+    response = await client.put(f"/api/nutrition/foods/{food.id}", json={
+        "name": "Chicken Breast, Cooked",
+        "brand": "Store Brand",
+        "barcode": "123456789012",
+        "calories_per_100g": 180,
+        "protein_per_100g": 32,
+        "carbs_per_100g": 1,
+        "fat_per_100g": 4,
+        "serving_size_g": 112,
+        "serving_label": "4 oz",
+    })
+    assert response.status_code == 200, response.text
+
+    payload = response.json()
+    assert payload["name"] == "Chicken Breast, Cooked"
+    assert payload["barcode"] == "123456789012"
+    assert payload["calories_per_100g"] == 180
+    assert payload["serving_size_g"] == 112
+    assert payload["serving_label"] == "4 oz"

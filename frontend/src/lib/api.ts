@@ -763,6 +763,21 @@ export async function createCustomFood(data: {
   return response.data;
 }
 
+export async function updateCustomFood(id: number, data: {
+  name: string;
+  brand?: string;
+  barcode?: string;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+  serving_size_g?: number;
+  serving_label?: string;
+}): Promise<FoodItem> {
+  const response = await api.put(`/nutrition/foods/${id}`, data);
+  return response.data;
+}
+
 export async function deleteCustomFood(id: number): Promise<void> {
   await api.delete(`/nutrition/foods/${id}`);
 }

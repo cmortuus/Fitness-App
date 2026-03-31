@@ -14,7 +14,7 @@ from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
 from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
 from app.models.user import User
-from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
+from app.schemas.requests import FoodItemCreate, FoodItemUpdate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
 from app.services.expenditure import compute_adaptive_tdee
 
 router = APIRouter()
@@ -342,6 +342,35 @@ async def delete_food(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food not found")
     await db.delete(food)
     await db.flush()
+
+
+@router.put("/foods/{food_id}")
+async def update_food(
+    food_id: int,
+    data: FoodItemUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Update a saved food owned by the current user."""
+    result = await db.execute(select(FoodItem).where(FoodItem.id == food_id, FoodItem.user_id == user.id))
+    food = result.scalar_one_or_none()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food not found")
+
+    food.name = data.name
+    food.brand = data.brand
+    food.barcode = data.barcode
+    food.calories_per_100g = data.calories_per_100g
+    food.protein_per_100g = data.protein_per_100g
+    food.carbs_per_100g = data.carbs_per_100g
+    food.fat_per_100g = data.fat_per_100g
+    food.serving_size_g = data.serving_size_g
+    food.serving_label = data.serving_label
+    food.micronutrients = json.dumps(data.micronutrients) if data.micronutrients else None
+
+    await db.flush()
+    await db.refresh(food)
+    return serialize_food_item(food)
 
 
 # ── Nutrition entries (daily log) ─────────────────────────────────────────────

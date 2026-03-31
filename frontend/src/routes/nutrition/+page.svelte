@@ -4,7 +4,7 @@
   import {
     getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
     getDailySummary, setMacroGoals,
-    searchFoods, lookupBarcode, getCustomFoods, createCustomFood, deleteCustomFood, createCommunityFood,
+    searchFoods, lookupBarcode, getCustomFoods, createCustomFood, updateCustomFood, deleteCustomFood, createCommunityFood,
     getActivePhase, createPhase, endPhase, recalculatePhase,
     getRecipes, logRecipe, createRecipe, deleteRecipe,
   } from '$lib/api';
@@ -42,13 +42,16 @@
 
   // Manual tab
   let manualName = $state('');
+  let manualBrand = $state('');
   let manualCal = $state<number | null>(null);
   let manualProtein = $state<number | null>(null);
   let manualCarbs = $state<number | null>(null);
   let manualFat = $state<number | null>(null);
   let manualQty = $state(100);
+  let manualServingLabel = $state('');
   let saveAsCustom = $state(false);
   let showFullMacros = $state(false);
+  let editingFood = $state<FoodItem | null>(null);
 
   // Quick-add tab
   let quickCal = $state<number | null>(null);
@@ -319,13 +322,16 @@
     searchResults = [];
     selectedFood = null;
     manualName = '';
+    manualBrand = '';
     manualCal = null;
     manualProtein = null;
     manualCarbs = null;
     manualFat = null;
     manualQty = 100;
+    manualServingLabel = '';
     saveAsCustom = false;
     showFullMacros = false;
+    editingFood = null;
     showAddModal = true;
   }
 
@@ -398,15 +404,56 @@
       const scale = 100 / qty;
       await createCustomFood({
         name: manualName.trim(),
+        brand: manualBrand.trim() || undefined,
         calories_per_100g: (manualCal ?? 0) * scale,
         protein_per_100g: (manualProtein ?? 0) * scale,
         carbs_per_100g: (manualCarbs ?? 0) * scale,
         fat_per_100g: (manualFat ?? 0) * scale,
         serving_size_g: qty,
+        serving_label: manualServingLabel.trim() || undefined,
       });
     }
     showAddModal = false;
     await loadDay();
+  }
+
+  function startEditingFood(food: FoodItem) {
+    const qty = food.serving_size_g || 100;
+    const scale = qty / 100;
+    activeTab = 'manual';
+    editingFood = food;
+    selectedFood = null;
+    manualName = food.name;
+    manualBrand = food.brand ?? '';
+    manualQty = qty;
+    manualServingLabel = food.serving_label ?? '';
+    manualCal = Math.round((food.calories_per_100g ?? 0) * scale);
+    manualProtein = Math.round((food.protein_per_100g ?? 0) * scale * 10) / 10;
+    manualCarbs = Math.round((food.carbs_per_100g ?? 0) * scale * 10) / 10;
+    manualFat = Math.round((food.fat_per_100g ?? 0) * scale * 10) / 10;
+    showFullMacros = !!((food.carbs_per_100g ?? 0) || (food.fat_per_100g ?? 0));
+    saveAsCustom = false;
+    showAddModal = true;
+  }
+
+  async function saveEditedFood() {
+    if (!editingFood || !manualName.trim()) return;
+    const qty = manualQty || 100;
+    const scale = 100 / qty;
+    const updated = await updateCustomFood(editingFood.id, {
+      name: manualName.trim(),
+      brand: manualBrand.trim() || undefined,
+      barcode: editingFood.barcode ?? undefined,
+      calories_per_100g: (manualCal ?? 0) * scale,
+      protein_per_100g: (manualProtein ?? 0) * scale,
+      carbs_per_100g: (manualCarbs ?? 0) * scale,
+      fat_per_100g: (manualFat ?? 0) * scale,
+      serving_size_g: qty,
+      serving_label: manualServingLabel.trim() || undefined,
+    });
+    customFoods = customFoods.map((food) => food.id === updated.id ? updated : food);
+    editingFood = null;
+    showAddModal = false;
   }
 
   async function removeEntry(id: number) {
@@ -986,7 +1033,7 @@
         {:else}
           <h3 class="font-semibold text-white">Add Food</h3>
         {/if}
-        <button onclick={() => { stopScanner(); showAddModal = false; selectedFood = null; }} class="text-zinc-400 hover:text-white text-xl">✕</button>
+        <button onclick={() => { stopScanner(); showAddModal = false; selectedFood = null; editingFood = null; }} class="text-zinc-400 hover:text-white text-xl">✕</button>
       </div>
 
       {#if selectedFood}
@@ -1288,6 +1335,10 @@
                 <label class="text-xs text-zinc-400 block mb-1">Food name</label>
                 <input type="text" bind:value={manualName} placeholder="e.g. Chicken breast" class="input" />
               </div>
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">Brand <span class="text-zinc-600">(optional)</span></label>
+                <input type="text" bind:value={manualBrand} placeholder="e.g. Kirkland" class="input" />
+              </div>
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label class="text-xs text-zinc-400 block mb-1">Calories</label>
@@ -1322,13 +1373,19 @@
                 <label class="text-xs text-zinc-400 block mb-1">Quantity (g)</label>
                 <input type="number" bind:value={manualQty} min="1" class="input" />
               </div>
+              <div>
+                <label class="text-xs text-zinc-400 block mb-1">Serving Label <span class="text-zinc-600">(optional)</span></label>
+                <input type="text" bind:value={manualServingLabel} placeholder="e.g. 1 cup" class="input" />
+              </div>
+              {#if !editingFood}
               <label class="flex items-center gap-2 text-sm text-zinc-400">
                 <input type="checkbox" bind:checked={saveAsCustom} class="rounded bg-zinc-800 border-zinc-700" />
                 Save as custom food
               </label>
-              <button onclick={logManualEntry} disabled={!manualName.trim()}
+              {/if}
+              <button onclick={editingFood ? saveEditedFood : logManualEntry} disabled={!manualName.trim()}
                       class="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed">
-                Log Food
+                {editingFood ? 'Save Changes' : 'Log Food'}
               </button>
             </div>
 
@@ -1394,6 +1451,11 @@
                         · {Math.round(food.calories_per_100g)} cal/100g
                       {/if}
                     </p>
+                  </button>
+                  <button onclick={() => startEditingFood(food)}
+                          class="px-2 py-2 text-zinc-600 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          title="Edit saved food">
+                    ✎
                   </button>
                   <button onclick={async () => {
                             if (!confirm(`Delete "${food.name}"?`)) return;
