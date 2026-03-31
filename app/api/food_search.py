@@ -147,12 +147,23 @@ def _normalize_calorieninjas(item: dict) -> dict | None:
 
 
 def _parse_serving(s: str | None) -> float:
-    """Try to extract grams from a serving string like '100 g' or '1 cup (240ml)'."""
+    """Extract serving size in grams/mL from strings like '100 g', '16 fl oz', '473 mL'."""
     if not s:
         return 100.0
     import re
-    m = re.search(r"(\d+\.?\d*)\s*g", s, re.IGNORECASE)
-    return float(m.group(1)) if m else 100.0
+    # Grams: "100g", "100 g" — but not "gal"
+    m = re.search(r"(\d+\.?\d*)\s*g(?!al)", s, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    # Milliliters: "473 ml", "473mL"
+    m = re.search(r"(\d+\.?\d*)\s*ml", s, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    # Fluid ounces: "16 fl oz", "16fl oz", "16 fl. oz"
+    m = re.search(r"(\d+\.?\d*)\s*fl\.?\s*oz", s, re.IGNORECASE)
+    if m:
+        return round(float(m.group(1)) * 29.5735, 1)
+    return 100.0
 
 
 def _completeness(item: dict) -> int:
