@@ -587,11 +587,12 @@
     </div>
     <div class="flex flex-col gap-3">
       {#each [
-        ['rep',    'Rep first',    'Add 1 rep each session. Weight goes up only when crossing a rep-range bracket (5-9 → 10-14 → 15+).'],
+        ['double', 'Double progression', 'Build reps within a range (e.g. 8-12). When ALL sets hit the top, weight goes up and reps reset to the bottom. Most recommended for hypertrophy.'],
+        ['rep',    'Rep first',    'Add 1 rep each session. Weight goes up only when crossing a rep-range bracket (5-9 / 10-14 / 15+).'],
         ['weight', 'Weight first', 'Immediately translate the +1 rep into an equivalent weight increase via Epley. Reps stay fixed.'],
       ] as [val, label, desc]}
         <button
-          onclick={() => settings.update(s => ({ ...s, progressionStyle: val as 'rep' | 'weight' }))}
+          onclick={() => settings.update(s => ({ ...s, progressionStyle: val as 'rep' | 'weight' | 'double' }))}
           class="flex items-start gap-3 p-3 rounded-lg text-left transition-colors border {
             $settings.progressionStyle === val
               ? 'border-primary-500 bg-primary-600/10'
@@ -609,20 +610,35 @@
       {/each}
     </div>
 
+    <!-- Double progression explanation -->
+    {#if $settings.progressionStyle === 'double'}
+      <div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 space-y-1">
+        <p class="font-medium text-gray-300">How double progression works</p>
+        <p>Each exercise has a rep range (set in the plan, default 8-12):</p>
+        <ul class="list-disc list-inside space-y-0.5 pl-1">
+          <li>Each set independently progresses +1 rep per session</li>
+          <li>Reps are capped at the top of the range</li>
+          <li>When <strong>every set</strong> hits the top, weight increases by one increment</li>
+          <li>Reps reset to the bottom of the range and the cycle repeats</li>
+        </ul>
+        <p class="pt-1">Example at 40 kg with 8-12 range: 3x8 &rarr; 3x9 &rarr; ... &rarr; 3x12 &rarr; 42.5 kg x 3x8</p>
+      </div>
+    {/if}
+
     <!-- Rep bracket explanation — shown when "Rep first" style is active -->
     {#if $settings.progressionStyle === 'rep'}
       <div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 space-y-1">
         <p class="font-medium text-gray-300">How rep brackets work</p>
         <p>Your rep range is split into three brackets:</p>
         <ul class="list-disc list-inside space-y-0.5 pl-1">
-          <li><span class="text-white font-mono">Bracket 1</span> — 1–9 reps</li>
-          <li><span class="text-white font-mono">Bracket 2</span> — 10–14 reps</li>
+          <li><span class="text-white font-mono">Bracket 1</span> — 1-9 reps</li>
+          <li><span class="text-white font-mono">Bracket 2</span> — 10-14 reps</li>
           <li><span class="text-white font-mono">Bracket 3</span> — 15+ reps</li>
         </ul>
         <p class="pt-0.5">
           Each session you add 1 rep. When the next rep would push you into a higher bracket,
           weight increases instead (via the Epley 1RM formula) and reps reset to the bottom of
-          the new bracket range.
+          the bracket range.
         </p>
       </div>
     {/if}

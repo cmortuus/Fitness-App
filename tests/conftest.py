@@ -126,7 +126,8 @@ async def create_plan(client: AsyncClient, exercise_id: int, sets: int = 3,
 
 
 async def start_session_from_plan(client: AsyncClient, plan_id: int,
-                                   day: int = 1, body_weight_kg: float = 0) -> dict:
+                                   day: int = 1, body_weight_kg: float = 0,
+                                   overload_style: str = "rep") -> dict:
     # Complete any truly active session before creating a new one (mirrors real workflow)
     r_list = await client.get("/api/sessions/", params={"limit": 500})
     assert r_list.status_code == 200, r_list.text
@@ -137,7 +138,7 @@ async def start_session_from_plan(client: AsyncClient, plan_id: int,
 
     r = await client.post(
         f"/api/sessions/from-plan/{plan_id}",
-        params={"day_number": day, "overload_style": "rep", "body_weight_kg": body_weight_kg},
+        params={"day_number": day, "overload_style": overload_style, "body_weight_kg": body_weight_kg},
     )
     assert r.status_code == 201, r.text
     sess = r.json()
