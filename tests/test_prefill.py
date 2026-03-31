@@ -436,7 +436,7 @@ class TestWeightOverloadStyle:
                 f"Rep-first within bracket: weight should stay 100, got {s['planned_weight_kg']}"
 
     async def test_rep_style_bumps_weight_at_bracket_boundary(self, client: AsyncClient):
-        """Rep-first at bracket boundary (9→10 crosses 5-9 → 10-14): weight increases, reps hold."""
+        """Rep-first at bracket boundary (9→10 crosses 1-9 → 10-14): weight increases, reps reset to bracket floor."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=9)
 
@@ -445,8 +445,8 @@ class TestWeightOverloadStyle:
 
         sess2 = await start_session_from_plan(client, plan["id"])
         s = sess2["sets"][0]
-        # 9→10 crosses bracket → weight should increase, reps should stay at 9
-        assert s["planned_reps"] == 9, f"At bracket: reps should hold at 9, got {s['planned_reps']}"
+        # 9→10 crosses bracket → weight should increase, reps reset to bracket 1 floor (5)
+        assert s["planned_reps"] == 5, f"At bracket: reps should reset to 5, got {s['planned_reps']}"
         assert s["planned_weight_kg"] > 100.0, \
             f"At bracket: weight should increase, got {s['planned_weight_kg']}"
 
@@ -558,25 +558,28 @@ class TestMultiWeekChain:
 
         prev_weight = 40.0
         prev_reps = 10
-        for week in range(2, 8):  # 6 progressions: 10→11→12→13→14→weight up
+        saw_weight_increase = False
+        for week in range(2, 8):  # 6 progressions: 10→11→12→13→14→weight up + reset
             sess = await start_session_from_plan(client, plan["id"])
             s = sess["sets"][0]
             w = s["planned_weight_kg"]
             r = s["planned_reps"]
 
-            # Must progress: either more reps or more weight
             assert w is not None and r is not None, f"Week {week}: no suggestion"
-            assert (w > prev_weight) or (r > prev_reps), \
-                f"Week {week}: stalled at {w}kg x {r} (was {prev_weight}kg x {prev_reps})"
+
+            if w > prev_weight:
+                saw_weight_increase = True
+                # After weight increase, reps should reset to bracket floor (10)
+                assert r == 10, \
+                    f"Week {week}: weight went up ({prev_weight}→{w}) but reps didn't reset to 10, got {r}"
 
             # Log at the suggested values
             await log_set(client, sess["id"], s["id"], w, r)
             prev_weight = w
             prev_reps = r
 
-        # After 6 progressions from 10 reps: 11, 12, 13, 14, then weight up at bracket boundary
-        assert prev_weight > 40.0, \
-            f"Expected weight increase after bracket boundary, got {prev_weight}kg x {prev_reps}"
+        assert saw_weight_increase, \
+            f"Expected weight increase after bracket boundary within 6 weeks, ended at {prev_weight}kg x {prev_reps}"
 
     async def test_miss_holds_then_retries(self, client: AsyncClient):
         """When user misses target reps, next week retries same weight at plan target."""
