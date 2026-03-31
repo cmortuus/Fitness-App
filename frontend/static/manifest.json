@@ -1,5 +1,7 @@
 {
   "name": "Onyx Expenditure",
+  "short_name": "Onyx Expenditure",
+  "description": "Track workouts, nutrition, and progress with science-based programming",
   "short_name": "Onyx",
   "description": "Track workouts and progress with science-based programming",
   "start_url": "/",

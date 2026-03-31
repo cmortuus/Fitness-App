@@ -279,7 +279,7 @@ final class HealthKitManager: @unchecked Sendable {
 
             // Add metadata before finishing
             try await builder.addMetadata([
-                HKMetadataKeyWorkoutBrandName: "GymTracker",
+                HKMetadataKeyWorkoutBrandName: "Onyx Intake",
                 "WorkoutName": name,
                 "TotalSets": totalSets,
                 "TotalVolumeKg": totalVolume,

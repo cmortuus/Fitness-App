@@ -37,7 +37,7 @@
 <div class="min-h-screen flex items-center justify-center p-4">
   <div class="w-full max-w-sm space-y-6">
     <div class="text-center">
-      <h1 class="text-2xl font-bold text-primary-400">GymTracker</h1>
+      <h1 class="text-2xl font-bold text-primary-400">Onyx Expenditure</h1>
       <p class="text-sm text-zinc-500 mt-1">Create your account</p>
     </div>
 

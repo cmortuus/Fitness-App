@@ -5,7 +5,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import select, func, desc
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -18,6 +18,10 @@ from app.services.plan_rir import normalize_rir_overrides
 from app.api.progress import VOLUME_LANDMARKS
 
 router = APIRouter()
+
+
+def _exercise_scope(user_id: int):
+    return or_(Exercise.user_id.is_(None), Exercise.user_id == user_id)
 
 
 def serialize_plan(plan: WorkoutPlan) -> dict:
@@ -183,6 +187,7 @@ async def get_recent_exercises(
         )
         .join(ExerciseSet, Exercise.id == ExerciseSet.exercise_id)
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(_exercise_scope(user.id))
         .group_by(Exercise.id)
         .order_by(func.max(WorkoutSession.date).desc())
         .limit(limit)
@@ -213,7 +218,11 @@ async def get_exercises_grouped(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict[str, list[dict]]:
     """Get all exercises grouped by primary muscle group."""
-    result = await db.execute(select(Exercise).order_by(Exercise.display_name))
+    result = await db.execute(
+        select(Exercise)
+        .where(_exercise_scope(user.id))
+        .order_by(Exercise.display_name)
+    )
     exercises = result.scalars().all()
 
     grouped: dict[str, list[dict]] = {}
@@ -229,9 +238,17 @@ async def get_exercises_grouped(
                 "id": ex.id,
                 "name": ex.name,
                 "display_name": ex.display_name,
+                "user_id": ex.user_id,
+                "source_exercise_id": ex.source_exercise_id,
+                "is_custom": ex.user_id is not None,
                 "movement_type": ex.movement_type,
                 "body_region": ex.body_region,
+                "equipment_type": ex.equipment_type or "other",
+                "is_unilateral": bool(ex.is_unilateral),
+                "is_assisted": bool(ex.is_assisted),
+                "description": ex.description,
                 "primary_muscles": primary_muscles,
+                "secondary_muscles": ex.secondary_muscles or [],
             })
 
     # Sort keys for consistent ordering
@@ -374,7 +391,9 @@ async def create_plan(
         }
         if all_exercise_ids:
             result = await db.execute(
-                select(Exercise.id).where(Exercise.id.in_(all_exercise_ids))
+                select(Exercise.id)
+                .where(Exercise.id.in_(all_exercise_ids))
+                .where(_exercise_scope(user.id))
             )
             found_ids = {row[0] for row in result.all()}
             missing = all_exercise_ids - found_ids
@@ -440,7 +459,11 @@ async def publish_plan(
     days = planned_data.get("days", [])
     all_exercise_ids = {ex["exercise_id"] for day in days for ex in day.get("exercises", [])}
     if all_exercise_ids:
-        ex_result = await db.execute(select(Exercise.id).where(Exercise.id.in_(all_exercise_ids)))
+        ex_result = await db.execute(
+            select(Exercise.id)
+            .where(Exercise.id.in_(all_exercise_ids))
+            .where(_exercise_scope(user.id))
+        )
         found_ids = {row[0] for row in ex_result.all()}
         missing = all_exercise_ids - found_ids
         if missing:
@@ -596,6 +619,26 @@ async def update_plan(
             planned_data["days"] = plan_data.days
         if plan_data.number_of_days is not None:
             planned_data["number_of_days"] = plan_data.number_of_days
+
+        all_exercise_ids = {
+            ex.get("exercise_id")
+            for day in planned_data.get("days", [])
+            for ex in day.get("exercises", [])
+            if ex.get("exercise_id")
+        }
+        if all_exercise_ids:
+            ex_result = await db.execute(
+                select(Exercise.id)
+                .where(Exercise.id.in_(all_exercise_ids))
+                .where(_exercise_scope(user.id))
+            )
+            found_ids = {row[0] for row in ex_result.all()}
+            missing = all_exercise_ids - found_ids
+            if missing:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Exercise IDs not found: {sorted(missing)}",
+                )
 
         plan.planned_exercises = json.dumps(planned_data)
 

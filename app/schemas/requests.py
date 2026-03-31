@@ -80,6 +80,9 @@ class ExerciseResponse(BaseModel):
     id: int
     name: str
     display_name: str
+    user_id: int | None = None
+    source_exercise_id: int | None = None
+    is_custom: bool = False
     movement_type: str
     body_region: str
     equipment_type: str = "other"
@@ -91,6 +94,27 @@ class ExerciseResponse(BaseModel):
     secondary_muscles: list[str]
 
     model_config = {"from_attributes": True}
+
+
+class ExerciseUpdate(BaseModel):
+    display_name: str
+    movement_type: MovementType = MovementType.COMPOUND
+    body_region: BodyRegion = BodyRegion.UPPER
+    is_unilateral: bool = False
+    is_assisted: bool = False
+    description: str | None = None
+    primary_muscles: list[str] = []
+    secondary_muscles: list[str] = []
+    apply_mode: str = Field(default="future_only", pattern="^(future_only|retroactive)$")
+
+    @model_validator(mode="after")
+    def no_overlap_between_primary_and_secondary(self) -> "ExerciseUpdate":
+        overlap = set(self.primary_muscles) & set(self.secondary_muscles)
+        if overlap:
+            raise ValueError(
+                f"A muscle cannot be both primary and secondary: {sorted(overlap)}"
+            )
+        return self
 
 
 # Set schemas

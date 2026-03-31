@@ -9,6 +9,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.exercise import Exercise
     from app.models.workout import WorkoutPlan, WorkoutSession
 
 
@@ -45,4 +46,9 @@ class User(Base):
     )
     workout_sessions: Mapped[list["WorkoutSession"]] = relationship(
         "WorkoutSession", back_populates="user", cascade="all, delete-orphan"
+    )
+    exercises: Mapped[list["Exercise"]] = relationship(
+        "Exercise",
+        foreign_keys="Exercise.user_id",
+        back_populates="user",
     )
