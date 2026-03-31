@@ -167,5 +167,9 @@ def compute_overload(
         if rep_bracket(projected_reps) <= rep_bracket(prior_reps):
             return prior_weight, projected_reps
         else:
+            # Bracket boundary crossed — increase weight, reset reps to plan target
             new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-            return new_weight, prior_reps
+            # Ensure at least one minimum increment (2.5 kg) when crossing a bracket
+            if new_weight <= prior_weight:
+                new_weight = round((prior_weight + 2.5) / 2.5) * 2.5
+            return new_weight, planned_reps

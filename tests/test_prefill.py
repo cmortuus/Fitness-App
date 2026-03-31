@@ -541,3 +541,60 @@ class TestMultiWeekChain:
         assert d1w2["sets"][0]["planned_weight_kg"] is not None
         assert d1w2["sets"][0]["planned_weight_kg"] >= 100.0, \
             f"Day 1 week 2 should build on 100 kg, got {d1w2['sets'][0]['planned_weight_kg']}"
+
+    async def test_five_week_rep_chain_then_weight_up(self, client: AsyncClient):
+        """Overload chains reps weekly until bracket boundary, then increases weight.
+
+        Rep brackets: 1-9, 10-14, 15+. Starting at 10 reps, progression adds
+        1 rep/week until 14→15 would cross into bracket 3, triggering a weight
+        increase with reps resetting.
+        """
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=10)
+
+        # Week 1: baseline — no prior data, log 40 kg × 10
+        w1 = await start_session_from_plan(client, plan["id"])
+        await log_set(client, w1["id"], w1["sets"][0]["id"], 40.0, 10)
+
+        prev_weight = 40.0
+        prev_reps = 10
+        for week in range(2, 8):  # 6 progressions: 10→11→12→13→14→weight up
+            sess = await start_session_from_plan(client, plan["id"])
+            s = sess["sets"][0]
+            w = s["planned_weight_kg"]
+            r = s["planned_reps"]
+
+            # Must progress: either more reps or more weight
+            assert w is not None and r is not None, f"Week {week}: no suggestion"
+            assert (w > prev_weight) or (r > prev_reps), \
+                f"Week {week}: stalled at {w}kg x {r} (was {prev_weight}kg x {prev_reps})"
+
+            # Log at the suggested values
+            await log_set(client, sess["id"], s["id"], w, r)
+            prev_weight = w
+            prev_reps = r
+
+        # After 6 progressions from 10 reps: 11, 12, 13, 14, then weight up at bracket boundary
+        assert prev_weight > 40.0, \
+            f"Expected weight increase after bracket boundary, got {prev_weight}kg x {prev_reps}"
+
+    async def test_miss_holds_then_retries(self, client: AsyncClient):
+        """When user misses target reps, next week retries same weight at plan target."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=10)
+
+        # Week 1: log 40 kg × 10
+        w1 = await start_session_from_plan(client, plan["id"])
+        await log_set(client, w1["id"], w1["sets"][0]["id"], 40.0, 10)
+
+        # Week 2: should suggest 40 kg × 11, but user only gets 8
+        w2 = await start_session_from_plan(client, plan["id"])
+        assert w2["sets"][0]["planned_reps"] == 11, "Week 2 should suggest 11 reps"
+        await log_set(client, w2["id"], w2["sets"][0]["id"], 40.0, 8)  # miss!
+
+        # Week 3: should hold — retry at planned target (11), not progress further
+        w3 = await start_session_from_plan(client, plan["id"])
+        w3_reps = w3["sets"][0]["planned_reps"]
+        w3_weight = w3["sets"][0]["planned_weight_kg"]
+        assert w3_weight == 40.0, f"Weight should hold at 40 after miss, got {w3_weight}"
+        assert w3_reps == 11, f"Should retry 11 reps after missing, got {w3_reps}"

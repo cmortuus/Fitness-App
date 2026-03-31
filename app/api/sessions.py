@@ -982,21 +982,14 @@ async def create_session_from_plan(
             return None, None
 
         # Determine the effective planned target for the prior session's set.
-        # Priority: 1) stored planned_reps from prior set, 2) plan target (if valid),
-        # 3) actual reps as fallback (week 1 / plan has reps=0 — assume they hit target).
+        # Use the prior set's planned_reps (which includes overload progression),
+        # falling back to the plan template target, then actual reps.
         if prior_planned and prior_planned > 0:
             planned = prior_planned
         elif target_reps and target_reps > 0:
             planned = target_reps
         else:
             planned = prior_reps  # week 1 / no target: treat actual as the goal
-
-        # Epley conversion when the rep target changed between weeks (user edited plan)
-        if target_reps and target_reps > 0 and target_reps != planned and prior_weight and prior_weight > 0:
-            one_rm   = prior_weight * (1 + prior_reps / 30)
-            prior_weight = round(one_rm / (1 + target_reps / 30) / 2.5) * 2.5
-            prior_reps   = target_reps
-            planned      = target_reps
 
         is_assisted = bool(ex_model and ex_model.is_assisted)
         suggested_weight, suggested_reps = compute_overload(
