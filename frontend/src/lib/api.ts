@@ -803,6 +803,18 @@ export async function addNutritionEntry(data: {
   return response.data;
 }
 
+export async function updateNutritionEntry(id: number, data: {
+  quantity_g?: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  meal?: string;
+}): Promise<NutritionEntry> {
+  const response = await api.patch(`/nutrition/entries/${id}`, data);
+  return response.data;
+}
+
 export async function deleteNutritionEntry(id: number): Promise<void> {
   await api.delete(`/nutrition/entries/${id}`);
 }
