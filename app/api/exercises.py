@@ -1,9 +1,11 @@
 """Exercise API endpoints."""
 
+import json
+import re
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
@@ -11,11 +13,114 @@ from app.database import get_db
 from app.models.exercise import Exercise
 from app.models.exercise_note import ExerciseNote
 from app.models.user import User
-from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession
+from app.models.workout import ExerciseFeedback, ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
 from pydantic import BaseModel as _PydanticBase
-from app.schemas.requests import ExerciseCreate, ExerciseResponse
+from app.schemas.requests import ExerciseCreate, ExerciseResponse, ExerciseUpdate
 
 router = APIRouter()
+
+
+def _serialize_exercise(ex: Exercise) -> dict:
+    return {
+        "id": ex.id,
+        "name": ex.name,
+        "display_name": ex.display_name,
+        "user_id": ex.user_id,
+        "source_exercise_id": ex.source_exercise_id,
+        "is_custom": ex.user_id is not None,
+        "movement_type": ex.movement_type,
+        "body_region": ex.body_region,
+        "equipment_type": ex.equipment_type or "other",
+        "is_unilateral": bool(ex.is_unilateral),
+        "is_assisted": bool(ex.is_assisted),
+        "description": ex.description,
+        "primary_muscles": ex.primary_muscles or [],
+        "secondary_muscles": ex.secondary_muscles or [],
+    }
+
+
+def _exercise_scope(user_id: int):
+    return or_(Exercise.user_id.is_(None), Exercise.user_id == user_id)
+
+
+async def _get_visible_exercise(db: AsyncSession, exercise_id: int, user_id: int) -> Exercise | None:
+    result = await db.execute(
+        select(Exercise).where(Exercise.id == exercise_id).where(_exercise_scope(user_id))
+    )
+    return result.scalar_one_or_none()
+
+
+def _slugify_name(name: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    return slug or "custom_exercise"
+
+
+async def _generate_unique_name(db: AsyncSession, user_id: int, display_name: str) -> str:
+    base = _slugify_name(display_name)
+    candidate = base
+    suffix = 2
+    while True:
+        result = await db.execute(
+            select(Exercise.id).where(Exercise.name == candidate)
+        )
+        if result.scalar_one_or_none() is None:
+            return candidate
+        candidate = f"{base}_{user_id}_{suffix}"
+        suffix += 1
+
+
+async def _replace_exercise_in_plans(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    old_exercise_id: int,
+    new_exercise_id: int,
+) -> int:
+    updated = 0
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.user_id == user_id))
+    for plan in result.scalars().all():
+        try:
+            planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+        except (json.JSONDecodeError, TypeError):
+            planned_data = {}
+        changed = False
+        for day in planned_data.get("days", []):
+            for exercise in day.get("exercises", []):
+                if exercise.get("exercise_id") == old_exercise_id:
+                    exercise["exercise_id"] = new_exercise_id
+                    changed = True
+        if changed:
+            plan.planned_exercises = json.dumps(planned_data)
+            updated += 1
+    return updated
+
+
+async def _replace_exercise_in_sessions(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    old_exercise_id: int,
+    new_exercise_id: int,
+    retroactive: bool,
+) -> int:
+    stmt = (
+        select(ExerciseSet)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.user_id == user_id,
+            ExerciseSet.exercise_id == old_exercise_id,
+        )
+    )
+    if not retroactive:
+        stmt = stmt.where(
+            WorkoutSession.status == WorkoutStatus.PLANNED,
+            WorkoutSession.started_at.is_(None),
+        )
+    result = await db.execute(stmt)
+    sets = result.scalars().all()
+    for exercise_set in sets:
+        exercise_set.exercise_id = new_exercise_id
+    return len(sets)
 
 
 @router.get("/", response_model=list[ExerciseResponse])
@@ -24,26 +129,13 @@ async def list_exercises(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[dict]:
     """List all available exercises."""
-    result = await db.execute(select(Exercise).order_by(Exercise.name))
+    result = await db.execute(
+        select(Exercise)
+        .where(_exercise_scope(user.id))
+        .order_by(Exercise.user_id.is_not(None), Exercise.display_name)
+    )
     exercises = result.scalars().all()
-
-    # Convert to response format with proper JSON parsing
-    responses = []
-    for ex in exercises:
-        responses.append({
-            "id": ex.id,
-            "name": ex.name,
-            "display_name": ex.display_name,
-            "equipment_type": ex.equipment_type or "other",
-            "movement_type": ex.movement_type,
-            "body_region": ex.body_region,
-            "is_unilateral": bool(ex.is_unilateral),
-            "is_assisted":   bool(ex.is_assisted),
-            "description": ex.description,
-            "primary_muscles": ex.primary_muscles or [],
-            "secondary_muscles": ex.secondary_muscles or [],
-        })
-    return responses
+    return [_serialize_exercise(ex) for ex in exercises]
 
 
 @router.get("/{exercise_id}", response_model=ExerciseResponse)
@@ -53,26 +145,13 @@ async def get_exercise(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Get an exercise by ID."""
-    result = await db.execute(select(Exercise).where(Exercise.id == exercise_id))
-    ex = result.scalar_one_or_none()
+    ex = await _get_visible_exercise(db, exercise_id, user.id)
     if not ex:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Exercise {exercise_id} not found",
         )
-    return {
-        "id": ex.id,
-        "name": ex.name,
-        "display_name": ex.display_name,
-        "equipment_type": ex.equipment_type or "other",
-        "movement_type": ex.movement_type,
-        "body_region": ex.body_region,
-        "is_unilateral": bool(ex.is_unilateral),
-        "is_assisted": bool(ex.is_assisted),
-        "description": ex.description,
-        "primary_muscles": ex.primary_muscles or [],
-        "secondary_muscles": ex.secondary_muscles or [],
-    }
+    return _serialize_exercise(ex)
 
 
 @router.post("/", response_model=ExerciseResponse, status_code=status.HTTP_201_CREATED)
@@ -82,11 +161,19 @@ async def create_exercise(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
     """Create a new exercise definition."""
+    existing = await db.execute(select(Exercise.id).where(Exercise.name == exercise_data.name))
+    exercise_name = (
+        await _generate_unique_name(db, user.id, exercise_data.display_name)
+        if existing.scalar_one_or_none() is not None
+        else exercise_data.name
+    )
     exercise = Exercise(
-        name=exercise_data.name,
+        name=exercise_name,
         display_name=exercise_data.display_name,
+        user_id=user.id,
         movement_type=exercise_data.movement_type.value,
         body_region=exercise_data.body_region.value,
+        equipment_type=exercise_data.equipment_type,
         is_unilateral=exercise_data.is_unilateral,
         is_assisted=exercise_data.is_assisted,
         description=exercise_data.description,
@@ -96,19 +183,98 @@ async def create_exercise(
     db.add(exercise)
     await db.flush()
     await db.refresh(exercise)
-    return {
-        "id": exercise.id,
-        "name": exercise.name,
-        "display_name": exercise.display_name,
-        "equipment_type": exercise.equipment_type or "other",
-        "movement_type": exercise.movement_type,
-        "body_region": exercise.body_region,
-        "is_unilateral": bool(exercise.is_unilateral),
-        "is_assisted":   bool(exercise.is_assisted),
-        "description": exercise.description,
-        "primary_muscles": exercise_data.primary_muscles,
-        "secondary_muscles": exercise_data.secondary_muscles,
-    }
+    return _serialize_exercise(exercise)
+
+
+@router.put("/{exercise_id}", response_model=ExerciseResponse)
+async def update_exercise(
+    exercise_id: int,
+    exercise_data: ExerciseUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Create or update a user-customized exercise and optionally remap history."""
+    source_exercise = await _get_visible_exercise(db, exercise_id, user.id)
+    if not source_exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise {exercise_id} not found",
+        )
+
+    retroactive = exercise_data.apply_mode == "retroactive"
+    if source_exercise.user_id == user.id and retroactive:
+        target_exercise = source_exercise
+    else:
+        target_exercise = Exercise(
+            name=await _generate_unique_name(db, user.id, exercise_data.display_name),
+            display_name=exercise_data.display_name,
+            user_id=user.id,
+            source_exercise_id=source_exercise.source_exercise_id or source_exercise.id,
+            movement_type=exercise_data.movement_type.value,
+            body_region=exercise_data.body_region.value,
+            equipment_type=source_exercise.equipment_type or "other",
+            is_unilateral=exercise_data.is_unilateral,
+            is_assisted=exercise_data.is_assisted,
+            description=exercise_data.description,
+            primary_muscles=exercise_data.primary_muscles,
+            secondary_muscles=exercise_data.secondary_muscles,
+        )
+        db.add(target_exercise)
+        await db.flush()
+
+    if target_exercise is source_exercise:
+        target_exercise.display_name = exercise_data.display_name
+        target_exercise.movement_type = exercise_data.movement_type.value
+        target_exercise.body_region = exercise_data.body_region.value
+        target_exercise.is_unilateral = exercise_data.is_unilateral
+        target_exercise.is_assisted = exercise_data.is_assisted
+        target_exercise.description = exercise_data.description
+        target_exercise.primary_muscles = exercise_data.primary_muscles
+        target_exercise.secondary_muscles = exercise_data.secondary_muscles
+
+    if target_exercise.id != source_exercise.id:
+        await _replace_exercise_in_plans(
+            db,
+            user_id=user.id,
+            old_exercise_id=source_exercise.id,
+            new_exercise_id=target_exercise.id,
+        )
+        await _replace_exercise_in_sessions(
+            db,
+            user_id=user.id,
+            old_exercise_id=source_exercise.id,
+            new_exercise_id=target_exercise.id,
+            retroactive=retroactive,
+        )
+        if retroactive:
+            feedback_result = await db.execute(
+                select(ExerciseFeedback).where(
+                    ExerciseFeedback.user_id == user.id,
+                    ExerciseFeedback.exercise_id == source_exercise.id,
+                )
+            )
+            for feedback in feedback_result.scalars().all():
+                feedback.exercise_id = target_exercise.id
+
+            notes_result = await db.execute(
+                select(ExerciseNote).where(
+                    ExerciseNote.user_id == user.id,
+                    ExerciseNote.exercise_id == source_exercise.id,
+                )
+            )
+            for note in notes_result.scalars().all():
+                note.exercise_id = target_exercise.id
+
+            if source_exercise.user_id == user.id:
+                await db.execute(
+                    delete(Exercise)
+                    .where(Exercise.id == source_exercise.id)
+                    .where(Exercise.user_id == user.id)
+                )
+
+    await db.flush()
+    await db.refresh(target_exercise)
+    return _serialize_exercise(target_exercise)
 
 
 @router.get("/{exercise_id}/history")
@@ -119,6 +285,13 @@ async def get_exercise_history(
     limit: int = 10,
 ) -> list[dict]:
     """Get the most recent completed sessions for a given exercise."""
+    ex = await _get_visible_exercise(db, exercise_id, user.id)
+    if not ex:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise {exercise_id} not found",
+        )
+
     # Subquery: sessions that have at least one completed set (bilateral or unilateral)
     sessions_with_data = (
         select(ExerciseSet.workout_session_id)
@@ -212,13 +385,14 @@ async def delete_exercise(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Delete an exercise definition."""
-    # Check if exercise exists
-    result = await db.execute(select(Exercise).where(Exercise.id == exercise_id))
+    result = await db.execute(
+        select(Exercise).where(Exercise.id == exercise_id, Exercise.user_id == user.id)
+    )
     ex = result.scalar_one_or_none()
     if not ex:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Exercise {exercise_id} not found",
+            detail=f"Custom exercise {exercise_id} not found",
         )
 
     # Check if exercise is used in any sets
@@ -247,6 +421,13 @@ async def get_exercise_note(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict | None:
     """Get the user's note for an exercise."""
+    ex = await _get_visible_exercise(db, exercise_id, user.id)
+    if not ex:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise {exercise_id} not found",
+        )
+
     result = await db.execute(
         select(ExerciseNote).where(
             ExerciseNote.exercise_id == exercise_id,
@@ -272,6 +453,12 @@ async def set_exercise_note(
 ) -> dict:
     """Create or update the user's note for an exercise. Empty string deletes."""
     note = body.note
+    ex = await _get_visible_exercise(db, exercise_id, user.id)
+    if not ex:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Exercise {exercise_id} not found",
+        )
 
     result = await db.execute(
         select(ExerciseNote).where(

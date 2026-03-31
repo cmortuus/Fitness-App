@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-	<string>GymTracker</string>
+	<string>Onyx Intake</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -23,11 +23,11 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>NSCameraUsageDescription</key>
-	<string>GymTracker uses the camera to scan food barcodes and nutrition labels for faster food logging.</string>
+	<string>Onyx Intake uses the camera to scan food barcodes and nutrition labels for faster food logging.</string>
 	<key>NSHealthShareUsageDescription</key>
-	<string>GymTracker reads your Apple Health body weight and body fat data to keep progress tracking current.</string>
+	<string>Onyx Intake reads your Apple Health body weight and body fat data to keep progress tracking current.</string>
 	<key>NSHealthUpdateUsageDescription</key>
-	<string>GymTracker writes completed workouts and body weight entries to Apple Health when you choose to sync them.</string>
+	<string>Onyx Intake writes completed workouts and body weight entries to Apple Health when you choose to sync them.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

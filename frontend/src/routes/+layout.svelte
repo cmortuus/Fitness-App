@@ -194,7 +194,7 @@
       <a href="/"
          class="text-lg font-bold gradient-text tracking-tight hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary-500/60 rounded-sm"
       >
-        GymTracker
+        Onyx Expenditure
       </a>
 
       <div class="flex items-center gap-3">

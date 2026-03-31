@@ -161,6 +161,9 @@ export interface Exercise {
   id: number;
   name: string;
   display_name: string;
+  user_id: number | null;
+  source_exercise_id: number | null;
+  is_custom: boolean;
   movement_type: 'compound' | 'isolation';
   body_region: 'upper' | 'lower' | 'full_body';
   equipment_type: 'barbell' | 'dumbbell' | 'cable' | 'machine' | 'plate_loaded' | 'bodyweight' | 'band' | 'kettlebell' | 'other';
@@ -437,6 +440,21 @@ export async function createExercise(data: {
   secondary_muscles?: string[];
 }): Promise<Exercise> {
   const response = await api.post('/exercises/', data);
+  return response.data;
+}
+
+export async function updateExercise(exerciseId: number, data: {
+  display_name: string;
+  movement_type: 'compound' | 'isolation';
+  body_region: 'upper' | 'lower' | 'full_body';
+  is_unilateral: boolean;
+  is_assisted: boolean;
+  description?: string | null;
+  primary_muscles: string[];
+  secondary_muscles: string[];
+  apply_mode: 'future_only' | 'retroactive';
+}): Promise<Exercise> {
+  const response = await api.put(`/exercises/${exerciseId}`, data);
   return response.data;
 }
 
