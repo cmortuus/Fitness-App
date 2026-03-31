@@ -237,6 +237,7 @@ export interface PlannedExercise {
   exercise_id: number;
   sets: number;
   reps: number;
+  rep_range_top?: number;
   starting_weight_kg: number;
   progression_type: string;
   rest_seconds?: number;
@@ -344,7 +345,7 @@ export async function createSession(data: {
 export async function createSessionFromPlan(
   planId: number,
   dayNumber: number = 1,
-  overloadStyle: 'rep' | 'weight' = 'rep',
+  overloadStyle: 'rep' | 'weight' | 'double' = 'double',
   bodyWeightKg: number = 0
 ): Promise<WorkoutSession> {
   const response = await api.post(

@@ -820,7 +820,7 @@ async def create_session_from_plan(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
     day_number: int = 1,
-    overload_style: str = "rep",
+    overload_style: str = "double",
     body_weight_kg: float = 0.0,
 ) -> dict:
     """Create a new workout session from a plan, pre-populating sets."""
@@ -1117,6 +1117,20 @@ async def create_session_from_plan(
         ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
         plan_set_type = exercise_data.get("set_type", "standard")
+        rep_range_top = exercise_data.get("rep_range_top") or 0
+
+        # Double progression: check if ALL prior sets hit the rep ceiling
+        double_weight_up = False
+        if overload_style == "double" and rep_range_top > 0:
+            prior_sets_for_ex = prior_set_data.get(exercise_id, {})
+            standard_prior = {k: v for k, v in prior_sets_for_ex.items()
+                              if v.get("set_type", "standard") in ("standard", "myo_rep", "myo_rep_match")}
+            if standard_prior:
+                all_hit_ceiling = all(
+                    (s.get("reps") or 0) >= rep_range_top
+                    for s in standard_prior.values()
+                )
+                double_weight_up = all_hit_ceiling
 
         # Track set 1's planned values so myo_rep_match sets can copy them
         set1_weight_kg = None
@@ -1136,10 +1150,26 @@ async def create_session_from_plan(
                 suggested_reps = set1_reps
                 planned_left = set1_left
                 planned_right = set1_right
+            elif double_weight_up:
+                # Double progression: all sets hit ceiling → weight up, reps reset
+                prior_sets_for_ex = prior_set_data.get(exercise_id, {})
+                prior_weight = next(
+                    (s["weight"] for s in prior_sets_for_ex.values()), None
+                )
+                if prior_weight and prior_weight > 0:
+                    weight_kg = round((prior_weight + 2.5) / 2.5) * 2.5
+                else:
+                    weight_kg = None
+                suggested_reps = reps  # reset to bottom of range
+                planned_left = None
+                planned_right = None
             else:
                 # Normal progression from prior session's corresponding set
                 weight_kg, suggested_reps, planned_left, planned_right = \
                     _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                # Double progression: cap reps at rep_range_top
+                if overload_style == "double" and rep_range_top > 0 and suggested_reps and suggested_reps > rep_range_top:
+                    suggested_reps = rep_range_top
 
             # Save set 1's values for myo_rep_match copying
             if set_num == 1:

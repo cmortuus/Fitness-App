@@ -171,6 +171,10 @@ def compute_overload(
     if overload_style == "weight":
         new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
         return new_weight, prior_reps
+    elif overload_style == "double":
+        # Double progression: add 1 rep per set. Weight increase is handled
+        # at the caller level when ALL sets hit rep_range_top.
+        return prior_weight, prior_reps + 1
     else:
         projected_reps = prior_reps + 1
         if rep_bracket(projected_reps) <= rep_bracket(prior_reps):

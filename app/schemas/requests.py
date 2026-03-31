@@ -217,7 +217,8 @@ class WorkoutSessionAuditResponse(BaseModel):
 class PlannedExercise(BaseModel):
     exercise_id: int
     sets: int
-    reps: int
+    reps: int = 8  # bottom of rep range for double progression
+    rep_range_top: int = 12  # top of rep range for double progression
     starting_weight_kg: float
     progression_type: str = "linear"
     set_type: str = "standard"

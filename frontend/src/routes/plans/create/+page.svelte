@@ -84,8 +84,10 @@
     exercise: Exercise | null;
   } | null>(null);
 
-  // Config values for the exercise being added (sets only — weight/reps set during workout)
+  // Config values for the exercise being added
   let configSets = $state(3);
+  let configRepsMin = $state(8);
+  let configRepsMax = $state(12);
   let configSetType = $state('standard');
   let configDrops = $state<number | null>(null);
 
@@ -267,6 +269,8 @@
       exercise: exercise
     };
     configSets = 3;
+    configRepsMin = 8;
+    configRepsMax = 12;
     configSetType = 'standard';
     configDrops = null;
   }
@@ -280,7 +284,8 @@
     const newExercise: PlannedExercise = {
       exercise_id: configuringExercise.exercise_id,
       sets: configSets,
-      reps: 0,
+      reps: configRepsMin,
+      rep_range_top: configRepsMax,
       starting_weight_kg: 0,
       progression_type: 'linear',
       rest_seconds: 90,
@@ -744,7 +749,7 @@
                   {#each day.exercises as ex}
                     <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
                       <span class="text-zinc-300">{getExName(ex.exercise_id)}</span>
-                      <span class="text-xs text-zinc-500">{ex.sets}×{ex.reps}</span>
+                      <span class="text-xs text-zinc-500">{ex.sets}×{ex.reps}{ex.rep_range_top ? `-${ex.rep_range_top}` : ''}</span>
                     </div>
                   {/each}
                 </div>
@@ -999,7 +1004,6 @@
             <p class="text-sm text-zinc-400">{configuringExercise.exercise?.primary_muscles.join(', ')}</p>
           </div>
 
-          <!-- Sets only — weight & reps are set during the workout -->
           <div>
             <label class="label">Number of Sets</label>
             <input
@@ -1009,7 +1013,16 @@
               max="20"
               class="input max-w-[120px]"
             />
-            <p class="text-xs text-zinc-500 mt-1">Weight and reps are logged during the workout.</p>
+          </div>
+
+          <div>
+            <label class="label">Rep Range</label>
+            <div class="flex items-center gap-2">
+              <input type="number" bind:value={configRepsMin} min="1" max="30" class="input max-w-[80px]" />
+              <span class="text-zinc-500">to</span>
+              <input type="number" bind:value={configRepsMax} min={configRepsMin} max="30" class="input max-w-[80px]" />
+            </div>
+            <p class="text-xs text-zinc-500 mt-1">With double progression, weight increases when all sets hit the top of the range.</p>
           </div>
 
           <div>

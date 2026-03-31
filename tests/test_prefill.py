@@ -601,3 +601,106 @@ class TestMultiWeekChain:
         w3_weight = w3["sets"][0]["planned_weight_kg"]
         assert w3_weight == 40.0, f"Weight should hold at 40 after miss, got {w3_weight}"
         assert w3_reps == 11, f"Should retry 11 reps after missing, got {w3_reps}"
+
+
+class TestDoubleProgression:
+    async def _create_plan_with_range(self, client, ex_id, sets=3, reps=8, rep_range_top=12):
+        body = {
+            "name": "Double Prog",
+            "block_type": "hypertrophy",
+            "duration_weeks": 4,
+            "number_of_days": 1,
+            "days": [{
+                "day_number": 1,
+                "day_name": "Day 1",
+                "exercises": [{
+                    "exercise_id": ex_id,
+                    "sets": sets,
+                    "reps": reps,
+                    "rep_range_top": rep_range_top,
+                    "starting_weight_kg": 0,
+                    "progression_type": "linear",
+                }]
+            }]
+        }
+        r = await client.post("/api/plans/", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    async def test_double_reps_increase_within_range(self, client: AsyncClient):
+        """Double progression: each set adds 1 rep per week, capped at range top."""
+        ex = await create_exercise(client)
+        plan = await self._create_plan_with_range(client, ex["id"], sets=3, reps=8, rep_range_top=12)
+
+        # Week 1: log 40 kg × 8 on all 3 sets
+        w1 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 40.0, 8)
+
+        # Week 2: should suggest 40 kg × 9 (each set +1 rep)
+        w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w2["sets"]:
+            assert s["planned_weight_kg"] == 40.0
+            assert s["planned_reps"] == 9, f"Expected 9, got {s['planned_reps']}"
+
+    async def test_double_weight_up_when_all_sets_hit_ceiling(self, client: AsyncClient):
+        """When ALL sets hit rep_range_top, weight increases and reps reset."""
+        ex = await create_exercise(client)
+        plan = await self._create_plan_with_range(client, ex["id"], sets=3, reps=8, rep_range_top=12)
+
+        # Week 1: log 40 kg × 12 on all 3 sets (already at ceiling)
+        w1 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 40.0, 12)
+
+        # Week 2: all sets hit ceiling → weight up, reps reset to 8
+        w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w2["sets"]:
+            assert s["planned_weight_kg"] == 42.5, f"Weight should increase to 42.5, got {s['planned_weight_kg']}"
+            assert s["planned_reps"] == 8, f"Reps should reset to 8, got {s['planned_reps']}"
+
+    async def test_double_no_weight_up_if_one_set_below_ceiling(self, client: AsyncClient):
+        """Weight stays same if even one set is below the ceiling."""
+        ex = await create_exercise(client)
+        plan = await self._create_plan_with_range(client, ex["id"], sets=3, reps=8, rep_range_top=12)
+
+        # Week 1: sets at 12, 12, 10 — not all at ceiling
+        w1 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        await log_set(client, w1["id"], w1["sets"][0]["id"], 40.0, 12)
+        await log_set(client, w1["id"], w1["sets"][1]["id"], 40.0, 12)
+        await log_set(client, w1["id"], w1["sets"][2]["id"], 40.0, 10)
+
+        # Week 2: weight stays, reps capped at 12 for sets that hit ceiling
+        w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        assert w2["sets"][0]["planned_weight_kg"] == 40.0, "Weight should stay"
+        assert w2["sets"][2]["planned_reps"] == 11, f"Set 3 should progress to 11, got {w2['sets'][2]['planned_reps']}"
+        # Sets 1 and 2 were at 12 (ceiling) — should stay at 12 (capped)
+        assert w2["sets"][0]["planned_reps"] == 12, f"Set 1 at ceiling should stay 12, got {w2['sets'][0]['planned_reps']}"
+
+    async def test_double_full_cycle(self, client: AsyncClient):
+        """Full double progression cycle: reps build up, weight increases, repeat."""
+        ex = await create_exercise(client)
+        plan = await self._create_plan_with_range(client, ex["id"], sets=2, reps=8, rep_range_top=10)
+
+        # Week 1: 40 kg × 8,8
+        w1 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 40.0, 8)
+
+        # Week 2: 40 × 9,9
+        w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w2["sets"]:
+            assert s["planned_reps"] == 9
+            await log_set(client, w2["id"], s["id"], 40.0, 9)
+
+        # Week 3: 40 × 10,10 (ceiling)
+        w3 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w3["sets"]:
+            assert s["planned_reps"] == 10
+            await log_set(client, w3["id"], s["id"], 40.0, 10)
+
+        # Week 4: all sets hit ceiling → 42.5 × 8,8
+        w4 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w4["sets"]:
+            assert s["planned_weight_kg"] == 42.5, f"Expected 42.5, got {s['planned_weight_kg']}"
+            assert s["planned_reps"] == 8, f"Expected reset to 8, got {s['planned_reps']}"
