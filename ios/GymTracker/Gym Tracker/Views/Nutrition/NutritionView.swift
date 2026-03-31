@@ -17,6 +17,7 @@ struct NutritionView: View {
     @State private var showAlcoholCalc = false
     @State private var showQuickAdd = false
     @State private var showRecipes = false
+    @State private var showRecipeBuilder = false
     @State private var showGoalsSheet = false
     @State private var editingEntry: NutritionEntry? = nil
     @State private var showCopyDayConfirm = false
@@ -24,6 +25,8 @@ struct NutritionView: View {
     @State private var copying = false
     @State private var endingPhase = false
     @State private var scannedFoodWrapper: IdentifiedFood? = nil
+    @State private var entrySelectionMode = false
+    @State private var selectedEntryIDs: Set<Int> = []
 
     private let meals = ["breakfast", "lunch", "dinner", "snack"]
 
@@ -38,7 +41,14 @@ struct NutritionView: View {
     }
 
     private var allEntries: [NutritionEntry] {
-        meals.flatMap { mealEntries[$0] ?? [] }
+        let orderedMeals = meals
+        let presentMeals = orderedMeals.filter { !(mealEntries[$0]?.isEmpty ?? true) }
+        let otherMeals = mealEntries.keys.filter { !orderedMeals.contains($0) }.sorted()
+        return (presentMeals + otherMeals).flatMap { mealEntries[$0] ?? [] }
+    }
+
+    private var selectedEntries: [NutritionEntry] {
+        allEntries.filter { selectedEntryIDs.contains($0.id) }
     }
 
     var body: some View {
@@ -112,6 +122,11 @@ struct NutritionView: View {
             }
             .sheet(isPresented: $showRecipes) {
                 RecipesView(date: dateString, onLog: { Task { await loadAll() } })
+            }
+            .sheet(isPresented: $showRecipeBuilder) {
+                RecipeBuilderView(sourceEntries: selectedEntries) {
+                    cancelEntrySelection()
+                }
             }
             .sheet(isPresented: $showGoalsSheet) {
                 MacroGoalsSheet(currentGoals: summary?.goals, onSave: { Task { await loadAll() } })
@@ -485,6 +500,7 @@ struct NutritionView: View {
                 let otherMeals = mealEntries.keys.filter { !orderedMeals.contains($0) }.sorted()
 
                 VStack(spacing: 8) {
+                    foodLogHeader
                     ForEach(presentMeals + otherMeals, id: \.self) { meal in
                         if let entries = mealEntries[meal], !entries.isEmpty {
                             mealSection(meal: meal, entries: entries)
@@ -494,6 +510,43 @@ struct NutritionView: View {
                 .padding(.horizontal)
             }
         }
+    }
+
+    private var foodLogHeader: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Food Log")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                if entrySelectionMode {
+                    Text("\(selectedEntries.count) selected")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.55))
+                }
+            }
+            Spacer()
+            if entrySelectionMode {
+                Button("Cancel") { cancelEntrySelection() }
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.7))
+
+                Button {
+                    startRecipeFromSelection()
+                } label: {
+                    Label("Make Recipe", systemImage: "fork.knife")
+                        .font(.caption.weight(.semibold))
+                }
+                .disabled(selectedEntries.isEmpty)
+            } else {
+                Button("Select") {
+                    entrySelectionMode = true
+                }
+                .font(.caption.weight(.semibold))
+                .disabled(allEntries.isEmpty)
+            }
+        }
+        .padding(.horizontal, 4)
+        .padding(.bottom, 4)
     }
 
     private func mealSection(meal: String, entries: [NutritionEntry]) -> some View {
@@ -517,25 +570,32 @@ struct NutritionView: View {
 
             List {
                 ForEach(entries) { entry in
-                    foodRow(entry)
-                        .listRowBackground(AppColors.zinc900)
-                        .listRowSeparatorTint(Color.white.opacity(0.04))
-                        .listRowInsets(EdgeInsets())
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                Task { await deleteEntry(entry.id); await loadAll() }
-                            } label: {
-                                Label("Delete", systemImage: "trash")
+                    if entrySelectionMode {
+                        foodRow(entry)
+                            .listRowBackground(AppColors.zinc900)
+                            .listRowSeparatorTint(Color.white.opacity(0.04))
+                            .listRowInsets(EdgeInsets())
+                    } else {
+                        foodRow(entry)
+                            .listRowBackground(AppColors.zinc900)
+                            .listRowSeparatorTint(Color.white.opacity(0.04))
+                            .listRowInsets(EdgeInsets())
+                            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                Button(role: .destructive) {
+                                    Task { await deleteEntry(entry.id); await loadAll() }
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                             }
-                        }
-                        .swipeActions(edge: .leading, allowsFullSwipe: true) {
-                            Button {
-                                Task { await duplicateEntry(entry) }
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
+                            .swipeActions(edge: .leading, allowsFullSwipe: true) {
+                                Button {
+                                    Task { await duplicateEntry(entry) }
+                                } label: {
+                                    Label("Copy", systemImage: "doc.on.doc")
+                                }
+                                .tint(.blue)
                             }
-                            .tint(.blue)
-                        }
+                    }
                 }
             }
             .listStyle(.plain)
@@ -550,10 +610,22 @@ struct NutritionView: View {
         let total = p + c + f
         let pFrac = total > 0 ? p / total : 0
         let cFrac = total > 0 ? c / total : 0
+        let isSelected = selectedEntryIDs.contains(entry.id)
 
-        return Button { editingEntry = entry } label: {
+        return Button {
+            if entrySelectionMode {
+                toggleEntrySelection(entry.id)
+            } else {
+                editingEntry = entry
+            }
+        } label: {
             VStack(spacing: 6) {
                 HStack(spacing: 8) {
+                    if entrySelectionMode {
+                        Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                            .font(.title3)
+                            .foregroundStyle(isSelected ? .blue : .white.opacity(0.28))
+                    }
                     VStack(alignment: .leading, spacing: 2) {
                         Text(entry.name).font(.subheadline).lineLimit(1).foregroundStyle(.primary)
                         HStack(spacing: 4) {
@@ -587,6 +659,10 @@ struct NutritionView: View {
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? Color.blue.opacity(0.12) : .clear)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -657,6 +733,24 @@ struct NutritionView: View {
         switch type { case "cut": .red; case "bulk": .green; default: .blue }
     }
 
+    private func toggleEntrySelection(_ id: Int) {
+        if selectedEntryIDs.contains(id) {
+            selectedEntryIDs.remove(id)
+        } else {
+            selectedEntryIDs.insert(id)
+        }
+    }
+
+    private func cancelEntrySelection() {
+        entrySelectionMode = false
+        selectedEntryIDs.removeAll()
+    }
+
+    private func startRecipeFromSelection() {
+        guard !selectedEntries.isEmpty else { return }
+        showRecipeBuilder = true
+    }
+
     // MARK: - Data Loading (fully sequential — no async let)
 
     private enum NutrResult: Sendable {
@@ -683,6 +777,11 @@ struct NutritionView: View {
             case .entries(let e): mealEntries = e?.meals ?? [:]
             case .water(let w): waterSummary = w
             }
+        }
+        let validIDs = Set(allEntries.map(\.id))
+        selectedEntryIDs = selectedEntryIDs.intersection(validIDs)
+        if entrySelectionMode, allEntries.isEmpty {
+            cancelEntrySelection()
         }
         loading = false
     }
