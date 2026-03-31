@@ -1434,8 +1434,8 @@
             </div>
             <div class="px-2">
               {#each customFoods as food}
-                <div class="flex items-center gap-1 rounded-lg hover:bg-zinc-800 transition-colors group">
-                  <button onclick={() => { selectedFood = food; selectedQty = food.serving_size_g || 100; }}
+                <div class="flex items-center gap-1 rounded-lg hover:bg-zinc-800 transition-colors">
+                  <button onclick={() => startEditingFood(food)}
                           class="flex-1 text-left px-3 py-2.5">
                     <p class="text-sm text-white truncate">
                       {food.name}
@@ -1453,7 +1453,7 @@
                     </p>
                   </button>
                   <button onclick={() => startEditingFood(food)}
-                          class="px-2 py-2 text-zinc-600 hover:text-blue-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          class="px-2 py-2 text-zinc-500 hover:text-blue-400"
                           title="Edit saved food">
                     ✎
                   </button>
@@ -1462,9 +1462,9 @@
                             await deleteCustomFood(food.id);
                             customFoods = customFoods.filter(f => f.id !== food.id);
                           }}
-                          class="px-2 py-2 text-zinc-600 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          class="px-2 py-2 text-zinc-500 hover:text-red-400"
                           title="Delete saved food">
-                    🗑
+                    ✕
                   </button>
                 </div>
               {/each}
