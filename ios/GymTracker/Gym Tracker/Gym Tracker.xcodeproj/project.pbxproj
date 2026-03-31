@@ -52,7 +52,7 @@
 		B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSyncService.swift; sourceTree = "<group>"; };
 		D6E7F8091A2B3C4D5E6F7081 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D2B3C4D5E60718293041B2C3 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
-		AA11BB22CC33DD44EE55FF67 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE55FF67 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Gym Tracker/Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
