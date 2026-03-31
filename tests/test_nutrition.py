@@ -15,19 +15,19 @@ async def test_list_entries_returns_newest_first(client, db):
         protein=20,
         carbs=8,
         fat=2,
-        logged_at=datetime(2026, 3, 30, 8, 0, tzinfo=timezone.utc),
+        logged_at=datetime(2026, 3, 30, 8, 0),
     )
     entry_newer = NutritionEntry(
         user_id=1,
         name="Blueberries",
-        date=datetime(2026, 3, 30, tzinfo=timezone.utc).date(),
+        date=datetime(2026, 3, 30).date(),
         meal="breakfast",
         quantity_g=100,
         calories=60,
         protein=1,
         carbs=14,
         fat=0,
-        logged_at=datetime(2026, 3, 30, 8, 5, tzinfo=timezone.utc),
+        logged_at=datetime(2026, 3, 30, 8, 5),
     )
     db.add_all([entry_older, entry_newer])
     await db.commit()
