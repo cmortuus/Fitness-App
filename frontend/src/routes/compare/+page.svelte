@@ -104,12 +104,6 @@
       .sort((a, b) => (b.actual_weight_kg! * b.actual_reps!) - (a.actual_weight_kg! * a.actual_reps!))[0] ?? null;
   }
 
-  function duration(s: SessionDetail): string {
-    if (!s.started_at || !s.completed_at) return '—';
-    const mins = Math.round((new Date(s.completed_at).getTime() - new Date(s.started_at).getTime()) / 60000);
-    return mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  }
-
   function delta(a: number | null | undefined, b: number | null | undefined): string {
     if (a == null || b == null) return '';
     const d = b - a;
@@ -167,12 +161,6 @@
           </tr>
         </thead>
         <tbody>
-          <tr class="border-b border-zinc-800/50">
-            <td class="py-2 text-zinc-400">Duration</td>
-            <td class="py-2 text-right font-mono">{duration(sessionA)}</td>
-            <td class="py-2 text-right font-mono">{duration(sessionB)}</td>
-            <td class="py-2 text-right text-zinc-500">—</td>
-          </tr>
           <tr class="border-b border-zinc-800/50">
             <td class="py-2 text-zinc-400">Total Sets</td>
             <td class="py-2 text-right font-mono">{sessionA.total_sets}</td>

@@ -5,15 +5,17 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
-from sqlalchemy import func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.user import User
-from app.models.workout import WorkoutPlan, WorkoutSession, ExerciseSet
+from app.models.workout import WorkoutPlan, WorkoutSession, ExerciseSet, ExerciseFeedback, WorkoutStatus
 from app.models.exercise import Exercise
-from app.schemas.requests import WorkoutPlanCreate, WorkoutPlanResponse
+from app.schemas.requests import WorkoutPlanCreate, WorkoutPlanResponse, PlanRirOverrides
+from app.services.plan_rir import normalize_rir_overrides
+from app.api.progress import VOLUME_LANDMARKS
 
 router = APIRouter()
 
@@ -42,6 +44,7 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         # New format
         days = planned_data.get("days", [])
         number_of_days = planned_data.get("number_of_days") or len(days)
+    rir_overrides = normalize_rir_overrides(planned_data.get("rir_overrides"))
 
     return {
         "id": plan.id,
@@ -52,10 +55,72 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         "current_week": plan.current_week,
         "number_of_days": number_of_days,
         "days": days,
+        "rir_overrides": rir_overrides,
         "auto_progression": plan.auto_progression,
         "is_draft": plan.is_draft,
         "is_archived": plan.is_archived,
         "created_at": plan.created_at,
+    }
+
+
+def session_matches_plan(session: WorkoutSession, plan: dict) -> bool:
+    if session.workout_plan_id == plan["id"]:
+        return True
+    return bool(session.name and session.name.startswith(f"{plan['name']} - "))
+
+
+def resolve_next_workout(sessions: list[WorkoutSession], plans: list[dict]) -> dict | None:
+    active_plans = [p for p in plans if not p["is_archived"] and not p["is_draft"]]
+    if not active_plans:
+        return None
+
+    def completed_sessions_for_plan(plan: dict) -> list[WorkoutSession]:
+        return [
+            s for s in sessions
+            if s.status == "completed"
+            and ((s.total_sets or 0) > 0 or (s.total_reps or 0) > 0)
+            and session_matches_plan(s, plan)
+        ]
+
+    recent_with_plan = next(
+        (
+            s for s in sessions
+            if s.status != "skipped" and any(session_matches_plan(s, plan) for plan in active_plans)
+        ),
+        None,
+    )
+
+    if recent_with_plan:
+        plan = next(
+            (p for p in active_plans if session_matches_plan(recent_with_plan, p)),
+            active_plans[0],
+        )
+    else:
+        plan = active_plans[0]
+
+    if not plan["days"]:
+        return None
+
+    completed_sessions = completed_sessions_for_plan(plan)
+    done_count = len(completed_sessions)
+    total_needed = plan["duration_weeks"] * len(plan["days"])
+    is_complete = done_count >= total_needed
+    next_day_idx = 0 if is_complete else done_count % len(plan["days"])
+    week_number = plan["duration_weeks"] if is_complete else (done_count // len(plan["days"])) + 1
+    day_number = next_day_idx + 1
+
+    return {
+        "plan": plan,
+        "day": plan["days"][next_day_idx],
+        "week_number": week_number,
+        "day_number": day_number,
+        "is_complete": is_complete,
+        "debug": {
+            "selected_plan_id": plan["id"],
+            "completed_session_count": done_count,
+            "total_sessions_needed": total_needed,
+            "recent_session_id": recent_with_plan.id if recent_with_plan else None,
+        },
     }
 
 
@@ -72,6 +137,31 @@ async def list_plans(
     result = await db.execute(stmt.order_by(WorkoutPlan.created_at.desc()))
     plans = result.scalars().all()
     return [serialize_plan(p) for p in plans]
+
+
+@router.get("/next-workout")
+async def get_next_workout(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict | None:
+    """Return the canonical next workout for the current user."""
+    plans_result = await db.execute(
+        select(WorkoutPlan)
+        .where(WorkoutPlan.user_id == user.id, WorkoutPlan.is_draft.is_(False))
+        .order_by(WorkoutPlan.created_at.desc())
+    )
+    plans = [serialize_plan(p) for p in plans_result.scalars().all()]
+    if not plans:
+        return None
+
+    sessions_result = await db.execute(
+        select(WorkoutSession)
+        .where(WorkoutSession.user_id == user.id)
+        .order_by(WorkoutSession.date.desc(), WorkoutSession.id.desc())
+    )
+    sessions = sessions_result.scalars().all()
+
+    return resolve_next_workout(sessions, plans)
 
 
 @router.get("/exercises/recent", response_model=list[dict])
@@ -182,6 +272,101 @@ async def get_plan(
     return serialize_plan(plan)
 
 
+@router.get("/{plan_id}/recommendations")
+async def get_plan_recommendations(
+    plan_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Workout plan {plan_id} not found")
+
+    try:
+        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    except (json.JSONDecodeError, TypeError):
+        planned_data = {}
+    days = planned_data.get("days", []) if isinstance(planned_data, dict) else []
+
+    planned_set_counts: dict[int, int] = {}
+    muscle_planned_sets: dict[str, int] = {}
+    plan_exercise_ids: set[int] = set()
+    for day in days:
+        for ex in day.get("exercises", []):
+            ex_id = ex.get("exercise_id")
+            if not ex_id:
+                continue
+            plan_exercise_ids.add(ex_id)
+            planned_set_counts[ex_id] = planned_set_counts.get(ex_id, 0) + max(0, int(ex.get("sets", 0) or 0))
+
+    if not plan_exercise_ids:
+        return []
+
+    ex_rows = await db.execute(select(Exercise).where(Exercise.id.in_(plan_exercise_ids)))
+    exercises = {exercise.id: exercise for exercise in ex_rows.scalars().all()}
+    for ex_id, count in planned_set_counts.items():
+        exercise = exercises.get(ex_id)
+        for muscle in exercise.primary_muscles or [] if exercise else []:
+            muscle_planned_sets[muscle] = muscle_planned_sets.get(muscle, 0) + count
+
+    feedback_rows = await db.execute(
+        select(ExerciseFeedback, WorkoutSession)
+        .join(WorkoutSession, ExerciseFeedback.session_id == WorkoutSession.id)
+        .where(
+            ExerciseFeedback.user_id == user.id,
+            WorkoutSession.workout_plan_id == plan_id,
+            WorkoutSession.status == WorkoutStatus.COMPLETED,
+        )
+        .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id), desc(ExerciseFeedback.id))
+    )
+
+    latest_feedback_by_exercise: dict[int, tuple[ExerciseFeedback, WorkoutSession]] = {}
+    for feedback, session in feedback_rows.all():
+        if feedback.exercise_id not in latest_feedback_by_exercise:
+            latest_feedback_by_exercise[feedback.exercise_id] = (feedback, session)
+
+    recommendations: list[dict] = []
+    for exercise_id, (feedback, session) in latest_feedback_by_exercise.items():
+        exercise = exercises.get(exercise_id)
+        if not exercise:
+            continue
+        if feedback.rir is None:
+            continue
+
+        primary_muscle = (exercise.primary_muscles or [None])[0]
+        muscle_landmarks = VOLUME_LANDMARKS.get(primary_muscle or "", {"mev": 4, "mav": 10, "mrv": 16})
+        weekly_sets = muscle_planned_sets.get(primary_muscle or "", 0)
+
+        if feedback.rir <= 1 and feedback.recovery_rating in {"poor", "ok"}:
+            add_set = weekly_sets < muscle_landmarks["mav"]
+            recommendations.append({
+                "type": "backoff_rir",
+                "exercise_id": exercise_id,
+                "exercise_name": exercise.display_name,
+                "muscle_group": primary_muscle,
+                "current_rir": feedback.rir,
+                "recovery_rating": feedback.recovery_rating,
+                "recommended_rir": 2,
+                "add_set": add_set,
+                "set_delta": 1 if add_set else 0,
+                "weekly_sets": weekly_sets,
+                "mav_sets": muscle_landmarks["mav"],
+                "reason": (
+                    f"{exercise.display_name} hit {feedback.rir} RIR with {feedback.recovery_rating} recovery. "
+                    f"Backing off to 2 RIR should improve recovery consistency."
+                ),
+                "detail": (
+                    f"{primary_muscle.replace('_', ' ').title() if primary_muscle else 'This muscle group'} is at "
+                    f"{weekly_sets} planned sets/week. "
+                    + ("Add 1 set to keep growth stimulus while easing effort." if add_set else "Hold set count steady for now.")
+                ),
+                "source_session_id": session.id,
+            })
+
+    return recommendations
+
+
 @router.post("/", response_model=WorkoutPlanResponse, status_code=status.HTTP_201_CREATED)
 async def create_plan(
     plan_data: WorkoutPlanCreate,
@@ -192,7 +377,8 @@ async def create_plan(
     # Convert days structure to JSON
     planned_data = {
         "number_of_days": plan_data.number_of_days,
-        "days": [d.model_dump() for d in plan_data.days]
+        "days": [d.model_dump() for d in plan_data.days],
+        "rir_overrides": normalize_rir_overrides(plan_data.rir_overrides.model_dump()),
     }
     planned_exercises_json = json.dumps(planned_data)
 
@@ -348,6 +534,39 @@ class PlanUpdate(BaseModel):
     days: list | None = None
     auto_progression: bool | None = None
     is_draft: bool | None = None
+
+
+@router.put("/{plan_id}/rir-overrides", response_model=WorkoutPlanResponse)
+async def update_plan_rir_overrides(
+    plan_id: int,
+    overrides: PlanRirOverrides,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan_id, WorkoutPlan.user_id == user.id))
+    plan = result.scalar_one_or_none()
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout plan {plan_id} not found",
+        )
+
+    try:
+        planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+    except (json.JSONDecodeError, TypeError):
+        planned_data = {}
+
+    if isinstance(planned_data, list):
+        planned_data = {
+            "number_of_days": len(planned_data) or 1,
+            "days": planned_data,
+        }
+
+    planned_data["rir_overrides"] = normalize_rir_overrides(overrides.model_dump())
+    plan.planned_exercises = json.dumps(planned_data)
+    await db.flush()
+    await db.refresh(plan)
+    return serialize_plan(plan)
 
 
 @router.put("/{plan_id}", response_model=WorkoutPlanResponse)

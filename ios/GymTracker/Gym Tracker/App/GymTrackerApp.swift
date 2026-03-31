@@ -2,6 +2,7 @@ import SwiftUI
 
 @main
 struct GymTrackerApp: App {
+    @Environment(\.scenePhase) private var scenePhase
     @State private var auth = AuthService.shared
 
     var body: some Scene {
@@ -15,14 +16,12 @@ struct GymTrackerApp: App {
                             Task { await HealthKitManager.shared.syncBodyWeightOnLaunch() }
                             Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
                         }
+                        .onChange(of: scenePhase) { _, newPhase in
+                            guard newPhase == .active else { return }
+                            Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
+                        }
                 } else {
                     LoginView()
-                        .task {
-                            // AUTO-LOGIN FOR UI TESTING — REMOVE BEFORE SHIPPING
-                            #if DEBUG
-                            try? await auth.login(username: "claude_test", password: "TestPass123")
-                            #endif
-                        }
                 }
             }
             .environment(auth)

@@ -1,6 +1,7 @@
 """Authentication API — register, login, refresh, current user, and settings."""
 
 import json
+from datetime import UTC, datetime
 from typing import Annotated
 
 import jwt
@@ -216,6 +217,18 @@ async def save_settings(
 ) -> dict:
     """Save the user's app settings to the database."""
     body = await request.json()
+    incoming_meta = body.get("settingsMeta") if isinstance(body.get("settingsMeta"), dict) else {}
+    source_device = (
+        request.headers.get("X-Client-Name")
+        or incoming_meta.get("source_device")
+        or "web"
+    )
+    body["settingsMeta"] = {
+        "schema_version": 1,
+        "updated_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+        "updated_by": user.username,
+        "source_device": source_device,
+    }
     user.settings_json = json.dumps(body)
     await db.flush()
     return body

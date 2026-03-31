@@ -47,8 +47,7 @@
 
       // Ensure branch cookie matches DB preference (survives cache clears)
       if (typeof document !== 'undefined') {
-        const pref = $settings as any;
-        const wantsDev = pref.branchPreference === 'dev';
+        const wantsDev = $settings.branchPreference === 'dev';
         const hasCookie = document.cookie.includes('gymtracker_branch=dev');
         if (wantsDev && !hasCookie) {
           document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
@@ -192,7 +191,11 @@
           style="padding-top: env(safe-area-inset-top);"
   >
     <div class="flex items-center justify-between px-4 h-14">
-      <span class="text-lg font-bold gradient-text tracking-tight">Onyx Expenditure</span>
+      <a href="/"
+         class="text-lg font-bold gradient-text tracking-tight hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary-500/60 rounded-sm"
+      >
+        Onyx Expenditure
+      </a>
 
       <div class="flex items-center gap-3">
         <!-- Desktop nav links (hidden on mobile) -->

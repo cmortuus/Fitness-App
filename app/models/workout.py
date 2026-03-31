@@ -131,6 +131,38 @@ class WorkoutSession(Base):
     sets: Mapped[list["ExerciseSet"]] = relationship(
         "ExerciseSet", back_populates="workout_session", cascade="all, delete-orphan"
     )
+    audit_entries: Mapped[list["WorkoutSessionAudit"]] = relationship(
+        "WorkoutSessionAudit", back_populates="workout_session", cascade="all, delete-orphan"
+    )
+
+
+class WorkoutSessionAudit(Base):
+    """Audit trail for workout session lifecycle transitions."""
+
+    __tablename__ = "workout_session_audit"
+    __table_args__ = (
+        Index("ix_workout_session_audit_session", "workout_session_id"),
+        Index("ix_workout_session_audit_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workout_session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workout_sessions.id"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reason: Mapped[str] = mapped_column(String(100), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_username: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_device: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+    workout_session: Mapped["WorkoutSession"] = relationship(
+        "WorkoutSession", back_populates="audit_entries"
+    )
 
 
 class ExerciseFeedback(Base):

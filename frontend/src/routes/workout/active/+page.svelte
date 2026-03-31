@@ -8,9 +8,9 @@
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback, syncSessionToPlan, patchSession,
+    saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
+  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import html2canvas from 'html2canvas';
@@ -236,6 +236,130 @@
     suggestion_detail?: string;
   }>>({});
 
+  type PersistedFeedbackState = {
+    recoveryAskedMuscles: string[];
+    effortSubmitted: number[];
+    feedbackData: Record<number, {
+      recovery_rating?: string;
+      rir?: number;
+      pump_rating?: string;
+      suggestion?: string;
+      suggestion_detail?: string;
+    }>;
+    dismissedRecoveryExerciseIds: number[];
+    dismissedEffortExerciseIds: number[];
+  };
+
+  function feedbackStorageKey(id: number): string {
+    return `hgt_session_feedback_${id}`;
+  }
+
+  function saveFeedbackDraftState() {
+    if (typeof localStorage === 'undefined' || !sessionId) return;
+    const dismissedRecoveryExerciseIds = Object.entries(showRecoveryPrompt)
+      .filter(([, visible]) => visible === false)
+      .map(([uiId]) => uiExercises.find(ex => ex.uiId === uiId)?.exerciseId)
+      .filter((exerciseId): exerciseId is number => exerciseId != null);
+    const dismissedEffortExerciseIds = Object.entries(showEffortPrompt)
+      .filter(([, visible]) => visible === false)
+      .map(([uiId]) => uiExercises.find(ex => ex.uiId === uiId)?.exerciseId)
+      .filter((exerciseId): exerciseId is number => exerciseId != null);
+
+    const payload: PersistedFeedbackState = {
+      recoveryAskedMuscles: [...recoveryAskedMuscles],
+      effortSubmitted: [...effortSubmitted],
+      feedbackData,
+      dismissedRecoveryExerciseIds,
+      dismissedEffortExerciseIds,
+    };
+    localStorage.setItem(feedbackStorageKey(sessionId), JSON.stringify(payload));
+  }
+
+  async function restoreFeedbackState(sessId: number) {
+    let nextRecoveryAskedMuscles = new Set<string>();
+    let nextEffortSubmitted = new Set<number>();
+    let nextFeedbackData: Record<number, {
+      recovery_rating?: string;
+      rir?: number;
+      pump_rating?: string;
+      suggestion?: string;
+      suggestion_detail?: string;
+    }> = {};
+    let dismissedRecoveryExerciseIds = new Set<number>();
+    let dismissedEffortExerciseIds = new Set<number>();
+
+    try {
+      const saved = await getExerciseFeedback(sessId);
+      for (const entry of saved) {
+        nextFeedbackData[entry.exercise_id] = {
+          recovery_rating: entry.recovery_rating ?? undefined,
+          rir: entry.rir ?? undefined,
+          pump_rating: entry.pump_rating ?? undefined,
+          suggestion: entry.suggestion ?? undefined,
+          suggestion_detail: entry.suggestion_detail ?? undefined,
+        };
+        if (entry.recovery_rating) {
+          const exercise = allExercises.find(e => e.id === entry.exercise_id);
+          const muscle = exercise?.primary_muscles?.[0];
+          if (muscle) nextRecoveryAskedMuscles.add(muscle);
+          dismissedRecoveryExerciseIds.add(entry.exercise_id);
+        }
+        if (entry.rir != null || entry.pump_rating || entry.suggestion) {
+          nextEffortSubmitted.add(entry.exercise_id);
+          dismissedEffortExerciseIds.add(entry.exercise_id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load saved feedback:', e);
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(feedbackStorageKey(sessId));
+      if (raw) {
+        try {
+          const parsed: PersistedFeedbackState = JSON.parse(raw);
+          nextRecoveryAskedMuscles = new Set([
+            ...nextRecoveryAskedMuscles,
+            ...(parsed.recoveryAskedMuscles ?? []),
+          ]);
+          nextEffortSubmitted = new Set([
+            ...nextEffortSubmitted,
+            ...(parsed.effortSubmitted ?? []),
+          ]);
+          nextFeedbackData = { ...nextFeedbackData, ...(parsed.feedbackData ?? {}) };
+          dismissedRecoveryExerciseIds = new Set([
+            ...dismissedRecoveryExerciseIds,
+            ...(parsed.dismissedRecoveryExerciseIds ?? []),
+          ]);
+          dismissedEffortExerciseIds = new Set([
+            ...dismissedEffortExerciseIds,
+            ...(parsed.dismissedEffortExerciseIds ?? []),
+          ]);
+        } catch (e) {
+          console.error('Failed to parse saved feedback draft:', e);
+        }
+      }
+    }
+
+    const nextShowRecoveryPrompt: Record<string, boolean> = {};
+    const nextShowEffortPrompt: Record<string, boolean> = {};
+    for (const ex of uiExercises) {
+      if (dismissedRecoveryExerciseIds.has(ex.exerciseId)) nextShowRecoveryPrompt[ex.uiId] = false;
+      if (dismissedEffortExerciseIds.has(ex.exerciseId)) nextShowEffortPrompt[ex.uiId] = false;
+    }
+
+    recoveryAskedMuscles = nextRecoveryAskedMuscles;
+    effortSubmitted = nextEffortSubmitted;
+    feedbackData = nextFeedbackData;
+    showRecoveryPrompt = nextShowRecoveryPrompt;
+    showEffortPrompt = nextShowEffortPrompt;
+  }
+
+  function clearFeedbackDraftState(id: number | null) {
+    if (typeof localStorage === 'undefined' || !id) return;
+    localStorage.removeItem(feedbackStorageKey(id));
+  }
+
   function getMuscleGroup(exerciseId: number): string {
     const ex = allExercises.find(e => e.id === exerciseId);
     return ex?.primary_muscles?.[0] ?? 'other';
@@ -319,17 +443,38 @@
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
   }
 
-  // Workout clock — only starts on first set completion
-  let startedAt = $state<number>(0);
-  let elapsed = $state(0);
+  // Preserve the first-completed-set time for resume / export only.
+  let startedAt = $state<number | null>(null);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
-  let clockPaused = $state(false);
-  let clockStarted = $state(false);
-  let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
   const PLATES_KG = [20, 15, 10, 5, 2.5, 1.25];
+
+  function getExerciseSearchText(exercise: Exercise | undefined): string {
+    if (!exercise) return '';
+    return `${exercise.name ?? ''} ${exercise.display_name ?? ''}`.toLowerCase();
+  }
+
+  function isRackableEzBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('rackable') && (text.includes('ez_bar') || text.includes('ez bar') || text.includes('curl_bar') || text.includes('curl bar'));
+  }
+
+  function isEzBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('ez_bar') || text.includes('ez bar') || text.includes('curl_bar') || text.includes('curl bar');
+  }
+
+  function isAxleBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('axle_bar') || text.includes('axle bar');
+  }
+
+  function isSwissBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('swiss_bar') || text.includes('swiss bar');
+  }
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
@@ -341,9 +486,9 @@
     // Smith machine variants
     if (n.includes('smith') || d.includes('smith')) return true;
     // EZ bar / curl bar variants (plate-loaded bars)
-    if (n.includes('ez_bar') || n.includes('ez bar') || d.includes('ez bar')) return true;
-    if (n.includes('axle_bar') || d.includes('axle bar')) return true;
-    if (n.includes('swiss_bar') || d.includes('swiss bar')) return true;
+    if (isEzBarExercise(exercise)) return true;
+    if (isAxleBarExercise(exercise)) return true;
+    if (isSwissBarExercise(exercise)) return true;
     if (n.includes('rackable') || d.includes('rackable')) return true;
     // T-bar row / landmine
     if (n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || d.includes('t-bar') || d.includes('t bar')) return true;
@@ -353,10 +498,32 @@
     return false;
   }
 
-  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+  function isNamedOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
     const n = exercise.name?.toLowerCase() ?? '';
-    return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
+    const d = (exercise.display_name ?? '').toLowerCase();
+    return (
+      n.includes('t_bar') ||
+      n.includes('t-bar') ||
+      n.includes('t bar') ||
+      d.includes('t-bar') ||
+      d.includes('t bar') ||
+      n.includes('landmine') ||
+      d.includes('landmine')
+    );
+  }
+
+  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+    return isNamedOneSidedPlateExercise(exercise);
+  }
+
+  function clearPlateBannerFocus() {
+    focusedWeightSetId = null;
+    focusedExerciseId = null;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement) {
+      active.blur();
+    }
   }
 
   // Derived: plate banner data for the currently focused weight input
@@ -399,16 +566,15 @@
       if (n.includes('smith')) key = 'smithMachine';
       else if (n.includes('leg_press') || n.includes('leg press')) key = 'legPress';
       else if (n.includes('hack_squat') || n.includes('hack squat')) key = 'hackSquat';
-      else if (n.includes('t_bar') || n.includes('t-bar')) key = 'tBarRow';
+      else if (isNamedOneSidedPlateExercise(exercise)) key = 'tBarRow';
       else if (n.includes('belt_squat') || n.includes('belt squat')) key = 'beltSquat';
       // Use display base for plate math if configured, otherwise actual weight
       return mw[`${key}_displayBase`] ?? mw[key] ?? defaultBar;
     }
     // Specialty bars
     const n = exercise.name.toLowerCase();
-    if (n.includes('ez_bar') || n.includes('ez bar') || n.includes('curl_bar')) {
-      return n.includes('rackable') ? (mw.ezBarRackable ?? 35) : (mw.ezBar ?? 25);
-    }
+    if (isRackableEzBarExercise(exercise)) return mw.ezBarRackable ?? 35;
+    if (isEzBarExercise(exercise)) return mw.ezBar ?? 25;
     if (n.includes('safety_squat') || n.includes('ssb')) return mw.safetySquatBar ?? 65;
     if (n.includes('trap_bar') || n.includes('hex_bar')) return mw.trapBar ?? 45;
     return mw.barbell ?? defaultBar;
@@ -450,6 +616,48 @@
   let recentExercises = $state<Exercise[]>([]);
   // Swap mode: when set, the modal replaces this exercise instead of adding
   let swapTargetUiId = $state<string | null>(null);
+  let showCustomExerciseModal = $state(false);
+  let customExerciseDisplayName = $state('');
+  let customMovementType = $state<'compound' | 'isolation'>('compound');
+  let customBodyRegion = $state<'upper' | 'lower' | 'full_body'>('upper');
+  let customPrimaryMuscles = $state<string[]>([]);
+  let customSecondaryMuscles = $state<string[]>([]);
+
+  const muscleGroups = [
+    { value: 'chest', label: 'Chest' },
+    { value: 'lats', label: 'Lats' },
+    { value: 'upper_back', label: 'Upper Back' },
+    { value: 'mid_back', label: 'Mid Back' },
+    { value: 'lower_back', label: 'Lower Back' },
+    { value: 'shoulders', label: 'Shoulders' },
+    { value: 'traps', label: 'Traps' },
+    { value: 'biceps', label: 'Biceps' },
+    { value: 'triceps', label: 'Triceps' },
+    { value: 'forearms', label: 'Forearms' },
+    { value: 'quadriceps', label: 'Quadriceps' },
+    { value: 'hamstrings', label: 'Hamstrings' },
+    { value: 'glutes', label: 'Glutes' },
+    { value: 'calves', label: 'Calves' },
+    { value: 'abs', label: 'Abs' },
+    { value: 'core', label: 'Core' },
+    { value: 'obliques', label: 'Obliques' },
+    { value: 'neck', label: 'Neck' },
+    { value: 'front_delts', label: 'Front Delts' },
+    { value: 'side_delts', label: 'Side Delts' },
+    { value: 'rear_delts', label: 'Rear Delts' },
+    { value: 'adductors', label: 'Adductors' },
+  ];
+
+  const movementTypes = [
+    { value: 'compound', label: 'Compound' },
+    { value: 'isolation', label: 'Isolation' },
+  ] as const;
+
+  const bodyRegions = [
+    { value: 'upper', label: 'Upper Body' },
+    { value: 'lower', label: 'Lower Body' },
+    { value: 'full_body', label: 'Full Body' },
+  ] as const;
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(async () => {
@@ -527,7 +735,10 @@
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        if (sessionId) saveDrafts();
+        if (sessionId) {
+          saveDrafts();
+          saveFeedbackDraftState();
+        }
       } else {
         // App came back to foreground — catch up the rest timer
         if (restActive && restEndTime > 0) {
@@ -544,43 +755,79 @@
       }
     });
     window.addEventListener('beforeunload', () => {
-      if (sessionId) saveDrafts();
+      if (sessionId) {
+        saveDrafts();
+        saveFeedbackDraftState();
+      }
     });
   }
 
   // Save drafts before navigating away — session will auto-resume when you come back
   beforeNavigate(() => {
-    if (sessionId) saveDrafts();
+    if (sessionId) {
+      saveDrafts();
+      saveFeedbackDraftState();
+    }
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────
+  function sessionMatchesRequestedDay(session: WorkoutSession, plan: WorkoutPlan, day: PlannedDay): boolean {
+    if (session.workout_plan_id !== plan.id) return false;
+    if (!session.name) return false;
+    return session.name === `${plan.name} - ${day.day_name}`;
+  }
+
   async function startFromPlan(planId: number, dayNumber: number) {
     loading = true;
     showPicker = false;
     try {
       const bodyWtKg = $latestBodyWeight?.weight_kg ?? 0;
+      const plan = await getPlan(planId);
+      const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
+      if (!day) throw new Error(`Plan ${planId} has no day ${dayNumber}`);
       let raw;
       try {
         raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
       } catch (e: any) {
         if (e?.response?.status === 409) {
-          // Session already in progress — resume it instead of showing conflict dialog
+          // Only resume automatically when the in-progress session matches the requested day.
           const detail = e?.response?.data?.detail;
           const existingId: number | null =
             detail && typeof detail === 'object' ? detail.session_id ?? null : null;
           if (existingId != null) {
-            currentSession.set(await getSession(existingId));
+            const existing = await getSession(existingId);
+            if (sessionMatchesRequestedDay(existing, plan, day)) {
+              currentSession.set(existing);
+              await resumeSession();
+              return;
+            }
+            conflictSession = existing;
+            conflictRetry = () => startFromPlan(planId, dayNumber);
+            conflictRequestedName = `${plan.name} - ${day.day_name}`;
+            loading = false;
+            return;
+          }
+
+          // Fallback: only auto-resume a matching in-progress session.
+          const sessions = await getSessions({ limit: 5 });
+          const matching = sessions.find(s =>
+            s.started_at && !s.completed_at && sessionMatchesRequestedDay(s, plan, day)
+          );
+          if (matching) {
+            currentSession.set(matching);
             await resumeSession();
             return;
           }
-          // Fallback: check for any in-progress session
-          const sessions = await getSessions({ limit: 5 });
+
           const inProgress = sessions.find(s => s.started_at && !s.completed_at);
           if (inProgress) {
-            currentSession.set(inProgress);
-            await resumeSession();
+            conflictSession = await getSession(inProgress.id);
+            conflictRetry = () => startFromPlan(planId, dayNumber);
+            conflictRequestedName = `${plan.name} - ${day.day_name}`;
+            loading = false;
             return;
           }
+
           await handleConflict(e, () => startFromPlan(planId, dayNumber));
           return;
         }
@@ -591,9 +838,6 @@
       workoutName = sess.name ?? 'Workout';
       hasLinkedPlan = true;
       currentSession.set(sess);
-
-      const plan = await getPlan(planId);
-      const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
 
       if (day) {
         uiExercises = day.exercises.map(pe => {
@@ -675,12 +919,8 @@
   }
 
   function startClockIfNeeded() {
-    if (clockStarted) return;
-    clockStarted = true;
+    if (startedAt !== null) return;
     startedAt = Date.now();
-    clockInterval = setInterval(() => {
-      elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
   }
 
   async function startFreeSession() {
@@ -723,17 +963,11 @@
       hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
 
-      // Restore elapsed time from when the session started.
-      // Use parseUtcMs so the naive datetime from the backend is treated as UTC.
       if (sess.started_at) {
         startedAt = parseUtcMs(sess.started_at);
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       } else {
-        startedAt = Date.now();
+        startedAt = null;
       }
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
 
       // Group sets by exercise, preserving insertion order
       const exerciseOrder: number[] = [];
@@ -833,6 +1067,8 @@
           groupType: null,
         };
       });
+
+      await restoreFeedbackState(sess.id);
     } catch (e) {
       error = 'Failed to resume workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
@@ -853,15 +1089,6 @@
     if (!ts) return Date.now();
     const hasOffset = ts.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(ts);
     return new Date(hasOffset ? ts : ts + 'Z').getTime();
-  }
-
-  function formatClock(s: number) {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-      : `${m}:${String(sec).padStart(2, '0')}`;
   }
 
   function formatRest(s: number) {
@@ -1202,7 +1429,7 @@
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (!ex) return;
     const set = ex.sets.find(s => s.localId === localId);
-    if (!set || set.done) return;
+    if (!set) return;
 
     if (set.backendId !== null) {
       try { await deleteSet(sessionId, set.backendId); } catch { /* ignore */ }
@@ -1211,6 +1438,9 @@
     ex.sets = ex.sets.filter(s => s.localId !== localId);
     ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
     uiExercises = [...uiExercises];
+
+    // Reset timer if no sets are done anymore
+    resetTimerIfNoDoneSets();
   }
 
   function addSetRow(exUiId: string) {
@@ -1353,6 +1583,16 @@
       await Promise.allSettled(backendIds.map(id => deleteSet(sessionId!, id)));
     }
     uiExercises = uiExercises.filter(e => e.uiId !== exUiId);
+
+    // Reset timer if no sets are done anymore
+    resetTimerIfNoDoneSets();
+  }
+
+  function resetTimerIfNoDoneSets() {
+    const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
+    if (!anyDone) {
+      startedAt = null;
+    }
   }
 
   // ─── Rest timer ───────────────────────────────────────────────────────────
@@ -1375,6 +1615,7 @@
   let highlightTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handlePostSetCompletion(exUiId: string) {
+    clearPlateBannerFocus();
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (!ex?.groupId) {
       startRestTimer(exUiId);
@@ -1575,6 +1816,54 @@
     searchInputEl?.focus();
   }
 
+  function resetCustomExerciseForm(prefill = '') {
+    customExerciseDisplayName = prefill;
+    customMovementType = 'compound';
+    customBodyRegion = 'upper';
+    customPrimaryMuscles = [];
+    customSecondaryMuscles = [];
+  }
+
+  function openCustomExerciseModal(prefill = searchQuery.trim()) {
+    resetCustomExerciseForm(prefill);
+    showCustomExerciseModal = true;
+  }
+
+  function closeCustomExerciseModal() {
+    showCustomExerciseModal = false;
+  }
+
+  async function createCustomExerciseForWorkout() {
+    const rawName = customExerciseDisplayName.trim();
+    if (!rawName) return;
+    if (customPrimaryMuscles.length === 0) {
+      alert('Please select at least one primary muscle group');
+      return;
+    }
+
+    const capitalizedDisplayName = rawName.replace(/\b\w/g, c => c.toUpperCase());
+    const systemName = capitalizedDisplayName
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, '_');
+
+    try {
+      const newExercise = await createExercise({
+        name: systemName,
+        display_name: capitalizedDisplayName,
+        movement_type: customMovementType,
+        body_region: customBodyRegion,
+        primary_muscles: customPrimaryMuscles,
+        secondary_muscles: customSecondaryMuscles,
+      });
+      allExercises = await getExercises();
+      pickingExercise = newExercise;
+      showCustomExerciseModal = false;
+    } catch (error) {
+      alert('Failed to create exercise: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  }
+
   function confirmAdd() {
     if (!pickingExercise) return;
 
@@ -1653,6 +1942,7 @@
   // ─── Finish workout ───────────────────────────────────────────────────────
   async function doFinish() {
     if (!sessionId) { goto('/'); return; }
+    const finishedSessionId = sessionId;
     finishing = true;
     try {
       await completeSession(sessionId);
@@ -1682,11 +1972,12 @@
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
+    clearFeedbackDraftState(finishedSessionId);
     // Compute PRs before clearing UI state
     prs = detectPRs();
     // Write workout to HealthKit (no-op on web/PWA)
     writeWorkout({
-      startDate: new Date(Date.now() - elapsed * 1000),
+      startDate: new Date(startedAt ?? Date.now()),
       endDate: new Date(),
       workoutName: workoutName,
     }).catch(() => {}); // fire and forget
@@ -1696,6 +1987,7 @@
 
   async function doDiscard() {
     if (!sessionId) { goto('/'); return; }
+    const discardedSessionId = sessionId;
     const confirmed = confirm('Discard this workout? All progress will be permanently deleted.');
     if (!confirmed) return;
     try {
@@ -1706,6 +1998,7 @@
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
+    clearFeedbackDraftState(discardedSessionId);
     goto('/');
   }
 
@@ -1805,6 +2098,7 @@
   // ─── Conflict state (existing in-progress session blocks starting a new one) ──
   let conflictSession = $state<WorkoutSession | null>(null);
   let conflictRetry = $state<(() => Promise<void>) | null>(null); // re-run after abandoning
+  let conflictRequestedName = $state<string | null>(null);
 
   async function handleConflict(err: any, retry: () => Promise<void>) {
     // Prefer the structured session_id from the 409 response body; fall back
@@ -1829,6 +2123,7 @@
     const sess = conflictSession;
     conflictSession = null;
     conflictRetry = null;
+    conflictRequestedName = null;
     // Ensure the store is set so resumeSession() can look up the ID
     if (sess) currentSession.set(sess);
     await resumeSession();
@@ -1848,7 +2143,15 @@
     conflictSession = null;
     const retry = conflictRetry;
     conflictRetry = null;
+    conflictRequestedName = null;
     if (retry) await retry();
+  }
+
+  function keepRequestedPlanned() {
+    conflictSession = null;
+    conflictRetry = null;
+    conflictRequestedName = null;
+    goto('/');
   }
 
   // ─── Exercise notes toggle ────────────────────────────────────────────────
@@ -1898,14 +2201,8 @@
       set.doneLeft = false;
       set.doneRight = false;
 
-      // If no sets are done anymore, reset timer (#528)
-      const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
-      if (!anyDone && clockStarted) {
-        clockStarted = false;
-        elapsed = 0;
-        startedAt = 0;
-        if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-      }
+      // Reset timer if no sets are done anymore
+      resetTimerIfNoDoneSets();
     } catch (e) {
       console.error('Failed to uncomplete set:', e);
     } finally {
@@ -2055,24 +2352,40 @@
 
   </div>
 
-<!-- ─── Conflict: existing in-progress session ────────────────────────── -->
+<!-- ─── Conflict: existing active session ─────────────────────────────── -->
 {:else if conflictSession}
   <div class="flex items-center justify-center flex-1 p-4">
     <div class="card max-w-md w-full text-center space-y-4">
       <div class="text-amber-400 text-4xl">⚠️</div>
-      <h2 class="text-xl font-semibold">Workout already in progress</h2>
+      <h2 class="text-xl font-semibold">Workout conflict</h2>
       <p class="text-zinc-400 text-sm">
-        <span class="text-white font-medium">{conflictSession.name}</span> is still active.
-        Do you want to continue it or abandon it and start a new one?
+        You tried to start
+        <span class="text-white font-medium">{conflictRequestedName ?? 'a new workout'}</span>,
+        but another session is already in progress.
       </p>
+      <div class="grid gap-3 text-left">
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Requested workout</p>
+          <p class="text-sm font-medium text-white">{conflictRequestedName ?? 'New workout'}</p>
+          <p class="text-xs text-zinc-500 mt-1">This will stay planned unless you explicitly replace the active session.</p>
+        </div>
+        <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-amber-400/80 mb-1">Active workout</p>
+          <p class="text-sm font-medium text-white">{conflictSession.name}</p>
+          <p class="text-xs text-zinc-500 mt-1">Status: in progress</p>
+        </div>
+      </div>
       <div class="flex flex-col gap-3 pt-1">
-        <button onclick={continueExisting} class="btn-primary w-full">▶ Continue Existing Workout</button>
+        <button onclick={continueExisting} class="btn-primary w-full">▶ Resume Active Workout</button>
         <button
           onclick={abandonAndRetry}
           class="w-full px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors text-sm font-medium"
-        >🗑 Abandon & Start New</button>
+        >🗑 Abandon Active & Start Requested Workout</button>
+        <button
+          onclick={keepRequestedPlanned}
+          class="w-full px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors text-sm font-medium"
+        >Keep Requested Workout Planned</button>
       </div>
-      <a href="/plans" class="block text-xs text-zinc-500 hover:text-zinc-300 transition-colors">← Back to Plans</a>
     </div>
   </div>
 
@@ -2089,8 +2402,8 @@
 
 <!-- ─── Finished screen ────────────────────────────────────────────────── -->
 {:else if finished}
-  <div class="flex items-center justify-center flex-1 p-4">
-    <div class="card max-w-lg w-full" bind:this={summaryCardEl}>
+  <div class="flex-1 overflow-y-auto px-4 py-4">
+    <div class="card max-w-lg w-full mx-auto mb-8" bind:this={summaryCardEl}>
       <div class="text-center mb-6">
         <div class="text-6xl mb-3">🎉</div>
         <h2 class="text-3xl font-bold">Workout done!</h2>
@@ -2098,14 +2411,10 @@
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-2 gap-4 mb-6">
         <div class="bg-zinc-900 rounded-lg p-3 text-center">
           <p class="text-2xl font-bold text-primary-400">{summaryDoneSets}</p>
           <p class="text-xs text-zinc-400 mt-0.5">Sets done</p>
-        </div>
-        <div class="bg-zinc-900 rounded-lg p-3 text-center">
-          <p class="text-2xl font-bold text-primary-400">{formatClock(elapsed)}</p>
-          <p class="text-xs text-zinc-400 mt-0.5">Duration</p>
         </div>
         <div class="bg-zinc-900 rounded-lg p-3 text-center">
           <p class="text-2xl font-bold text-primary-400">{Math.round(summaryVolumeLbs).toLocaleString()}</p>
@@ -2193,23 +2502,6 @@
         <div class="flex-1 min-w-0">
           <h1 class="text-sm font-semibold truncate text-zinc-200">{workoutName}</h1>
           <div class="flex items-center gap-3 mt-0.5">
-            <button
-              onclick={() => {
-                if (clockPaused) {
-                  // Resume: add pause duration to offset
-                  pauseOffset += Date.now() - (startedAt + (elapsed * 1000) + pauseOffset);
-                  clockInterval = setInterval(() => {
-                    elapsed = Math.max(0, Math.floor((Date.now() - startedAt - pauseOffset) / 1000));
-                  }, 1000);
-                } else {
-                  // Pause: stop the clock
-                  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-                }
-                clockPaused = !clockPaused;
-              }}
-              class="text-base font-mono font-bold {clockPaused ? 'text-amber-400 animate-pulse' : 'text-primary-400'}"
-              title={clockPaused ? 'Resume timer' : 'Pause timer'}
-            >{formatClock(elapsed)}{clockPaused ? ' ⏸' : ''}</button>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
           </div>
         </div>
@@ -2902,28 +3194,28 @@
     </div><!-- /scrollable -->
 
     <!-- ─── Rest timer banner (always visible) ──────────────────────────────── -->
-    <div class="sticky bottom-0 z-30 flex items-center px-4 py-3 border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
+    <div class="sticky bottom-0 z-30 flex items-center px-4 {restActive ? 'py-2.5' : 'py-2'} border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
       {#if restActive}
         <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
+          <div class="w-7 h-7 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
             <span class="text-primary-400 text-xs font-bold">REST</span>
           </div>
-          <span class="text-3xl font-mono font-bold tracking-tight text-white">{formatRest(restSecs)}</span>
+          <span class="text-[1.65rem] font-mono font-bold tracking-tight text-white leading-none">{formatRest(restSecs)}</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button onclick={() => { restEndTime = Math.max(Date.now() + 1000, restEndTime - 15000); restSecs = Math.max(1, Math.ceil((restEndTime - Date.now()) / 1000)); }}
-                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">−15s</button>
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[38px]">−15s</button>
           <button onclick={() => { restEndTime += 15000; restSecs = Math.ceil((restEndTime - Date.now()) / 1000); }}
-                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">+15s</button>
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[38px]">+15s</button>
           <button onclick={skipRest}
-                  class="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[40px]">Skip</button>
+                  class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[38px]">Skip</button>
         </div>
       {:else}
         <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
+          <div class="w-7 h-7 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
             <span class="text-zinc-500 text-xs font-bold">REST</span>
           </div>
-          <span class="text-sm text-zinc-500">Ready</span>
+          <span class="text-xs text-zinc-500">Ready</span>
         </div>
       {/if}
     </div>
@@ -2947,7 +3239,17 @@
             Add Exercise
           {/if}
         </h3>
-        <button onclick={() => { showAddModal = false; swapTargetUiId = null; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        <div class="flex items-center gap-3">
+          {#if !pickingExercise}
+            <button
+              onclick={() => openCustomExerciseModal()}
+              class="w-8 h-8 rounded-full bg-primary-600 hover:bg-primary-500 text-white text-lg leading-none flex items-center justify-center"
+              aria-label="Create custom exercise"
+              title="Create custom exercise"
+            >+</button>
+          {/if}
+          <button onclick={() => { showAddModal = false; swapTargetUiId = null; showCustomExerciseModal = false; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        </div>
       </div>
 
       {#if !pickingExercise}
@@ -3019,9 +3321,25 @@
                 </div>
               {/if}
             </button>
-          {:else}
-            <p class="text-zinc-500 text-sm text-center py-8">No exercises found</p>
           {/each}
+
+          <button
+            onclick={() => openCustomExerciseModal()}
+            class="w-full text-left px-3 py-3 rounded-lg border border-dashed border-primary-500/40 bg-primary-500/5 hover:bg-primary-500/10 transition-colors mt-1"
+          >
+            <div class="text-sm font-medium text-primary-300">Create custom exercise</div>
+            <div class="text-xs text-zinc-500 mt-0.5">
+              {#if searchQuery.trim()}
+                Add “{searchQuery.trim()}” if it is missing from the list
+              {:else}
+                Add a new exercise without leaving the workout
+              {/if}
+            </div>
+          </button>
+
+          {#if filteredExercises.length === 0}
+            <p class="text-zinc-500 text-sm text-center py-6">No exercises found</p>
+          {/if}
         </div>
 
       {:else}
@@ -3049,6 +3367,97 @@
           <button onclick={confirmAdd} class="btn-primary flex-1">{swapTargetUiId ? 'Swap Exercise' : 'Add to Workout'}</button>
         </div>
       {/if}
+    </div>
+  </div>
+{/if}
+
+{#if showCustomExerciseModal}
+  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+    <div class="bg-zinc-900 w-full max-w-md rounded-2xl border border-white/8 shadow-2xl max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-white/5">
+        <h4 class="text-lg font-semibold">Create Custom Exercise</h4>
+        <button onclick={closeCustomExerciseModal} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <div>
+          <label class="label">Exercise Name *</label>
+          <input
+            type="text"
+            bind:value={customExerciseDisplayName}
+            class="input"
+            placeholder="e.g. Incline Dumbbell Press"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Movement Type</label>
+            <select bind:value={customMovementType} class="input">
+              {#each movementTypes as type}
+                <option value={type.value}>{type.label}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label class="label">Body Region</label>
+            <select bind:value={customBodyRegion} class="input">
+              {#each bodyRegions as region}
+                <option value={region.value}>{region.label}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Primary Muscle Groups *</label>
+          <div class="flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => {
+                  customPrimaryMuscles = customPrimaryMuscles.includes(muscle.value)
+                    ? customPrimaryMuscles.filter(m => m !== muscle.value)
+                    : [...customPrimaryMuscles, muscle.value];
+                }}
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customPrimaryMuscles.includes(muscle.value) ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Secondary Muscle Groups</label>
+          <div class="flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => {
+                  customSecondaryMuscles = customSecondaryMuscles.includes(muscle.value)
+                    ? customSecondaryMuscles.filter(m => m !== muscle.value)
+                    : [...customSecondaryMuscles, muscle.value];
+                }}
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customSecondaryMuscles.includes(muscle.value) ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 px-4 py-4 border-t border-white/5">
+        <button onclick={closeCustomExerciseModal} class="btn-secondary">Cancel</button>
+        <button
+          onclick={createCustomExerciseForWorkout}
+          class="btn-primary"
+          disabled={!customExerciseDisplayName.trim()}
+        >
+          Create Exercise
+        </button>
+      </div>
     </div>
   </div>
 {/if}

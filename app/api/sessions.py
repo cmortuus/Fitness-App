@@ -4,7 +4,7 @@ import json
 from datetime import date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -13,12 +13,14 @@ from app.api.auth import get_current_user
 from app.database import get_db
 from app.models.exercise import Exercise
 from app.models.user import User
-from app.models.workout import ExerciseFeedback, ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutStatus
-from app.services.progression import compute_overload
+from app.models.workout import ExerciseFeedback, ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutSessionAudit, WorkoutStatus
+from app.services.plan_rir import resolve_rir_override
+from app.services.progression import adjust_load_for_target_rir, compute_overload
 from app.schemas.requests import (
     SetCreate,
     SetResponse,
     SetUpdate,
+    WorkoutSessionAuditResponse,
     WorkoutSessionCreate,
     WorkoutSessionResponse,
 )
@@ -52,6 +54,21 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "exercise_id": exercise_set.exercise_id,
         "exercise_name": (
             exercise_set.exercise.display_name
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
+        "movement_type": (
+            exercise_set.exercise.movement_type
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
+        "body_region": (
+            exercise_set.exercise.body_region
+            if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
+            else None
+        ),
+        "equipment_type": (
+            exercise_set.exercise.equipment_type
             if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
             else None
         ),
@@ -97,6 +114,53 @@ def serialize_session(workout_session: WorkoutSession) -> dict:
     }
 
 
+def serialize_session_audit(entry: WorkoutSessionAudit) -> dict:
+    return {
+        "id": entry.id,
+        "workout_session_id": entry.workout_session_id,
+        "from_status": entry.from_status,
+        "to_status": entry.to_status,
+        "reason": entry.reason,
+        "endpoint": entry.endpoint,
+        "actor_username": entry.actor_username,
+        "source_device": entry.source_device,
+        "created_at": entry.created_at,
+    }
+
+
+def _set_total_reps(exercise_set: ExerciseSet) -> int:
+    if exercise_set.actual_reps is not None:
+        return exercise_set.actual_reps
+    return (exercise_set.reps_left or 0) + (exercise_set.reps_right or 0)
+
+
+def _set_total_volume_kg(exercise_set: ExerciseSet) -> float:
+    return _set_total_reps(exercise_set) * (exercise_set.actual_weight_kg or 0)
+
+
+async def record_session_audit(
+    db: AsyncSession,
+    session: WorkoutSession,
+    *,
+    from_status: WorkoutStatus | str | None,
+    to_status: WorkoutStatus | str | None,
+    reason: str,
+    endpoint: str,
+    actor_username: str | None,
+    source_device: str | None,
+) -> None:
+    db.add(WorkoutSessionAudit(
+        workout_session_id=session.id,
+        user_id=session.user_id or 0,
+        from_status=str(from_status.value if isinstance(from_status, WorkoutStatus) else from_status) if from_status is not None else None,
+        to_status=str(to_status.value if isinstance(to_status, WorkoutStatus) else to_status) if to_status is not None else None,
+        reason=reason,
+        endpoint=endpoint,
+        actor_username=actor_username,
+        source_device=source_device,
+    ))
+
+
 @router.get("/", response_model=list[WorkoutSessionResponse])
 async def list_sessions(
     user: Annotated[User, Depends(get_current_user)],
@@ -125,6 +189,7 @@ async def create_session(
     session_data: WorkoutSessionCreate,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
 ) -> dict:
     """Create a new workout session."""
     workout_session = WorkoutSession(
@@ -136,6 +201,16 @@ async def create_session(
     )
     db.add(workout_session)
     await db.flush()
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=None,
+        to_status=workout_session.status,
+        reason="session_created",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
 
@@ -167,6 +242,7 @@ async def start_session(
     session_id: int,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
 ) -> dict:
     """Start a workout session."""
     result = await db.execute(
@@ -200,8 +276,19 @@ async def start_session(
             },
         )
 
+    prior_status = workout_session.status
     workout_session.status = WorkoutStatus.IN_PROGRESS
     workout_session.started_at = datetime.utcnow()
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=prior_status,
+        to_status=workout_session.status,
+        reason="session_started",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
@@ -212,6 +299,7 @@ async def complete_session(
     session_id: int,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
 ) -> dict:
     """Complete a workout session."""
     result = await db.execute(
@@ -227,8 +315,72 @@ async def complete_session(
             detail=f"Workout session {session_id} not found",
         )
 
+    prior_status = workout_session.status
     workout_session.status = WorkoutStatus.COMPLETED
     workout_session.completed_at = datetime.utcnow()
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=prior_status,
+        to_status=workout_session.status,
+        reason="session_completed",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
+    await db.flush()
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
+    return serialize_session(workout_session)
+
+
+@router.post("/{session_id}/reset-to-planned", response_model=WorkoutSessionResponse)
+async def reset_session_to_planned(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> dict:
+    """Reset a session back to a clean planned state for repair/debug workflows."""
+    workout_session = await _get_session_with_sets(db, session_id, user_id=user.id)
+    if not workout_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+
+    prior_status = workout_session.status
+    workout_session.status = WorkoutStatus.PLANNED
+    workout_session.started_at = None
+    workout_session.completed_at = None
+    workout_session.total_volume_kg = 0
+    workout_session.total_sets = 0
+    workout_session.total_reps = 0
+    workout_session.duration_minutes = None
+
+    for exercise_set in workout_session.sets:
+        exercise_set.actual_reps = None
+        exercise_set.actual_weight_kg = None
+        exercise_set.reps_left = None
+        exercise_set.reps_right = None
+        exercise_set.started_at = None
+        exercise_set.completed_at = None
+        exercise_set.skipped_at = None
+        exercise_set.sub_sets = None
+        exercise_set.draft_weight_kg = None
+        exercise_set.draft_reps = None
+        exercise_set.draft_reps_left = None
+        exercise_set.draft_reps_right = None
+
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=prior_status,
+        to_status=workout_session.status,
+        reason="session_reset_to_planned",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
     await db.flush()
     workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
     return serialize_session(workout_session)
@@ -458,10 +610,8 @@ async def add_set(
         )
         all_sets = all_sets_result.scalars().all()
         session.total_sets = len(all_sets)
-        session.total_reps = sum(s.actual_reps or 0 for s in all_sets)
-        session.total_volume_kg = sum(
-            (s.actual_reps or 0) * (s.actual_weight_kg or 0) for s in all_sets
-        )
+        session.total_reps = sum(_set_total_reps(s) for s in all_sets)
+        session.total_volume_kg = sum(_set_total_volume_kg(s) for s in all_sets)
         await db.flush()
 
     await db.refresh(exercise_set)
@@ -504,6 +654,8 @@ async def update_set(
         # Strip timezone info — DB uses naive timestamps
         if isinstance(value, datetime) and value.tzinfo is not None:
             value = value.replace(tzinfo=None)
+        if field == "sub_sets" and isinstance(value, list):
+            value = json.dumps(value)
         setattr(exercise_set, field, value)
 
     # Update session totals
@@ -512,20 +664,70 @@ async def update_set(
     )
     session = session_result.scalar_one_or_none()
     if session:
+        prior_status = session.status
         # Recalculate totals from all sets
         all_sets_result = await db.execute(
             select(ExerciseSet).where(ExerciseSet.workout_session_id == session_id)
         )
         all_sets = all_sets_result.scalars().all()
         session.total_sets = len(all_sets)
-        session.total_reps = sum(s.actual_reps or 0 for s in all_sets)
-        session.total_volume_kg = sum(
-            (s.actual_reps or 0) * (s.actual_weight_kg or 0) for s in all_sets
-        )
+        session.total_reps = sum(_set_total_reps(s) for s in all_sets)
+        session.total_volume_kg = sum(_set_total_volume_kg(s) for s in all_sets)
+
+        has_completed_sets = any(s.completed_at is not None and s.skipped_at is None for s in all_sets)
+        if has_completed_sets and session.status == WorkoutStatus.PLANNED:
+            session.status = WorkoutStatus.IN_PROGRESS
+            session.started_at = session.started_at or datetime.utcnow()
+            await record_session_audit(
+                db,
+                session,
+                from_status=prior_status,
+                to_status=session.status,
+                reason="first_set_completed",
+                endpoint=f"/api/sessions/{session_id}/sets/{set_id}",
+                actor_username=user.username,
+                source_device="web",
+            )
+        elif not has_completed_sets and session.status == WorkoutStatus.IN_PROGRESS and session.completed_at is None:
+            session.status = WorkoutStatus.PLANNED
+            session.started_at = None
+            await record_session_audit(
+                db,
+                session,
+                from_status=prior_status,
+                to_status=session.status,
+                reason="last_completed_set_removed",
+                endpoint=f"/api/sessions/{session_id}/sets/{set_id}",
+                actor_username=user.username,
+                source_device="web",
+            )
 
     await db.flush()
     await db.refresh(exercise_set)
     return serialize_set(exercise_set)
+
+
+@router.get("/{session_id}/audit", response_model=list[WorkoutSessionAuditResponse])
+async def get_session_audit(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[dict]:
+    session = await _get_session_with_sets(db, session_id, user_id=user.id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+    result = await db.execute(
+        select(WorkoutSessionAudit)
+        .where(
+            WorkoutSessionAudit.workout_session_id == session_id,
+            WorkoutSessionAudit.user_id == user.id,
+        )
+        .order_by(desc(WorkoutSessionAudit.created_at), desc(WorkoutSessionAudit.id))
+    )
+    return [serialize_session_audit(entry) for entry in result.scalars().all()]
 
 
 @router.delete("/{session_id}/sets/{set_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -573,10 +775,8 @@ async def delete_set(
         )
         remaining = remaining_result.scalars().all()
         session.total_sets = len(remaining)
-        session.total_reps = sum(s.actual_reps or 0 for s in remaining)
-        session.total_volume_kg = sum(
-            (s.actual_reps or 0) * (s.actual_weight_kg or 0) for s in remaining
-        )
+        session.total_reps = sum(_set_total_reps(s) for s in remaining)
+        session.total_volume_kg = sum(_set_total_volume_kg(s) for s in remaining)
 
     await db.flush()
 
@@ -606,6 +806,7 @@ async def create_session_from_plan(
     plan_id: int,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
     day_number: int = 1,
     overload_style: str = "rep",
     body_weight_kg: float = 0.0,
@@ -762,6 +963,7 @@ async def create_session_from_plan(
         prior_planned: int | None,
         target_reps: int,
         ex_model,
+        target_rir: int | None = None,
     ) -> tuple[float | None, int | None]:
         """Compute overload for one side (or a bilateral set) given prior values."""
         if prior_reps is None or prior_reps <= 0:
@@ -785,7 +987,7 @@ async def create_session_from_plan(
             planned      = target_reps
 
         is_assisted = bool(ex_model and ex_model.is_assisted)
-        return compute_overload(
+        suggested_weight, suggested_reps = compute_overload(
             prior_weight=prior_weight,
             prior_reps=prior_reps,
             planned_reps=planned,
@@ -796,6 +998,18 @@ async def create_session_from_plan(
             is_bodyweight=(not is_assisted) and (prior_weight is None or prior_weight <= 0),
             body_weight_kg=body_weight_kg,
         )
+        if target_rir is not None and target_rir > 0:
+            suggested_weight = adjust_load_for_target_rir(
+                prior_weight,
+                prior_reps,
+                target_reps if target_reps > 0 else (suggested_reps or planned),
+                target_rir,
+                is_assisted=is_assisted,
+                body_weight_kg=body_weight_kg,
+            )
+            if target_reps > 0:
+                suggested_reps = target_reps
+        return suggested_weight, suggested_reps
 
     def _overload_for_set(
         exercise_id: int, set_num: int, target_reps: int, ex_model,
@@ -822,6 +1036,11 @@ async def create_session_from_plan(
             return None, None, None, None
 
         prior_set = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
+        target_rir = resolve_rir_override(
+            planned_data,
+            exercise_id,
+            ex_model.primary_muscles if ex_model else None,
+        )
 
         left_reps  = prior_set.get("reps_left")
         right_reps = prior_set.get("reps_right")
@@ -837,7 +1056,7 @@ async def create_session_from_plan(
             weight_kg, _ = _overload_for_side(
                 prior_weight, ref_reps,
                 prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
-                target_reps, ex_model,
+                target_reps, ex_model, target_rir,
             )
             _, new_reps_left = _overload_for_side(
                 prior_weight, left_reps,
@@ -859,7 +1078,7 @@ async def create_session_from_plan(
         # Bilateral: standard single-side logic
         weight_kg, planned_reps = _overload_for_side(
             prior_set["weight"], prior_set["reps"],
-            prior_set.get("planned_reps"), target_reps, ex_model,
+            prior_set.get("planned_reps"), target_reps, ex_model, target_rir,
         )
         return weight_kg, planned_reps, None, None
 
@@ -873,6 +1092,16 @@ async def create_session_from_plan(
     )
     db.add(workout_session)
     await db.flush()
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=None,
+        to_status=workout_session.status,
+        reason="session_created_from_plan",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
 
     # Create sets for each exercise
     for exercise_data in day_exercises:

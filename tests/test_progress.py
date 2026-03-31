@@ -65,3 +65,40 @@ class TestProgressAPI:
         assert "current_weight" in rec
         assert "recommended_weight" in rec
         assert "reason" in rec
+
+    async def test_overload_uses_saved_training_level(self, client: AsyncClient):
+        """POST /progress/overload should respect the user's saved training level."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+        await log_set(client, sess["id"], sess["sets"][0]["id"], 36.29, 8)
+        await client.post(f"/api/sessions/{sess['id']}/complete")
+
+        settings_res = await client.put("/api/auth/settings", json={
+            "progression": {"trainingLevel": "beginner"}
+        })
+        assert settings_res.status_code == 200, settings_res.text
+
+        beginner_res = await client.post("/api/progress/overload", json={
+            "exercise_id": ex["id"],
+            "current_weight": 100.0,
+            "current_reps": 15,
+            "target_reps": 8,
+            "weight_unit": "lbs",
+        })
+        assert beginner_res.status_code == 200, beginner_res.text
+
+        settings_res = await client.put("/api/auth/settings", json={
+            "progression": {"trainingLevel": "advanced"}
+        })
+        assert settings_res.status_code == 200, settings_res.text
+
+        advanced_res = await client.post("/api/progress/overload", json={
+            "exercise_id": ex["id"],
+            "current_weight": 100.0,
+            "current_reps": 15,
+            "target_reps": 8,
+            "weight_unit": "lbs",
+        })
+        assert advanced_res.status_code == 200, advanced_res.text
+        assert beginner_res.json()["next_weight"] > advanced_res.json()["next_weight"]

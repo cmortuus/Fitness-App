@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { daysAgoLocalDateString, localDateString } from '$lib/date';
   import { Line, Bar } from 'svelte-chartjs';
   import {
     Chart,
@@ -48,18 +49,18 @@
     loading = true;
     error = null;
     try {
-      const endDate = new Date().toISOString().split('T')[0];
+      const endDate = localDateString();
       let startDate: string;
 
       switch (timeRange) {
         case '7d':
-          startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          startDate = daysAgoLocalDateString(7);
           break;
         case '90d':
-          startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          startDate = daysAgoLocalDateString(90);
           break;
         default:
-          startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+          startDate = daysAgoLocalDateString(30);
       }
 
       const daysBack = parseInt(timeRange.replace('d', ''));

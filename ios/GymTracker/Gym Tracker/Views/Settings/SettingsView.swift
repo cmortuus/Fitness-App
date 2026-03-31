@@ -4,6 +4,7 @@ import HealthKit
 // MARK: - UserDefaults Keys (shared across views via @AppStorage)
 
 enum SettingsKey {
+    static let branchPreference    = "branchPreference"
     static let weightUnit          = "weightUnit"
     static let heightUnit          = "heightUnit"
     static let heightInches        = "heightInches"
@@ -53,10 +54,29 @@ enum SettingsKey {
     static let lastBodyWeightKg    = "lastBodyWeightKg"
 }
 
+private let validHeightUnits = ["imperial_split", "imperial_in", "metric"]
+private let validActivityLevels: [Double] = [1.0, 1.2, 1.4, 1.6, 1.8]
+
+private func normalizedHeightUnit(_ value: String?) -> String {
+    switch value {
+    case "ft", "imperial":
+        return "imperial_split"
+    case let unit? where validHeightUnits.contains(unit):
+        return unit
+    default:
+        return "imperial_split"
+    }
+}
+
+private func normalizedActivityLevel(_ value: Double) -> Double {
+    validActivityLevels.contains(value) ? value : 1.4
+}
+
 // MARK: - Settings Sync (backend DB ↔ @AppStorage cache)
 
 /// JSON structure matching the web app's settings format for cross-platform sync.
 struct SettingsJSON: Codable {
+    var branchPreference: String?
     var weightUnit: String?
     var heightUnit: String?
     var progressionStyle: String?
@@ -97,6 +117,7 @@ enum SettingsSync {
             let remote: SettingsJSON = try await APIClient.shared.get("/auth/settings")
             let ud = UserDefaults.standard
 
+            if let v = remote.branchPreference { ud.set(v, forKey: SettingsKey.branchPreference) }
             if let v = remote.weightUnit { ud.set(v, forKey: SettingsKey.weightUnit) }
             if let v = remote.heightUnit { ud.set(v, forKey: SettingsKey.heightUnit) }
             if let v = remote.progressionStyle { ud.set(v, forKey: SettingsKey.progressionStyle) }
@@ -195,8 +216,9 @@ enum SettingsSync {
         ]
 
         let settings = SettingsJSON(
+            branchPreference: ud.string(forKey: SettingsKey.branchPreference) ?? "main",
             weightUnit: ud.string(forKey: SettingsKey.weightUnit) ?? "lbs",
-            heightUnit: ud.string(forKey: SettingsKey.heightUnit) ?? "ft",
+            heightUnit: normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit)),
             progressionStyle: ud.string(forKey: SettingsKey.progressionStyle) ?? "rep",
             showPlateMath: ud.bool(forKey: SettingsKey.showPlateMath),
             maxWarmupSets: ud.integer(forKey: SettingsKey.maxWarmupSets),
@@ -354,8 +376,8 @@ struct SettingsView: View {
 
             // Activity level (#481)
             Picker("Activity Level", selection: Binding(
-                get: { UserDefaults.standard.double(forKey: "activityLevel") },
-                set: { UserDefaults.standard.set($0, forKey: "activityLevel") }
+                get: { normalizedActivityLevel(UserDefaults.standard.double(forKey: "activityLevel")) },
+                set: { UserDefaults.standard.set(normalizedActivityLevel($0), forKey: "activityLevel") }
             )) {
                 Text("Sedentary (1.0)").tag(1.0)
                 Text("Lightly Active (1.2)").tag(1.2)
@@ -640,6 +662,15 @@ struct SettingsView: View {
             Button("Sync Now") {
                 Task { await WorkoutSyncService.shared.syncRecentWorkouts() }
             }
+
+            Button("Delete & Re-Sync All Workouts", role: .destructive) {
+                Task {
+                    let deleted = await HealthKitManager.shared.deleteAllGymTrackerWorkouts()
+                    WorkoutSyncService.shared.resetSyncState()
+                    print("[Settings] Deleted \(deleted) workouts from HealthKit, reset sync state")
+                    await WorkoutSyncService.shared.syncRecentWorkouts()
+                }
+            }
         } header: {
             Text("Workout Sync")
         } footer: {
@@ -910,6 +941,13 @@ struct SettingsView: View {
 
     private func loadData() async {
         loadingWeighIns = true
+        let ud = UserDefaults.standard
+        let normalizedUnit = normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit))
+        if normalizedUnit != heightUnit {
+            heightUnit = normalizedUnit
+        }
+        let normalizedActivity = normalizedActivityLevel(ud.double(forKey: "activityLevel"))
+        ud.set(normalizedActivity, forKey: "activityLevel")
         do {
             weighIns = try await APIClient.shared.get(
                 "/body-weight/",
@@ -924,7 +962,10 @@ struct SettingsView: View {
         await SettingsSync.loadFromDB()
 
         // Extract display bases from the loaded machine weights
-        let ud = UserDefaults.standard
+        let refreshedUnit = normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit))
+        if refreshedUnit != heightUnit {
+            heightUnit = refreshedUnit
+        }
         let mwKeys = ["smithMachine", "legPress", "hackSquat", "tBarRow", "beltSquat",
                        "chestPress", "shoulderPress", "inclinePress", "declinePress",
                        "calfRaise", "seatedRow", "latPulldown", "pendulumSquat",
@@ -1006,6 +1047,10 @@ struct SettingsView: View {
         Task {
             let success = await HealthKitManager.shared.requestAuthorization()
             healthKitAuthorized = success
+            if success {
+                WorkoutSyncService.shared.isSyncEnabled = true
+                await WorkoutSyncService.shared.syncRecentWorkouts()
+            }
         }
     }
 }

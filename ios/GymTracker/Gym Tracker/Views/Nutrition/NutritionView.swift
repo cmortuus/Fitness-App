@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct NutritionView: View {
+    @Binding private var externalShowGoalsSheet: Bool
     @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
     @State private var summary: DailySummary?
     @State private var mealEntries: [String: [NutritionEntry]] = [:]
@@ -22,8 +23,13 @@ struct NutritionView: View {
     @State private var fabExpanded = false
     @State private var copying = false
     @State private var endingPhase = false
+    @State private var scannedFoodWrapper: IdentifiedFood? = nil
 
     private let meals = ["breakfast", "lunch", "dinner", "snack"]
+
+    init(externalShowGoalsSheet: Binding<Bool> = .constant(false)) {
+        _externalShowGoalsSheet = externalShowGoalsSheet
+    }
 
     private var dateString: String {
         let df = DateFormatter()
@@ -115,9 +121,19 @@ struct NutritionView: View {
                     Task { await deleteEntry(entry.id); await loadAll() }
                 })
             }
+            .sheet(item: $scannedFoodWrapper) { wrapper in
+                ServingSizeSheet(food: wrapper.food, date: dateString) {
+                    Task { await loadAll() }
+                }
+            }
             .confirmationDialog("Copy yesterday's food log?", isPresented: $showCopyDayConfirm, titleVisibility: .visible) {
                 Button("Copy") { Task { await copyPreviousDay() } }
                 Button("Cancel", role: .cancel) {}
+            }
+            .onChange(of: externalShowGoalsSheet) { _, shouldShow in
+                guard shouldShow else { return }
+                showGoalsSheet = true
+                externalShowGoalsSheet = false
             }
         }
     }
@@ -734,19 +750,8 @@ struct NutritionView: View {
     private func lookupBarcode(_ barcode: String) async {
         do {
             let food: FoodSearchResult = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
-            let qty = food.serving_size_g ?? 100
-            let scale = qty / 100
-            let body = NutritionEntryBody(
-                name: food.name + (food.brand.map { " (\($0))" } ?? ""),
-                date: dateString,
-                quantity_g: qty,
-                calories: (food.calories_per_100g ?? 0) * scale,
-                protein: (food.protein_per_100g ?? 0) * scale,
-                carbs: (food.carbs_per_100g ?? 0) * scale,
-                fat: (food.fat_per_100g ?? 0) * scale
-            )
-            let _: NutritionEntry = try await APIClient.shared.post("/nutrition/entries", body: body)
-            await loadAll()
+            // Open serving size picker instead of auto-logging (#543)
+            scannedFoodWrapper = IdentifiedFood(food: food)
         } catch {
             pendingBarcode = barcode
             showLabelScanner = true
@@ -875,9 +880,22 @@ struct EditEntrySheet: View {
     @State private var errorMessage: String? = nil
     @Environment(\.dismiss) private var dismiss
 
+    // Store original per-gram ratios for scaling
+    private let originalQty: Double
+    private let calPer100: Double
+    private let proPer100: Double
+    private let carbPer100: Double
+    private let fatPer100: Double
+
     init(entry: NutritionEntry, onSave: @escaping () -> Void, onDelete: @escaping () -> Void) {
         self.entry = entry; self.onSave = onSave; self.onDelete = onDelete
-        _qty = State(initialValue: entry.quantity_g.map { "\(Int($0))" } ?? "100")
+        let q = entry.quantity_g ?? 100
+        self.originalQty = q > 0 ? q : 100
+        self.calPer100 = (entry.calories ?? 0) / (q > 0 ? q : 100) * 100
+        self.proPer100 = (entry.protein ?? 0) / (q > 0 ? q : 100) * 100
+        self.carbPer100 = (entry.carbs ?? 0) / (q > 0 ? q : 100) * 100
+        self.fatPer100 = (entry.fat ?? 0) / (q > 0 ? q : 100) * 100
+        _qty = State(initialValue: "\(Int(q))")
         _cal = State(initialValue: entry.calories.map { "\(Int($0))" } ?? "0")
         _pro = State(initialValue: entry.protein.map { "\(Int($0))" } ?? "0")
         _carb = State(initialValue: entry.carbs.map { "\(Int($0))" } ?? "0")
@@ -896,6 +914,16 @@ struct EditEntrySheet: View {
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.trailing)
                             .frame(width: 80)
+                            .onChange(of: qty) { _, newQty in
+                                // Scale macros proportionally (#535)
+                                if let newG = Double(newQty), newG > 0 {
+                                    let scale = newG / 100
+                                    cal = "\(Int(calPer100 * scale))"
+                                    pro = "\(Int(proPer100 * scale))"
+                                    carb = "\(Int(carbPer100 * scale))"
+                                    fat = "\(Int(fatPer100 * scale))"
+                                }
+                            }
                     }
                     Picker("Meal", selection: $meal) {
                         ForEach(["breakfast", "lunch", "dinner", "snack"], id: \.self) {
@@ -998,19 +1026,51 @@ struct ServingSizeSheet: View {
     let date: String
     let onSave: () -> Void
 
+    enum UnitMode: String, CaseIterable {
+        case serving = "Serving"
+        case grams = "Grams"
+        case oz = "Oz"
+        case cups = "Cups"
+        case tbsp = "Tbsp"
+        case ml = "mL"
+    }
+
+    // Conversion factors to grams
+    private static let toGrams: [UnitMode: Double] = [
+        .grams: 1,
+        .oz: 28.3495,
+        .cups: 236.588,  // ~water/liquid density
+        .tbsp: 14.787,
+        .ml: 1,  // approx 1ml = 1g for most foods
+    ]
+
     @State private var servings: Double = 1.0
-    @State private var customGrams: String = ""
-    @State private var useServings = true
+    @State private var customAmount: String = ""
+    @State private var unitMode: UnitMode = .serving
     @State private var saving = false
     @Environment(\.dismiss) private var dismiss
 
     private var servingG: Double { food.serving_size_g ?? 100 }
-    private var quantity: Double { useServings ? servings * servingG : (Double(customGrams) ?? servingG) }
+    private var quantity: Double {
+        switch unitMode {
+        case .serving: return servings * servingG
+        default:
+            let amount = Double(customAmount) ?? servingG
+            return amount * (Self.toGrams[unitMode] ?? 1)
+        }
+    }
     private var scale: Double { quantity / 100 }
     private var cal: Double { (food.calories_per_100g ?? 0) * scale }
     private var pro: Double { (food.protein_per_100g ?? 0) * scale }
     private var carb: Double { (food.carbs_per_100g ?? 0) * scale }
     private var fat: Double { (food.fat_per_100g ?? 0) * scale }
+
+    // Liquids (fl oz / mL in label) should display mL, not g
+    private var isLiquid: Bool {
+        let label = (food.serving_label ?? "").lowercased()
+        return label.contains("ml") || label.contains("fl oz") || label.contains("fl. oz")
+    }
+    private var quantityUnit: String { isLiquid ? "mL" : "g" }
 
     var body: some View {
         NavigationStack {
@@ -1024,15 +1084,22 @@ struct ServingSizeSheet: View {
                 }
                 .padding(.top, 8)
 
-                // Serving toggle
-                Picker("Mode", selection: $useServings) {
-                    Text("Servings").tag(true)
-                    Text("Grams").tag(false)
+                // Unit picker (#541)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        ForEach(UnitMode.allCases, id: \.self) { mode in
+                            Button(mode.rawValue) { unitMode = mode }
+                                .font(.caption.weight(.medium))
+                                .padding(.horizontal, 12).padding(.vertical, 6)
+                                .background(unitMode == mode ? Color.blue : Color(white: 0.15))
+                                .foregroundStyle(unitMode == mode ? .white : .secondary)
+                                .clipShape(Capsule())
+                        }
+                    }
+                    .padding(.horizontal)
                 }
-                .pickerStyle(.segmented)
-                .padding(.horizontal)
 
-                if useServings {
+                if unitMode == .serving {
                     VStack(spacing: 8) {
                         Text(food.serving_label ?? "\(Int(servingG))g serving")
                             .font(.caption).foregroundStyle(.secondary)
@@ -1048,17 +1115,22 @@ struct ServingSizeSheet: View {
                                 Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(.blue)
                             }
                         }
-                        Text(String(format: "%.0fg total", quantity))
+                        Text(String(format: "%.0f", quantity) + "\(quantityUnit) total")
                             .font(.caption).foregroundStyle(.tertiary)
                     }
                 } else {
                     HStack {
-                        TextField("\(Int(servingG))", text: $customGrams)
+                        TextField("Amount", text: $customAmount)
                             .font(.system(size: 36, weight: .bold, design: .rounded))
                             .keyboardType(.decimalPad)
                             .multilineTextAlignment(.center)
                             .frame(width: 120)
-                        Text("g").font(.title3).foregroundStyle(.secondary)
+                        Text(unitMode.rawValue.lowercased())
+                            .font(.title3).foregroundStyle(.secondary)
+                    }
+                    if unitMode != .grams {
+                        Text(String(format: "= %.0f", quantity) + "\(quantityUnit)")
+                            .font(.caption).foregroundStyle(.tertiary)
                     }
                 }
 
@@ -1100,7 +1172,7 @@ struct ServingSizeSheet: View {
         }
         .presentationDetents([.medium])
         .onAppear {
-            customGrams = "\(Int(servingG))"
+            customAmount = "\(Int(servingG))"
         }
     }
 
@@ -1132,4 +1204,3 @@ struct ServingSizeSheet: View {
         saving = false
     }
 }
-

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { getSessions } from '$lib/api';
+  import { localDateString } from '$lib/date';
   import { settings } from '$lib/stores';
 
   const KG_TO_LBS = 2.20462;
@@ -42,7 +43,7 @@
     for (let i = 0; i < 7; i++) {
       const curr = new Date(start);
       curr.setDate(start.getDate() + i);
-      dates.push(isoDate(curr));
+      dates.push(localDateString(curr));
     }
     return dates;
   }
@@ -64,7 +65,6 @@
     }
   });
 
-  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -83,7 +83,7 @@
     new Date(calYear, calMonth, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
   );
 
-  let todayStr = isoDate(today);
+  let todayStr = localDateString(today);
 
   function prevMonth() {
     if (calMonth === 0) { calMonth = 11; calYear--; }
@@ -135,11 +135,11 @@
     let count = 0;
     const d = new Date();
     // Check if worked out today
-    if (!dates.has(isoDate(d))) {
+    if (!dates.has(localDateString(d))) {
       d.setDate(d.getDate() - 1);
-      if (!dates.has(isoDate(d))) return 0;
+      if (!dates.has(localDateString(d))) return 0;
     }
-    while (dates.has(isoDate(d))) {
+    while (dates.has(localDateString(d))) {
       count++;
       d.setDate(d.getDate() - 1);
     }
@@ -152,13 +152,6 @@
     });
   }
 
-  function duration(s: Session): string {
-    if (!s.started_at || !s.completed_at) return '';
-    const ms = new Date(s.completed_at).getTime() - new Date(s.started_at).getTime();
-    const mins = Math.round(ms / 60000);
-    if (mins < 60) return `${mins}m`;
-    return `${Math.floor(mins / 60)}h ${mins % 60}m`;
-  }
 </script>
 
 <div class="space-y-4 max-w-lg mx-auto">
@@ -290,9 +283,6 @@
                   <div class="w-2 h-2 rounded-full" style="background-color: {guessColor(s.name)}"></div>
                   <p class="font-medium text-sm">{s.name ?? 'Workout'}</p>
                 </div>
-                {#if duration(s)}
-                  <span class="text-xs text-zinc-500">{duration(s)}</span>
-                {/if}
               </div>
               <div class="flex gap-4 mt-1.5 text-xs text-zinc-400">
                 <span>{s.total_sets} sets</span>

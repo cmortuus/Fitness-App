@@ -140,7 +140,9 @@ export async function getSettings(): Promise<Record<string, any>> {
 }
 
 export async function saveSettings(settings: Record<string, any>): Promise<void> {
-  await api.put('/auth/settings', settings);
+  await api.put('/auth/settings', settings, {
+    headers: { 'X-Client-Name': 'web' },
+  });
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -218,6 +220,18 @@ export interface WorkoutSession {
   sets: Set[];
 }
 
+export interface WorkoutSessionAuditEntry {
+  id: number;
+  workout_session_id: number;
+  from_status: string | null;
+  to_status: string | null;
+  reason: string;
+  endpoint: string;
+  actor_username: string | null;
+  source_device: string | null;
+  created_at: string;
+}
+
 export interface PlannedExercise {
   exercise_id: number;
   sets: number;
@@ -230,6 +244,12 @@ export interface PlannedExercise {
   drops?: number | null;
   group_id?: string | null;
   group_type?: 'superset' | 'circuit' | null;
+}
+
+export interface PlanRirOverrides {
+  plan: number | null;
+  muscles: Record<string, number>;
+  exercises: Record<string, number>;
 }
 
 export interface PlannedDay {
@@ -247,10 +267,42 @@ export interface WorkoutPlan {
   current_week: number;
   number_of_days: number;
   days: PlannedDay[];
+  rir_overrides: PlanRirOverrides;
   auto_progression: boolean;
   min_technique_score: number;
   is_draft: boolean;
   is_archived: boolean;
+}
+
+export interface NextWorkoutResolution {
+  plan: WorkoutPlan;
+  day: PlannedDay;
+  week_number: number;
+  day_number: number;
+  is_complete: boolean;
+  debug: {
+    selected_plan_id: number;
+    completed_session_count: number;
+    total_sessions_needed: number;
+    recent_session_id: number | null;
+  };
+}
+
+export interface PlanRecommendation {
+  type: 'backoff_rir';
+  exercise_id: number;
+  exercise_name: string;
+  muscle_group: string | null;
+  current_rir: number;
+  recovery_rating: string | null;
+  recommended_rir: number;
+  add_set: boolean;
+  set_delta: number;
+  weekly_sets: number;
+  mav_sets: number;
+  reason: string;
+  detail: string;
+  source_session_id: number;
 }
 
 export interface ProgressMetric {
@@ -315,12 +367,24 @@ export async function completeSession(sessionId: number): Promise<WorkoutSession
   return response.data;
 }
 
+export async function resetSessionToPlanned(sessionId: number): Promise<WorkoutSession> {
+  const response = await api.post(`/sessions/${sessionId}/reset-to-planned`);
+  return response.data;
+}
+
+export async function getSessionAudit(sessionId: number): Promise<WorkoutSessionAuditEntry[]> {
+  const response = await api.get(`/sessions/${sessionId}/audit`);
+  return response.data;
+}
+
 export async function patchSession(sessionId: number, data: { notes?: string; name?: string }): Promise<WorkoutSession> {
   const response = await api.patch(`/sessions/${sessionId}`, data);
   return response.data;
 }
 
-export async function syncSessionToPlan(sessionId: number): Promise<{ updated: number }> {
+export async function syncSessionToPlan(
+  sessionId: number
+): Promise<{ updated: number; structural_changes?: number }> {
   const response = await api.post(`/sessions/${sessionId}/sync-to-plan`);
   return response.data;
 }
@@ -478,8 +542,18 @@ export async function getPlans(): Promise<WorkoutPlan[]> {
   return response.data;
 }
 
+export async function getNextWorkout(): Promise<NextWorkoutResolution | null> {
+  const response = await api.get('/plans/next-workout');
+  return response.data;
+}
+
 export async function getPlan(planId: number): Promise<WorkoutPlan> {
   const response = await api.get(`/plans/${planId}`);
+  return response.data;
+}
+
+export async function getPlanRecommendations(planId: number): Promise<PlanRecommendation[]> {
+  const response = await api.get(`/plans/${planId}/recommendations`);
   return response.data;
 }
 
@@ -530,8 +604,14 @@ export async function updatePlan(planId: number, data: {
   number_of_days?: number;
   days?: PlannedDay[];
   auto_progression?: boolean;
+  is_draft?: boolean;
 }): Promise<WorkoutPlan> {
   const response = await api.put(`/plans/${planId}`, data);
+  return response.data;
+}
+
+export async function updatePlanRirOverrides(planId: number, overrides: PlanRirOverrides): Promise<WorkoutPlan> {
+  const response = await api.put(`/plans/${planId}/rir-overrides`, overrides);
   return response.data;
 }
 
@@ -701,6 +781,21 @@ export async function createCustomFood(data: {
   return response.data;
 }
 
+export async function updateCustomFood(id: number, data: {
+  name: string;
+  brand?: string;
+  barcode?: string;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+  serving_size_g?: number;
+  serving_label?: string;
+}): Promise<FoodItem> {
+  const response = await api.put(`/nutrition/foods/${id}`, data);
+  return response.data;
+}
+
 export async function deleteCustomFood(id: number): Promise<void> {
   await api.delete(`/nutrition/foods/${id}`);
 }
@@ -723,6 +818,18 @@ export async function addNutritionEntry(data: {
   fat: number;
 }): Promise<NutritionEntry> {
   const response = await api.post('/nutrition/entries', data);
+  return response.data;
+}
+
+export async function updateNutritionEntry(id: number, data: {
+  quantity_g?: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  meal?: string;
+}): Promise<NutritionEntry> {
+  const response = await api.patch(`/nutrition/entries/${id}`, data);
   return response.data;
 }
 

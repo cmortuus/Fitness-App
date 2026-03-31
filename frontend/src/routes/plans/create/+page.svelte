@@ -1,8 +1,8 @@
 <script lang="ts">  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { exercises } from '$lib/stores';
-  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise } from '$lib/api';
-  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutTemplate } from '$lib/api';
+  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise, getPlan, updatePlan } from '$lib/api';
+  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutPlan, WorkoutTemplate } from '$lib/api';
 
   // Plan basic info
   let newPlanName = $state('');
@@ -27,6 +27,9 @@
   let initialized = $state(false);
   let currentStep = $state(1); // 0: Choose method, 1: Basic Info, 2: Configure Days
   let createMode = $state<'choose' | 'template' | 'custom'>('choose');
+  let editingPlanId = $state<number | null>(null);
+  let loadingExistingPlan = $state(false);
+  let savingPlan = $state(false);
 
   // Template browser state
   let templates = $state<WorkoutTemplate[]>([]);
@@ -102,6 +105,46 @@
     return Math.round(kg * KG_TO_LBS * 10) / 10;
   }
 
+  function cloneDays(sourceDays: PlannedDay[]): PlannedDay[] {
+    return sourceDays.map((day, index) => ({
+      day_number: index + 1,
+      day_name: day.day_name,
+      exercises: day.exercises.map((exercise) => ({ ...exercise }))
+    }));
+  }
+
+  function updateDayExercises(dayNum: number, updater: (exercises: PlannedExercise[]) => PlannedExercise[]) {
+    days = cloneDays(days).map((day) =>
+      day.day_number === dayNum
+        ? { ...day, exercises: updater(day.exercises) }
+        : day
+    );
+  }
+
+  function moveExerciseWithinDay(dayNum: number, fromIndex: number, toIndex: number) {
+    updateDayExercises(dayNum, (exercises) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= exercises.length || toIndex >= exercises.length) {
+        return exercises;
+      }
+      const reordered = [...exercises];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    });
+  }
+
+  function hydratePlan(plan: WorkoutPlan) {
+    editingPlanId = plan.id;
+    newPlanName = plan.name;
+    newPlanDescription = plan.description ?? '';
+    numberOfDays = plan.number_of_days;
+    durationWeeks = plan.duration_weeks;
+    blockType = plan.block_type;
+    days = cloneDays(plan.days);
+    createMode = 'custom';
+    currentStep = 2;
+  }
+
   onMount(() => {
     let autosaveInterval: ReturnType<typeof setInterval> | null = null;
     (async () => {
@@ -117,10 +160,27 @@
         recentExercises = recentData;
         groupedExercises = groupedData;
 
-        // Check for saved draft in localStorage
-        const restored = restoreDraftFromStorage();
-        if (!restored) {
-          initializeDays();
+        const params = new URLSearchParams(window.location.search);
+        const editId = Number.parseInt(params.get('edit') ?? '', 10);
+
+        if (Number.isInteger(editId) && editId > 0) {
+          loadingExistingPlan = true;
+          try {
+            const plan = await getPlan(editId);
+            hydratePlan(plan);
+          } catch (error) {
+            console.error('Failed to load existing plan:', error);
+            alert('Failed to load the selected plan for editing.');
+            goto('/plans');
+            return;
+          } finally {
+            loadingExistingPlan = false;
+          }
+        } else {
+          const restored = restoreDraftFromStorage();
+          if (!restored) {
+            initializeDays();
+          }
         }
         initialized = true;
 
@@ -235,19 +295,13 @@
   }
 
   function removeExerciseFromDay(dayNum: number, exerciseIndex: number) {
-    const dayIndex = days.findIndex(d => d.day_number === dayNum);
-    if (dayIndex === -1) return;
-
-    days[dayIndex].exercises = days[dayIndex].exercises.filter((_, i) => i !== exerciseIndex);
-    days = [...days];
+    updateDayExercises(dayNum, (exercises) => exercises.filter((_, i) => i !== exerciseIndex));
   }
 
   function updateDayName(dayNum: number, newName: string) {
-    const dayIndex = days.findIndex(d => d.day_number === dayNum);
-    if (dayIndex !== -1) {
-      days[dayIndex].day_name = newName;
-      days = [...days];
-    }
+    days = cloneDays(days).map((day) =>
+      day.day_number === dayNum ? { ...day, day_name: newName } : day
+    );
   }
 
   // Drag and drop handlers
@@ -276,15 +330,16 @@
 
     if (sourceDayIndex === -1 || targetDayIndex === -1) return;
 
-    // Remove from source
-    days[sourceDayIndex].exercises = days[sourceDayIndex].exercises.filter(
-      (_, i) => i !== draggedExercise!.index
-    );
+    const sourceDay = days[sourceDayIndex];
+    const targetDay = days[targetDayIndex];
+    const nextSourceExercises = sourceDay.exercises.filter((_, i) => i !== draggedExercise!.index);
+    const nextTargetExercises = [...targetDay.exercises, { ...draggedExercise.exercise }];
 
-    // Add to target
-    days[targetDayIndex].exercises = [...days[targetDayIndex].exercises, draggedExercise.exercise];
-
-    days = [...days];
+    days = cloneDays(days).map((day) => {
+      if (day.day_number === sourceDay.day_number) return { ...day, exercises: nextSourceExercises };
+      if (day.day_number === targetDay.day_number) return { ...day, exercises: nextTargetExercises };
+      return day;
+    });
     draggedExercise = null;
   }
 
@@ -363,18 +418,26 @@
     };
   }
 
-  async function handleCreatePlan() {
+  async function handleSubmitPlan() {
+    savingPlan = true;
     try {
-      await createPlan(buildPlanData(false));
+      if (editingPlanId !== null) {
+        await updatePlan(editingPlanId, buildPlanData(false));
+      } else {
+        await createPlan(buildPlanData(false));
+      }
       clearDraftFromStorage();
       goto('/plans');
     } catch (error) {
-      console.error('Failed to create plan:', error);
-      alert('Failed to create plan: ' + (error instanceof Error ? error.message : String(error)));
+      console.error('Failed to save plan:', error);
+      alert('Failed to save plan: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      savingPlan = false;
     }
   }
 
   async function handleSaveDraft() {
+    if (editingPlanId !== null) return;
     try {
       await createPlan(buildPlanData(true));
       clearDraftFromStorage();
@@ -389,6 +452,7 @@
   const DRAFT_KEY = 'hgt_plan_draft';
 
   function saveDraftToStorage() {
+    if (editingPlanId !== null) return;
     if (typeof localStorage === 'undefined') return;
     const draft = {
       name: newPlanName, description: newPlanDescription, blockType, durationWeeks,
@@ -402,6 +466,7 @@
   }
 
   function restoreDraftFromStorage(): boolean {
+    if (editingPlanId !== null) return false;
     if (typeof localStorage === 'undefined') return false;
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return false;
@@ -437,6 +502,20 @@
 
   function cancel() {
     goto('/plans');
+  }
+
+  function moveDay(dayNum: number, direction: -1 | 1) {
+    const index = days.findIndex((d) => d.day_number === dayNum);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= days.length) return;
+
+    const reordered = [...days];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    days = cloneDays(reordered);
+  }
+
+  function clearDay(dayNum: number) {
+    updateDayExercises(dayNum, () => []);
   }
 
   async function loadTemplates() {
@@ -543,20 +622,33 @@
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-4">
         <button onclick={() => {
-          if (createMode === 'template' || createMode === 'custom') { createMode = 'choose'; }
-          else if (currentStep === 2) { goBackToStep1(); }
+          if (currentStep === 2) { goBackToStep1(); }
+          else if (createMode === 'template') { createMode = 'choose'; }
+          else if (createMode === 'custom' && editingPlanId === null) { createMode = 'choose'; }
           else { cancel(); }
         }} class="text-zinc-400 hover:text-white">
           ← {createMode === 'choose' ? 'Back to Plans' : 'Back'}
         </button>
         <h1 class="text-xl font-bold">
-          {createMode === 'choose' ? 'New Plan' : createMode === 'template' ? 'Choose Template' : 'Build Custom Plan'}
+          {editingPlanId !== null
+            ? 'Edit Weekly Plan'
+            : createMode === 'choose'
+              ? 'New Plan'
+              : createMode === 'template'
+                ? 'Choose Template'
+                : 'Build Custom Plan'}
         </h1>
       </div>
 
       {#if currentStep === 2 && createMode === 'custom'}
-        <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
-        <button onclick={handleCreatePlan} class="btn-primary">Create Plan</button>
+        {#if editingPlanId === null}
+          <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
+        {/if}
+        <button onclick={handleSubmitPlan} class="btn-primary" disabled={savingPlan}>
+          {savingPlan
+            ? (editingPlanId !== null ? 'Saving...' : 'Creating...')
+            : (editingPlanId !== null ? 'Save Changes' : 'Create Plan')}
+        </button>
       {/if}
     </div>
   </div>
@@ -670,10 +762,10 @@
 
     <!-- Custom plan builder: Step 1 -->
     {:else if currentStep === 1}
-      {#if !initialized}
+      {#if !initialized || loadingExistingPlan}
         <div class="card max-w-2xl mx-auto text-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
-          <p class="text-zinc-400 mb-4">Loading exercises...</p>
+          <p class="text-zinc-400 mb-4">{loadingExistingPlan ? 'Loading weekly plan...' : 'Loading exercises...'}</p>
           <button
             class="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-500"
             onclick={async () => {
@@ -748,7 +840,7 @@
 
         <div class="flex justify-end gap-3 mt-8">
           <button onclick={cancel} class="btn-secondary">Cancel</button>
-          <button onclick={goToStep2} class="btn-primary">Next Step</button>
+          <button onclick={goToStep2} class="btn-primary">{editingPlanId !== null ? 'Edit Week' : 'Next Step'}</button>
         </div>
       </div>
       {/if}
@@ -759,7 +851,7 @@
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-semibold">Configure Days</h2>
-          <p class="text-sm text-zinc-400">Drag and drop exercises between days to reorganize</p>
+          <p class="text-sm text-zinc-400">Drag exercises between days, clear a day to skip it, and reorder the week.</p>
         </div>
 
         <!-- Days grid - responsive columns -->
@@ -774,14 +866,39 @@
               aria-label="Day {day.day_number}"
             >
               <!-- Day header -->
-              <div class="mb-4">
-                <input
-                  type="text"
-                  value={day.day_name}
-                  oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
-                  class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
-                  placeholder="Day name..."
-                />
+              <div class="mb-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                  <input
+                    type="text"
+                    value={day.day_name}
+                    oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
+                    class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
+                    placeholder="Day name..."
+                  />
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      onclick={() => moveDay(day.day_number, -1)}
+                      disabled={day.day_number === 1}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                    >
+                      ←
+                    </button>
+                    <button
+                      onclick={() => moveDay(day.day_number, 1)}
+                      disabled={day.day_number === days.length}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                    >
+                      →
+                    </button>
+                    <button
+                      onclick={() => clearDay(day.day_number)}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-xs"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <p class="text-xs text-zinc-500">Day {day.day_number}</p>
               </div>
 
               <!-- Add exercise button -->
@@ -807,10 +924,10 @@
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1.5">
                           <div class="flex flex-col shrink-0">
-                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) { const arr = day.exercises; [arr[idx-1], arr[idx]] = [arr[idx], arr[idx-1]]; days = [...days]; } }}
+                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) moveExerciseWithinDay(day.day_number, idx, idx - 1); }}
                                     disabled={idx === 0}
                                     class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▲</button>
-                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) { const arr = day.exercises; [arr[idx], arr[idx+1]] = [arr[idx+1], arr[idx]]; days = [...days]; } }}
+                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) moveExerciseWithinDay(day.day_number, idx, idx + 1); }}
                                     disabled={idx === day.exercises.length - 1}
                                     class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▼</button>
                           </div>
@@ -825,8 +942,11 @@
                             oninput={(e) => {
                               const v = parseInt((e.target as HTMLInputElement).value);
                               if (!isNaN(v) && v > 0) {
-                                days[days.findIndex(d => d.day_number === day.day_number)].exercises[idx].sets = v;
-                                days = [...days];
+                                updateDayExercises(day.day_number, (exercises) =>
+                                  exercises.map((exercise, exerciseIndex) =>
+                                    exerciseIndex === idx ? { ...exercise, sets: v } : exercise
+                                  )
+                                );
                               }
                             }}
                             min="1" max="20"

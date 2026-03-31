@@ -2,16 +2,20 @@ import SwiftUI
 
 struct MainTabView: View {
     @State private var selectedTab = 0
+    @State private var showNutritionGoalsSheet = false
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            HomeView()
+            HomeView {
+                selectedTab = 1
+                showNutritionGoalsSheet = true
+            }
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
                 .tag(0)
 
-            NutritionView()
+            NutritionView(externalShowGoalsSheet: $showNutritionGoalsSheet)
                 .tabItem {
                     Label("Log", systemImage: "plus.circle.fill")
                 }

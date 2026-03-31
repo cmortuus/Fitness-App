@@ -33,6 +33,7 @@ struct AddFoodView: View {
     @State private var manualCarbs = ""
     @State private var manualFat = ""
     @State private var manualQty = "100"
+    @State private var manualServingLabel = ""
     @State private var saveAsCustom = true
     @State private var saving = false
 
@@ -93,6 +94,10 @@ struct AddFoodView: View {
                     manualProtein = scanned.protein > 0 ? "\(Int(scanned.protein))" : ""
                     manualCarbs = scanned.carbs > 0 ? "\(Int(scanned.carbs))" : ""
                     manualFat = scanned.fat > 0 ? "\(Int(scanned.fat))" : ""
+                    manualServingLabel = scanned.servingSize.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if let servingQty = parseServingSizeInGrams(from: scanned.servingSize) {
+                        manualQty = formatServingQuantity(servingQty)
+                    }
                     activeTab = .manual
                 }
             }
@@ -361,6 +366,18 @@ struct AddFoodView: View {
                 }
             }
 
+            if !manualServingLabel.isEmpty {
+                HStack {
+                    Text("Scanned serving")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(manualServingLabel)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
+
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Protein").font(.caption).foregroundStyle(.secondary)
@@ -450,8 +467,17 @@ struct AddFoodView: View {
         let qty = Double(manualQty) ?? 100
         let cal = Double(manualCal) ?? 0
         let pro = Double(manualProtein) ?? 0
-        let carb = Double(manualCarbs) ?? 0
-        let fat = Double(manualFat) ?? 0
+        var carb = Double(manualCarbs) ?? 0
+        var fat = Double(manualFat) ?? 0
+
+        // Auto-calc carbs/fat if not specified (#536)
+        // Equal caloric split: fats=9cal/g, carbs=4cal/g
+        if carb == 0 && fat == 0 && cal > 0 {
+            let remainingCal = max(cal - (pro * 4), 0)
+            let halfCal = remainingCal / 2
+            carb = round(halfCal / 4)   // 4 cal per gram of carbs
+            fat = round(halfCal / 9)    // 9 cal per gram of fat
+        }
 
         do {
             // Optionally save to custom food library first
@@ -473,7 +499,7 @@ struct AddFoodView: View {
                     carbs_per_100g: carb * scale,
                     fat_per_100g: fat * scale,
                     serving_size_g: qty,
-                    serving_label: "\(Int(qty))g serving"
+                    serving_label: normalizedServingLabel(for: qty)
                 ))
             }
 
@@ -491,6 +517,33 @@ struct AddFoodView: View {
             dismiss()
         } catch { print("[Food] Manual: \(error)") }
         saving = false
+    }
+
+    private func parseServingSizeInGrams(from label: String) -> Double? {
+        let nsRange = NSRange(label.startIndex..<label.endIndex, in: label)
+
+        if let gramsRegex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)\s*g\b"#, options: [.caseInsensitive]),
+           let match = gramsRegex.firstMatch(in: label, range: nsRange),
+           let range = Range(match.range(at: 1), in: label) {
+            return Double(label[range])
+        }
+
+        if let leadingNumberRegex = try? NSRegularExpression(pattern: #"(\d+(?:\.\d+)?)"#),
+           let match = leadingNumberRegex.firstMatch(in: label, range: nsRange),
+           let range = Range(match.range(at: 1), in: label) {
+            return Double(label[range])
+        }
+
+        return nil
+    }
+
+    private func formatServingQuantity(_ qty: Double) -> String {
+        qty.rounded(.towardZero) == qty ? "\(Int(qty))" : String(qty)
+    }
+
+    private func normalizedServingLabel(for qty: Double) -> String {
+        let scanned = manualServingLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        return scanned.isEmpty ? "\(Int(qty))g serving" : scanned
     }
 
     private func lookupBarcode(_ barcode: String) async {

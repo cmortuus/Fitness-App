@@ -130,7 +130,7 @@ class SetUpdate(BaseModel):
     reps_left: int | None = None
     reps_right: int | None = None
     set_type: str | None = None
-    sub_sets: str | None = None  # JSON for drop set entries
+    sub_sets: list | str | None = None
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None
@@ -195,6 +195,20 @@ class WorkoutSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkoutSessionAuditResponse(BaseModel):
+    id: int
+    workout_session_id: int
+    from_status: str | None
+    to_status: str | None
+    reason: str
+    endpoint: str
+    actor_username: str | None
+    source_device: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # Workout plan schemas
 class PlannedExercise(BaseModel):
     exercise_id: int
@@ -206,6 +220,12 @@ class PlannedExercise(BaseModel):
     drops: int | None = None  # number of drops for drop sets
     rest_seconds: int | None = 90
     notes: str | None = None
+
+
+class PlanRirOverrides(BaseModel):
+    plan: int | None = None
+    muscles: dict[str, int] = Field(default_factory=dict)
+    exercises: dict[str, int] = Field(default_factory=dict)
 
 
 class PlannedDay(BaseModel):
@@ -234,6 +254,7 @@ class WorkoutPlanCreate(BaseModel):
     days: list[PlannedDay] = []
     auto_progression: bool = True
     is_draft: bool = False
+    rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
 
 
 class WorkoutPlanResponse(BaseModel):
@@ -245,6 +266,7 @@ class WorkoutPlanResponse(BaseModel):
     current_week: int
     number_of_days: int
     days: list[PlannedDay]
+    rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
     auto_progression: bool
     is_draft: bool = False
     is_archived: bool = False
@@ -306,6 +328,10 @@ class FoodItemCreate(BaseModel):
     serving_size_g: float = Field(default=100, gt=0)
     serving_label: str | None = None
     micronutrients: dict | None = None
+
+
+class FoodItemUpdate(FoodItemCreate):
+    pass
 
 
 class NutritionEntryCreate(BaseModel):
