@@ -102,7 +102,7 @@ struct RecipesView: View {
     private func loadRecipes() async {
         loading = true
         do {
-            recipes = try await APIClient.shared.get("/recipes")
+            recipes = try await APIClient.shared.get("/recipes/")
         } catch {
             print("[Recipes] Load error: \(error)")
         }
@@ -456,7 +456,7 @@ struct RecipeBuilderView: View {
             if let existing {
                 let _: RecipeModel = try await APIClient.shared.put("/recipes/\(existing.id)", body: body)
             } else {
-                let _: RecipeModel = try await APIClient.shared.post("/recipes", body: body)
+                let _: RecipeModel = try await APIClient.shared.post("/recipes/", body: body)
             }
             dismiss()
         } catch {
