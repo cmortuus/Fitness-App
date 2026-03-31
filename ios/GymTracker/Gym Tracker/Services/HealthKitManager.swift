@@ -234,7 +234,7 @@ final class HealthKitManager: @unchecked Sendable {
             totalEnergyBurned: calorieQuantity,
             totalDistance: nil,
             metadata: [
-                HKMetadataKeyWorkoutBrandName: "GymTracker",
+                HKMetadataKeyWorkoutBrandName: "Onyx Intake",
                 "WorkoutName": name,
                 "TotalSets": totalSets,
                 "TotalVolumeKg": totalVolume,

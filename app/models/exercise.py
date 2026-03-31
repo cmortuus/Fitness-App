@@ -4,12 +4,13 @@ from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, Integer, JSON, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
 if TYPE_CHECKING:
+    from app.models.user import User
     from app.models.workout import ExerciseSet
 
 
@@ -50,6 +51,8 @@ class Exercise(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     display_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("users.id"), nullable=True)
+    source_exercise_id: Mapped[int | None] = mapped_column(Integer, ForeignKey("exercises.id"), nullable=True)
     movement_type: Mapped[str] = mapped_column(String(50), default="compound")
     body_region: Mapped[str] = mapped_column(String(50), default="upper")
     equipment_type: Mapped[str] = mapped_column(String(30), default="other", nullable=False, server_default="other")
@@ -73,8 +76,12 @@ class Exercise(Base):
     )
 
     # Relationships
+    user: Mapped["User | None"] = relationship("User", foreign_keys=[user_id], back_populates="exercises")
     sets: Mapped[list["ExerciseSet"]] = relationship(
         "ExerciseSet", back_populates="exercise", cascade="all, delete-orphan"
+    )
+    source_exercise: Mapped["Exercise | None"] = relationship(
+        "Exercise", remote_side=[id], foreign_keys=[source_exercise_id]
     )
 
     def __repr__(self) -> str:

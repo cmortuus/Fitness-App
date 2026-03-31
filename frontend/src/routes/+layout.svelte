@@ -192,7 +192,7 @@
           style="padding-top: env(safe-area-inset-top);"
   >
     <div class="flex items-center justify-between px-4 h-14">
-      <span class="text-lg font-bold gradient-text tracking-tight">GymTracker</span>
+      <span class="text-lg font-bold gradient-text tracking-tight">Onyx Expenditure</span>
 
       <div class="flex items-center gap-3">
         <!-- Desktop nav links (hidden on mobile) -->

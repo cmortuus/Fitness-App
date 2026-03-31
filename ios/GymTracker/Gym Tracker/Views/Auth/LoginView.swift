@@ -18,7 +18,7 @@ struct LoginView: View {
                     Image(systemName: "dumbbell.fill")
                         .font(.system(size: 48))
                         .foregroundStyle(.blue)
-                    Text("GymTracker")
+                    Text("Onyx Intake")
                         .font(.largeTitle.bold())
                     Text("Sign in to your account")
                         .font(.subheadline)

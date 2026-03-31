@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -24,6 +24,10 @@ from app.schemas.requests import (
 )
 
 router = APIRouter()
+
+
+def _exercise_scope(user_id: int):
+    return or_(Exercise.user_id.is_(None), Exercise.user_id == user_id)
 
 
 async def _get_session_with_sets(
@@ -643,7 +647,9 @@ async def create_session_from_plan(
     ]
     if day_exercise_ids:
         ex_rows = await db.execute(
-            select(Exercise).where(Exercise.id.in_(day_exercise_ids))
+            select(Exercise)
+            .where(Exercise.id.in_(day_exercise_ids))
+            .where(_exercise_scope(user.id))
         )
         exercise_model_map: dict[int, Exercise] = {
             ex.id: ex for ex in ex_rows.scalars().all()
