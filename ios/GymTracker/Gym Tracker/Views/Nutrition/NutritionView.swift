@@ -1065,6 +1065,13 @@ struct ServingSizeSheet: View {
     private var carb: Double { (food.carbs_per_100g ?? 0) * scale }
     private var fat: Double { (food.fat_per_100g ?? 0) * scale }
 
+    // Liquids (fl oz / mL in label) should display mL, not g
+    private var isLiquid: Bool {
+        let label = (food.serving_label ?? "").lowercased()
+        return label.contains("ml") || label.contains("fl oz") || label.contains("fl. oz")
+    }
+    private var quantityUnit: String { isLiquid ? "mL" : "g" }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 20) {
@@ -1108,7 +1115,7 @@ struct ServingSizeSheet: View {
                                 Image(systemName: "plus.circle.fill").font(.title2).foregroundStyle(.blue)
                             }
                         }
-                        Text(String(format: "%.0fg total", quantity))
+                        Text(String(format: "%.0f", quantity) + "\(quantityUnit) total")
                             .font(.caption).foregroundStyle(.tertiary)
                     }
                 } else {
@@ -1122,7 +1129,7 @@ struct ServingSizeSheet: View {
                             .font(.title3).foregroundStyle(.secondary)
                     }
                     if unitMode != .grams {
-                        Text(String(format: "= %.0fg", quantity))
+                        Text(String(format: "= %.0f", quantity) + "\(quantityUnit)")
                             .font(.caption).foregroundStyle(.tertiary)
                     }
                 }
