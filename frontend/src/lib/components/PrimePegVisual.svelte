@@ -77,11 +77,11 @@
     }))
   );
 
-  let totalPerSide = $derived(pegWeights.peg1 + pegWeights.peg2 + pegWeights.peg3);
+  let total = $derived(pegWeights.peg1 + pegWeights.peg2 + pegWeights.peg3);
   let unit = $derived(isLbs ? 'lbs' : 'kg');
 </script>
 
-{#if totalPerSide > 0}
+{#if total > 0}
   <div class="flex flex-col gap-1 mt-1">
     {#each pegEntries as peg}
       <div class="flex items-center gap-1">
@@ -114,9 +114,8 @@
         </span>
       </div>
     {/each}
-    <!-- Total per side -->
     <p class="text-[9px] text-zinc-500 text-center mt-0.5">
-      {totalPerSide} {unit}/side · {totalPerSide * 2} {unit} total
+      {total} {unit} total
     </p>
   </div>
 {/if}

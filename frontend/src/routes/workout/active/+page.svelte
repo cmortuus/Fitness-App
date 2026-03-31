@@ -525,24 +525,24 @@
     return exercise.is_prime && exercise.equipment_type === 'plate_loaded';
   }
 
-  /** Distribute total per-side weight across 3 pegs (peg3 first, then peg2, then peg1).
-   *  Uses plate increments for clean distribution. */
-  function distributeToPegs(totalPerSide: number): { peg1: number; peg2: number; peg3: number } {
+  /** Distribute total weight across 3 pegs (peg3 first, then peg2, then peg1). */
+  function distributeToPegs(totalWeight: number): { peg1: number; peg2: number; peg3: number } {
     const increment = $settings.weightUnit === 'lbs' ? 5 : 2.5;
-    // For now, unlimited peg capacity — fill peg3 first
-    // Round total to increment
-    const rounded = Math.round(totalPerSide / increment) * increment;
-    // Simple strategy: put everything on peg3
-    // In practice, users will adjust per-peg manually and overload will
-    // suggest incrementing peg3 first
-    return { peg1: 0, peg2: 0, peg3: Math.max(0, rounded) };
+    const rounded = Math.round(totalWeight / increment) * increment;
+    // Split evenly across pegs, filling peg3 first for overload
+    const perPeg = Math.floor(rounded / 3 / increment) * increment;
+    const remainder = rounded - perPeg * 3;
+    return {
+      peg1: perPeg,
+      peg2: perPeg + (remainder >= increment * 2 ? increment : 0),
+      peg3: perPeg + (remainder >= increment ? increment : 0),
+    };
   }
 
   /** Update total weight from peg values */
   function syncWeightFromPegs(set: UISet) {
     if (!set.pegWeights) return;
-    const perSide = set.pegWeights.peg1 + set.pegWeights.peg2 + set.pegWeights.peg3;
-    set.weightLbs = roundWeight(perSide * 2);
+    set.weightLbs = roundWeight(set.pegWeights.peg1 + set.pegWeights.peg2 + set.pegWeights.peg3);
   }
 
   function clearPlateBannerFocus() {
@@ -2985,7 +2985,7 @@
                           }
                           // Auto-distribute to pegs for Prime machines
                           if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
-                            set.pegWeights = distributeToPegs(val / 2);
+                            set.pegWeights = distributeToPegs(val);
                           }
                           // Propagate to subsequent sets only while each next set
                           // had the same weight as the set just edited (chain stops at first mismatch)
@@ -3136,7 +3136,7 @@
                     {@const pegs = set.pegWeights ?? { peg1: 0, peg2: 0, peg3: 0 }}
                     <div class="col-span-full px-2 mt-1 mb-1">
                       <div class="bg-zinc-800/50 rounded-lg px-3 py-2">
-                        <p class="text-[10px] text-zinc-500 mb-1.5 font-medium">Per-side peg weights ({unit})</p>
+                        <p class="text-[10px] text-zinc-500 mb-1.5 font-medium">Peg weights ({unit})</p>
                         <div class="flex items-center gap-2">
                           {#each ['peg1', 'peg2', 'peg3'] as pegKey, pi}
                             <div class="flex flex-col items-center gap-0.5 flex-1">
@@ -3162,15 +3162,14 @@
                           <div class="flex flex-col items-center gap-0.5">
                             <span class="text-[9px] text-zinc-400">Total</span>
                             <span class="text-xs text-zinc-300 font-mono py-1">
-                              {roundWeight((pegs.peg1 + pegs.peg2 + pegs.peg3) * 2)}
+                              {roundWeight(pegs.peg1 + pegs.peg2 + pegs.peg3)}
                             </span>
                           </div>
                         </div>
                         <button
                           class="text-[10px] text-primary-400 hover:text-primary-300 mt-1"
                           onclick={() => {
-                            const totalPerSide = (set.weightLbs ?? 0) / 2;
-                            set.pegWeights = distributeToPegs(totalPerSide);
+                            set.pegWeights = distributeToPegs(set.weightLbs ?? 0);
                             uiExercises = [...uiExercises];
                           }}
                         >Auto-distribute from total</button>

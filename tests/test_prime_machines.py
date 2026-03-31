@@ -108,8 +108,8 @@ class TestPegWeights:
         assert data["peg_weights"]["peg2"] == 10.0
         assert data["peg_weights"]["peg3"] == 15.0
 
-        # actual_weight_kg should be auto-calculated: (20+10+15)*2 = 90 kg
-        assert data["actual_weight_kg"] == 90.0
+        # actual_weight_kg should be auto-calculated: 20+10+15 = 45 kg
+        assert data["actual_weight_kg"] == 45.0
 
     async def test_log_set_without_peg_weights(self, client: AsyncClient):
         """Normal sets without peg_weights still work."""
@@ -160,4 +160,4 @@ class TestPegWeights:
         logged_set = session_data["sets"][0]
         assert logged_set["peg_weights"]["peg1"] == 25.0
         assert logged_set["peg_weights"]["peg3"] == 45.0
-        assert logged_set["actual_weight_kg"] == 140.0  # (25+0+45)*2
+        assert logged_set["actual_weight_kg"] == 70.0  # 25+0+45

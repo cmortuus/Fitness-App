@@ -665,8 +665,8 @@ async def update_set(
     if "peg_weights" in update_data and exercise_set.peg_weights:
         try:
             pegs = json.loads(exercise_set.peg_weights) if isinstance(exercise_set.peg_weights, str) else exercise_set.peg_weights
-            per_side = sum(pegs.get(f"peg{i}", 0) for i in range(1, 4))
-            exercise_set.actual_weight_kg = round(per_side * 2, 2)
+            total = sum(pegs.get(f"peg{i}", 0) for i in range(1, 4))
+            exercise_set.actual_weight_kg = round(total, 2)
         except (json.JSONDecodeError, AttributeError):
             pass
 
