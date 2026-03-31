@@ -2,7 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { activeDietPhase, settings } from '$lib/stores';
   import {
-    getNutritionEntries, addNutritionEntry, deleteNutritionEntry,
+    getNutritionEntries, addNutritionEntry, updateNutritionEntry, deleteNutritionEntry,
     getDailySummary, setMacroGoals,
     searchFoods, lookupBarcode, getCustomFoods, createCustomFood, updateCustomFood, deleteCustomFood, createCommunityFood,
     getActivePhase, createPhase, endPhase, recalculatePhase,
@@ -52,6 +52,12 @@
   let saveAsCustom = $state(false);
   let showFullMacros = $state(false);
   let editingFood = $state<FoodItem | null>(null);
+  let editingEntry = $state<NutritionEntry | null>(null);
+  let editEntryCal = $state<number | null>(null);
+  let editEntryProtein = $state<number | null>(null);
+  let editEntryCarbs = $state<number | null>(null);
+  let editEntryFat = $state<number | null>(null);
+  let editEntryQty = $state<number | null>(null);
 
   // Quick-add tab
   let quickCal = $state<number | null>(null);
@@ -458,6 +464,28 @@
 
   async function removeEntry(id: number) {
     await deleteNutritionEntry(id);
+    await loadDay();
+  }
+
+  function startEditEntry(entry: NutritionEntry) {
+    editingEntry = entry;
+    editEntryCal = Math.round(entry.calories);
+    editEntryProtein = Math.round(entry.protein * 10) / 10;
+    editEntryCarbs = Math.round(entry.carbs * 10) / 10;
+    editEntryFat = Math.round(entry.fat * 10) / 10;
+    editEntryQty = entry.quantity_g;
+  }
+
+  async function saveEditEntry() {
+    if (!editingEntry) return;
+    await updateNutritionEntry(editingEntry.id, {
+      quantity_g: editEntryQty ?? undefined,
+      calories: editEntryCal ?? undefined,
+      protein: editEntryProtein ?? undefined,
+      carbs: editEntryCarbs ?? undefined,
+      fat: editEntryFat ?? undefined,
+    });
+    editingEntry = null;
     await loadDay();
   }
 
@@ -992,21 +1020,59 @@
       {#if allEntries.length > 0}
         <div class="border-t border-zinc-800/50">
           {#each allEntries as entry}
-            <div class="flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/30 last:border-b-0">
-              <div class="flex-1 min-w-0">
-                <p class="text-sm text-white truncate">{entry.name}</p>
-                <p class="text-xs text-zinc-500">{entry.quantity_g}g</p>
-              </div>
-              <div class="flex items-center gap-4 shrink-0">
-                <div class="text-right">
-                  <p class="text-sm font-medium text-white">{Math.round(entry.calories)} cal</p>
-                  <p class="text-[10px] text-zinc-500">{Math.round(entry.protein)}g P</p>
-                </div>
-                <button onclick={() => removeEntry(entry.id)}
-                        class="w-7 h-7 flex items-center justify-center text-zinc-600 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors text-xs">
-                  ✕
+            <div class="border-b border-zinc-800/30 last:border-b-0">
+              <div class="flex items-center justify-between px-4 py-2.5">
+                <button onclick={() => startEditEntry(entry)} class="flex-1 min-w-0 text-left">
+                  <p class="text-sm text-white truncate">{entry.name}</p>
+                  <p class="text-xs text-zinc-500">{entry.quantity_g}g</p>
                 </button>
+                <div class="flex items-center gap-2 shrink-0">
+                  <div class="text-right">
+                    <p class="text-sm font-medium text-white">{Math.round(entry.calories)} cal</p>
+                    <p class="text-[10px] text-zinc-500">{Math.round(entry.protein)}g P</p>
+                  </div>
+                  <button onclick={() => startEditEntry(entry)}
+                          class="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded transition-colors text-xs"
+                          title="Edit entry">
+                    ✎
+                  </button>
+                  <button onclick={() => removeEntry(entry.id)}
+                          class="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors text-xs"
+                          title="Delete entry">
+                    ✕
+                  </button>
+                </div>
               </div>
+              {#if editingEntry?.id === entry.id}
+                <div class="px-4 pb-3 space-y-2 border-t border-zinc-800/30 bg-zinc-900/50">
+                  <div class="grid grid-cols-4 gap-2 pt-2">
+                    <div>
+                      <label class="text-[10px] text-zinc-500 block">Cal</label>
+                      <input type="number" bind:value={editEntryCal} class="input text-xs py-1" />
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-zinc-500 block">Protein</label>
+                      <input type="number" bind:value={editEntryProtein} step="0.1" class="input text-xs py-1" />
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-zinc-500 block">Carbs</label>
+                      <input type="number" bind:value={editEntryCarbs} step="0.1" class="input text-xs py-1" />
+                    </div>
+                    <div>
+                      <label class="text-[10px] text-zinc-500 block">Fat</label>
+                      <input type="number" bind:value={editEntryFat} step="0.1" class="input text-xs py-1" />
+                    </div>
+                  </div>
+                  <div class="flex gap-2">
+                    <div class="flex-1">
+                      <label class="text-[10px] text-zinc-500 block">Qty (g)</label>
+                      <input type="number" bind:value={editEntryQty} class="input text-xs py-1" />
+                    </div>
+                    <button onclick={saveEditEntry} class="btn-primary text-xs px-4 self-end">Save</button>
+                    <button onclick={() => editingEntry = null} class="text-xs text-zinc-500 hover:text-zinc-300 self-end px-2">Cancel</button>
+                  </div>
+                </div>
+              {/if}
             </div>
           {/each}
         </div>
