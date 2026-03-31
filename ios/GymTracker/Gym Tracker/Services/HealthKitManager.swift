@@ -320,17 +320,53 @@ final class HealthKitManager: @unchecked Sendable {
                 }
 
                 Task {
+                    var deletedWorkoutCount = 0
+
                     do {
-                        try await self.store.delete(workouts)
-                        print("[HealthKit] Deleted \(workouts.count) workouts")
-                        continuation.resume(returning: workouts.count)
+                        for workout in workouts {
+                            let deleted = try await self.deleteWorkoutAndSamples(workout)
+                            if deleted {
+                                deletedWorkoutCount += 1
+                            }
+                        }
+                        print("[HealthKit] Deleted \(deletedWorkoutCount) GymTracker workouts and their samples")
+                        continuation.resume(returning: deletedWorkoutCount)
                     } catch {
                         print("[HealthKit] Error deleting workouts: \(error.localizedDescription)")
-                        continuation.resume(returning: 0)
+                        continuation.resume(returning: deletedWorkoutCount)
                     }
                 }
             }
             store.execute(query)
+        }
+    }
+
+    private func deleteWorkoutAndSamples(_ workout: HKWorkout) async throws -> Bool {
+        let energySamples = try await loadEnergySamplesForDeletion(workout: workout)
+        if !energySamples.isEmpty {
+            try await store.delete(energySamples)
+        }
+        try await store.delete(workout)
+        return true
+    }
+
+    private func loadEnergySamplesForDeletion(workout: HKWorkout) async throws -> [HKSample] {
+        try await withCheckedThrowingContinuation { continuation in
+            let predicate = HKQuery.predicateForObjects(from: workout)
+            let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            let query = HKSampleQuery(
+                sampleType: energyType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: samples ?? [])
+            }
+            self.store.execute(query)
         }
     }
 }
