@@ -70,6 +70,7 @@ export interface AppSettings {
   deload: DeloadSettings;
   progression: ProgressionSettings;
   dashboardWidgets: DashboardWidget[];
+  quickChartCount: number;
   settingsMeta?: SettingsMeta;
 }
 
@@ -138,6 +139,7 @@ const defaultSettings: AppSettings = {
     { id: 'repeatLast', enabled: false },
     { id: 'pinnedCharts', enabled: false },
   ],
+  quickChartCount: 4,
   progression: {
     trainingLevel: 'intermediate',
     upperWeightIncrement: 2.5,

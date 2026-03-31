@@ -237,7 +237,7 @@
       })
       .filter((card): card is NonNullable<typeof card> => !!card)
       .sort((a, b) => b.points - a.points || b.latest - a.latest)
-      .slice(0, 4);
+      .slice(0, $settings.quickChartCount ?? 4);
   });
   let progressMetricsByExerciseId = $derived.by(() => {
     const grouped = new Map<number, ProgressMetric[]>();
@@ -1045,7 +1045,18 @@
   <!-- ── Pinned Charts ─────────────────────────────────────────────── -->
   <div class="card">
     <div class="flex items-center justify-between mb-3">
-      <h3 class="font-semibold text-zinc-200">Quick Charts</h3>
+      <div class="flex items-center gap-2">
+        <h3 class="font-semibold text-zinc-200">Quick Charts</h3>
+        <select
+          value={$settings.quickChartCount ?? 4}
+          onchange={(e) => settings.update(s => ({ ...s, quickChartCount: Number((e.target as HTMLSelectElement).value) }))}
+          class="bg-zinc-800 text-zinc-400 text-xs rounded px-1.5 py-0.5 border border-zinc-700 cursor-pointer"
+        >
+          {#each [2, 4, 6, 8, 10, 12] as n}
+            <option value={n}>{n}</option>
+          {/each}
+        </select>
+      </div>
       <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">
         Full Progress →
       </a>
