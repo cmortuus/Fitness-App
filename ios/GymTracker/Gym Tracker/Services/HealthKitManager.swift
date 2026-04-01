@@ -279,7 +279,7 @@ final class HealthKitManager: @unchecked Sendable {
 
             // Add metadata before finishing
             try await builder.addMetadata([
-                HKMetadataKeyWorkoutBrandName: "Onyx Intake",
+                HKMetadataKeyWorkoutBrandName: "Onyx Expenditure",
                 "WorkoutName": name,
                 "TotalSets": totalSets,
                 "TotalVolumeKg": totalVolume,
@@ -295,7 +295,7 @@ final class HealthKitManager: @unchecked Sendable {
         }
     }
 
-    /// Delete all GymTracker-created workouts from HealthKit
+    /// Delete workouts previously written by this app across legacy and current brand names.
     func deleteAllGymTrackerWorkouts() async -> Int {
         guard canWriteWorkouts else {
             print("[HealthKit] Cannot delete workouts — no write authorization")
@@ -303,7 +303,10 @@ final class HealthKitManager: @unchecked Sendable {
         }
 
         let workoutType = HKObjectType.workoutType()
-        let predicate = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyWorkoutBrandName, allowedValues: ["GymTracker"])
+        let predicate = HKQuery.predicateForObjects(
+            withMetadataKey: HKMetadataKeyWorkoutBrandName,
+            allowedValues: ["GymTracker", "Onyx Intake", "Onyx Expenditure"]
+        )
 
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(sampleType: workoutType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { [weak self] _, samples, error in
@@ -313,7 +316,7 @@ final class HealthKitManager: @unchecked Sendable {
                     return
                 }
 
-                print("[HealthKit] Found \(workouts.count) GymTracker workouts to delete")
+                print("[HealthKit] Found \(workouts.count) branded workouts to delete")
                 guard !workouts.isEmpty else {
                     continuation.resume(returning: 0)
                     return
@@ -329,7 +332,7 @@ final class HealthKitManager: @unchecked Sendable {
                                 deletedWorkoutCount += 1
                             }
                         }
-                        print("[HealthKit] Deleted \(deletedWorkoutCount) GymTracker workouts and their samples")
+                        print("[HealthKit] Deleted \(deletedWorkoutCount) branded workouts and their samples")
                         continuation.resume(returning: deletedWorkoutCount)
                     } catch {
                         print("[HealthKit] Error deleting workouts: \(error.localizedDescription)")
