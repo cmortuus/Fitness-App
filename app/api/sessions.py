@@ -651,6 +651,21 @@ async def update_set(
         )
 
     update_data = set_data.model_dump(exclude_unset=True)
+    if "exercise_id" in update_data:
+        exercise_id = update_data["exercise_id"]
+        if exercise_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="exercise_id cannot be null",
+            )
+        exercise_result = await db.execute(
+            select(Exercise).where(Exercise.id == exercise_id).where(_exercise_scope(user.id))
+        )
+        if exercise_result.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Exercise {exercise_id} not found",
+            )
     for field, value in update_data.items():
         # Strip timezone info — DB uses naive timestamps
         if isinstance(value, datetime) and value.tzinfo is not None:
@@ -715,8 +730,13 @@ async def update_set(
             )
 
     await db.flush()
-    await db.refresh(exercise_set)
-    return serialize_set(exercise_set)
+    refreshed_set_result = await db.execute(
+        select(ExerciseSet)
+        .options(selectinload(ExerciseSet.exercise))
+        .where(ExerciseSet.id == set_id, ExerciseSet.workout_session_id == session_id)
+    )
+    refreshed_set = refreshed_set_result.scalar_one()
+    return serialize_set(refreshed_set)
 
 
 @router.get("/{session_id}/audit", response_model=list[WorkoutSessionAuditResponse])

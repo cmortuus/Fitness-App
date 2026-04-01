@@ -132,6 +132,28 @@ class TestSessionLifecycle:
         assert data["actual_weight_kg"] == 80.0
         assert data["actual_reps"] == 10
 
+    async def test_log_set_allows_changing_exercise(self, client: AsyncClient):
+        """PATCH /sessions/{id}/sets/{set_id} can move a logged set to another visible exercise."""
+        ex = await create_exercise(client, name="incline_press", display_name="Incline Press")
+        replacement = await create_exercise(client, name="prime_press", display_name="Prime Press")
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+
+        set_id = sess["sets"][0]["id"]
+        r = await client.patch(
+            f"/api/sessions/{sess['id']}/sets/{set_id}",
+            json={
+                "exercise_id": replacement["id"],
+                "actual_weight_kg": 70.0,
+                "actual_reps": 9,
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["exercise_id"] == replacement["id"]
+        assert data["exercise_name"] == replacement["display_name"]
+
     async def test_log_set_with_partials(self, client: AsyncClient):
         """PATCH /sessions/{id}/sets/{set_id} accepts partial-rep sub_sets payloads."""
         ex = await create_exercise(client)
