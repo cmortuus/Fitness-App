@@ -60,7 +60,7 @@ export interface AppSettings {
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
   heightUnit: 'in' | 'ft' | 'cm';
-  progressionStyle: 'rep' | 'weight';
+  progressionStyle: 'rep' | 'weight' | 'double';
   branchPreference: 'main' | 'dev';
   profile: UserProfile;
   machineWeights: MachineWeights;
@@ -85,7 +85,7 @@ const defaultSettings: AppSettings = {
   },
   weightUnit: 'lbs',
   heightUnit: 'ft',
-  progressionStyle: 'rep',
+  progressionStyle: 'double',
   branchPreference: 'main',
   profile: {
     age: null,

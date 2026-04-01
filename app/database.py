@@ -10,16 +10,12 @@ from app.config import get_settings
 
 settings = get_settings()
 
-# SQLite doesn't support pool_size, check if using SQLite
-is_sqlite = "sqlite" in settings.database_url
-
-engine_kwargs = {"echo": settings.debug}
-if not is_sqlite:
-    engine_kwargs.update({
-        "pool_pre_ping": True,
-        "pool_size": 5,
-        "max_overflow": 10,
-    })
+engine_kwargs = {
+    "echo": settings.debug,
+    "pool_pre_ping": True,
+    "pool_size": 5,
+    "max_overflow": 10,
+}
 
 engine = create_async_engine(settings.database_url, **engine_kwargs)
 

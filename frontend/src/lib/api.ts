@@ -169,6 +169,7 @@ export interface Exercise {
   equipment_type: 'barbell' | 'dumbbell' | 'cable' | 'machine' | 'plate_loaded' | 'bodyweight' | 'band' | 'kettlebell' | 'other';
   is_unilateral: boolean;
   is_assisted: boolean;
+  is_prime: boolean;
   description: string | null;
   primary_muscles: string[];
   secondary_muscles: string[];
@@ -236,6 +237,7 @@ export interface PlannedExercise {
   exercise_id: number;
   sets: number;
   reps: number;
+  rep_range_top?: number;
   starting_weight_kg: number;
   progression_type: string;
   rest_seconds?: number;
@@ -343,7 +345,7 @@ export async function createSession(data: {
 export async function createSessionFromPlan(
   planId: number,
   dayNumber: number = 1,
-  overloadStyle: 'rep' | 'weight' = 'rep',
+  overloadStyle: 'rep' | 'weight' | 'double' = 'double',
   bodyWeightKg: number = 0
 ): Promise<WorkoutSession> {
   const response = await api.post(
@@ -435,6 +437,8 @@ export async function createExercise(data: {
   display_name: string;
   movement_type?: 'compound' | 'isolation';
   body_region?: 'upper' | 'lower' | 'full_body';
+  equipment_type?: string;
+  is_prime?: boolean;
   description?: string;
   primary_muscles?: string[];
   secondary_muscles?: string[];
@@ -676,7 +680,7 @@ export const MICRO_META: Record<string, { label: string; unit: string; rda: numb
 export interface FoodSearchResult {
   name: string;
   brand: string | null;
-  source: 'openfoodfacts' | 'usda' | 'custom' | 'pending' | 'community' | 'calorieninjas';
+  source: 'openfoodfacts' | 'usda' | 'custom' | 'pending' | 'community' | 'calorieninjas' | 'recipe';
   source_id: string | null;
   barcode: string | null;
   calories_per_100g: number | null;

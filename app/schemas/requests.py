@@ -61,6 +61,7 @@ class ExerciseCreate(BaseModel):
     equipment_type: str = "other"
     is_unilateral: bool = False
     is_assisted: bool = False
+    is_prime: bool = False
     description: str | None = None
     primary_muscles: list[str] = []
     secondary_muscles: list[str] = []
@@ -87,6 +88,7 @@ class ExerciseResponse(BaseModel):
     equipment_type: str = "other"
     is_unilateral: bool = False
     is_assisted:   bool = False
+    is_prime:      bool = False
     description: str | None
     primary_muscles: list[str]
     secondary_muscles: list[str]
@@ -131,6 +133,7 @@ class SetUpdate(BaseModel):
     reps_right: int | None = None
     set_type: str | None = None
     sub_sets: list | str | None = None
+    peg_weights: str | None = None  # JSON: {"peg1":kg,"peg2":kg,"peg3":kg} per side
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None
@@ -155,6 +158,7 @@ class SetResponse(BaseModel):
     reps_right: int | None = None
     set_type: str = "standard"
     sub_sets: list | str | None = None
+    peg_weights: dict | list | str | None = None
     notes: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -213,7 +217,8 @@ class WorkoutSessionAuditResponse(BaseModel):
 class PlannedExercise(BaseModel):
     exercise_id: int
     sets: int
-    reps: int
+    reps: int = 8  # bottom of rep range for double progression
+    rep_range_top: int = 12  # top of rep range for double progression
     starting_weight_kg: float
     progression_type: str = "linear"
     set_type: str = "standard"

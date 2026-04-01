@@ -25,6 +25,15 @@ def rep_bracket(reps: int) -> int:
     return 1
 
 
+def _bracket_floor(bracket: int) -> int:
+    """Return the lowest rep count in a bracket (for resetting after weight-up)."""
+    if bracket >= 3:
+        return 15
+    if bracket == 2:
+        return 10
+    return 5  # don't go below 5 for bracket 1
+
+
 def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> float:
     """Estimate the weight needed to achieve *target_reps* given that
     *weight* was lifted for *done_reps*, using the Epley 1RM formula.
@@ -162,10 +171,20 @@ def compute_overload(
     if overload_style == "weight":
         new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
         return new_weight, prior_reps
+    elif overload_style == "double":
+        # Double progression: add 1 rep per set. Weight increase is handled
+        # at the caller level when ALL sets hit rep_range_top.
+        return prior_weight, prior_reps + 1
     else:
         projected_reps = prior_reps + 1
         if rep_bracket(projected_reps) <= rep_bracket(prior_reps):
             return prior_weight, projected_reps
         else:
+            # Bracket boundary crossed — increase weight, reset reps to bracket floor
             new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-            return new_weight, prior_reps
+            # Ensure at least one minimum increment (2.5 kg) when crossing a bracket
+            if new_weight <= prior_weight:
+                new_weight = round((prior_weight + 2.5) / 2.5) * 2.5
+            # Reset reps to bottom of current bracket (e.g., 14→10 for bracket 2)
+            reset_reps = _bracket_floor(rep_bracket(prior_reps))
+            return new_weight, reset_reps

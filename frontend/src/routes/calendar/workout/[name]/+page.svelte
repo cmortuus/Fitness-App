@@ -56,14 +56,6 @@
       : weight;
   }
 
-  function setDraft(set: WorkoutSet) {
-    editDrafts[set.id] = {
-      weight: displayWeight(set.actual_weight_kg),
-      reps: set.actual_reps != null ? String(set.actual_reps) : '',
-      notes: set.notes ?? '',
-    };
-  }
-
   async function loadSessionDetail(sessionId: number) {
     if (loadingSessionIds.has(sessionId)) return;
     loadingSessionIds.add(sessionId);
@@ -74,6 +66,7 @@
       matchedSessions = matchedSessions.map((session) =>
         session.id === sessionId ? detail : session
       );
+
       const drafts = { ...editDrafts };
       for (const set of detail.sets) {
         drafts[set.id] = {

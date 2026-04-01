@@ -83,6 +83,7 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "reps_right": exercise_set.reps_right,
         "set_type": exercise_set.set_type or "standard",
         "sub_sets": json.loads(exercise_set.sub_sets) if exercise_set.sub_sets else None,
+        "peg_weights": json.loads(exercise_set.peg_weights) if exercise_set.peg_weights else None,
         "notes": exercise_set.notes,
         "started_at": exercise_set.started_at,
         "completed_at": exercise_set.completed_at,
@@ -656,7 +657,18 @@ async def update_set(
             value = value.replace(tzinfo=None)
         if field == "sub_sets" and isinstance(value, list):
             value = json.dumps(value)
+        if field == "peg_weights" and isinstance(value, (dict, list)):
+            value = json.dumps(value)
         setattr(exercise_set, field, value)
+
+    # Auto-calculate total weight from peg_weights if provided
+    if "peg_weights" in update_data and exercise_set.peg_weights:
+        try:
+            pegs = json.loads(exercise_set.peg_weights) if isinstance(exercise_set.peg_weights, str) else exercise_set.peg_weights
+            per_side = sum(pegs.get(f"peg{i}", 0) for i in range(1, 4))
+            exercise_set.actual_weight_kg = round(per_side * 2, 2)
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
     # Update session totals
     session_result = await db.execute(
@@ -808,7 +820,7 @@ async def create_session_from_plan(
     db: Annotated[AsyncSession, Depends(get_db)],
     request: Request,
     day_number: int = 1,
-    overload_style: str = "rep",
+    overload_style: str = "double",
     body_weight_kg: float = 0.0,
 ) -> dict:
     """Create a new workout session from a plan, pre-populating sets."""
@@ -970,21 +982,14 @@ async def create_session_from_plan(
             return None, None
 
         # Determine the effective planned target for the prior session's set.
-        # Priority: 1) stored planned_reps from prior set, 2) plan target (if valid),
-        # 3) actual reps as fallback (week 1 / plan has reps=0 — assume they hit target).
+        # Use the prior set's planned_reps (which includes overload progression),
+        # falling back to the plan template target, then actual reps.
         if prior_planned and prior_planned > 0:
             planned = prior_planned
         elif target_reps and target_reps > 0:
             planned = target_reps
         else:
             planned = prior_reps  # week 1 / no target: treat actual as the goal
-
-        # Epley conversion when the rep target changed between weeks (user edited plan)
-        if target_reps and target_reps > 0 and target_reps != planned and prior_weight and prior_weight > 0:
-            one_rm   = prior_weight * (1 + prior_reps / 30)
-            prior_weight = round(one_rm / (1 + target_reps / 30) / 2.5) * 2.5
-            prior_reps   = target_reps
-            planned      = target_reps
 
         is_assisted = bool(ex_model and ex_model.is_assisted)
         suggested_weight, suggested_reps = compute_overload(
@@ -1112,6 +1117,20 @@ async def create_session_from_plan(
         ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
         plan_set_type = exercise_data.get("set_type", "standard")
+        rep_range_top = exercise_data.get("rep_range_top") or 0
+
+        # Double progression: check if ALL prior sets hit the rep ceiling
+        double_weight_up = False
+        if overload_style == "double" and rep_range_top > 0:
+            prior_sets_for_ex = prior_set_data.get(exercise_id, {})
+            standard_prior = {k: v for k, v in prior_sets_for_ex.items()
+                              if v.get("set_type", "standard") in ("standard", "myo_rep", "myo_rep_match")}
+            if standard_prior:
+                all_hit_ceiling = all(
+                    (s.get("reps") or 0) >= rep_range_top
+                    for s in standard_prior.values()
+                )
+                double_weight_up = all_hit_ceiling
 
         # Track set 1's planned values so myo_rep_match sets can copy them
         set1_weight_kg = None
@@ -1131,10 +1150,26 @@ async def create_session_from_plan(
                 suggested_reps = set1_reps
                 planned_left = set1_left
                 planned_right = set1_right
+            elif double_weight_up:
+                # Double progression: all sets hit ceiling → weight up, reps reset
+                prior_sets_for_ex = prior_set_data.get(exercise_id, {})
+                prior_weight = next(
+                    (s["weight"] for s in prior_sets_for_ex.values()), None
+                )
+                if prior_weight and prior_weight > 0:
+                    weight_kg = round((prior_weight + 2.5) / 2.5) * 2.5
+                else:
+                    weight_kg = None
+                suggested_reps = reps  # reset to bottom of range
+                planned_left = None
+                planned_right = None
             else:
                 # Normal progression from prior session's corresponding set
                 weight_kg, suggested_reps, planned_left, planned_right = \
                     _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                # Double progression: cap reps at rep_range_top
+                if overload_style == "double" and rep_range_top > 0 and suggested_reps and suggested_reps > rep_range_top:
+                    suggested_reps = rep_range_top
 
             # Save set 1's values for myo_rep_match copying
             if set_num == 1:

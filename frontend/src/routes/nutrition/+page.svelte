@@ -150,6 +150,9 @@
   let newRecipeServings = $state(1);
   let newRecipeIngredients = $state<{name: string; quantity: string; unit: string; calories: string; protein: string; carbs: string; fat: string}[]>([]);
   let recipeSaving = $state(false);
+  let recipeBuilderSource = $state<'manual' | 'selection'>('manual');
+  let entrySelectionMode = $state(false);
+  let selectedEntryIds = $state<Set<number>>(new Set());
 
   async function loadRecipes() {
     try { recipes = await getRecipes(); recipesLoaded = true; } catch { recipes = []; }
@@ -186,6 +189,9 @@
         })),
       });
       newRecipeName = ''; newRecipeDesc = ''; newRecipeServings = 1; newRecipeIngredients = [];
+      recipeBuilderSource = 'manual';
+      entrySelectionMode = false;
+      selectedEntryIds = new Set();
       showRecipeBuilder = false;
       await loadRecipes();
     } catch (e) { console.error('Recipe save error:', e); }
@@ -293,6 +299,8 @@
         goalCarbs = s.goals.carbs;
         goalFat = s.goals.fat;
       }
+      entrySelectionMode = false;
+      selectedEntryIds = new Set();
     } catch (e) {
       console.error('Failed to load nutrition data:', e);
     }
@@ -327,6 +335,10 @@
     ) : []
   );
 
+  let selectedEntries = $derived(
+    allEntries.filter((entry) => selectedEntryIds.has(entry.id))
+  );
+
   // ─── Add entry ────────────────────────────────────────────────────────────
   function openAddModal() {
     activeTab = 'search';
@@ -344,6 +356,47 @@
     saveAsCustom = false;
     showFullMacros = false;
     editingFood = null;
+    showRecipeBuilder = false;
+    selectedRecipe = null;
+    recipeBuilderSource = 'manual';
+    showAddModal = true;
+  }
+
+  function toggleEntrySelection(id: number) {
+    const next = new Set(selectedEntryIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    selectedEntryIds = next;
+  }
+
+  function cancelEntrySelection() {
+    entrySelectionMode = false;
+    selectedEntryIds = new Set();
+  }
+
+  function startRecipeFromSelectedEntries() {
+    if (selectedEntries.length === 0) return;
+    const sameMeal = selectedEntries.every((entry) => entry.meal === selectedEntries[0].meal);
+    const mealLabel = sameMeal
+      ? `${selectedEntries[0].meal.charAt(0).toUpperCase()}${selectedEntries[0].meal.slice(1)}`
+      : 'Mixed Meal';
+
+    newRecipeName = `${mealLabel} Recipe`;
+    newRecipeDesc = `Created from ${selectedEntries.length} logged food${selectedEntries.length === 1 ? '' : 's'} on ${formatDate(selectedDate)}`;
+    newRecipeServings = 1;
+    newRecipeIngredients = selectedEntries.map((entry) => ({
+      name: entry.name,
+      quantity: entry.quantity_g > 0 ? String(Math.round(entry.quantity_g * 100) / 100) : '1',
+      unit: entry.quantity_g > 0 ? 'g' : 'serving',
+      calories: String(Math.round(entry.calories * 100) / 100),
+      protein: String(Math.round(entry.protein * 100) / 100),
+      carbs: String(Math.round(entry.carbs * 100) / 100),
+      fat: String(Math.round(entry.fat * 100) / 100),
+    }));
+    recipeBuilderSource = 'selection';
+    activeTab = 'recipes';
+    showRecipeBuilder = true;
+    selectedRecipe = null;
     showAddModal = true;
   }
 
@@ -1034,8 +1087,33 @@
     <!-- ─── Food log ─────────────────────────────────────────────────────── -->
     <div class="card !p-0 overflow-hidden">
       <div class="flex items-center justify-between px-4 py-3">
-        <h3 class="font-semibold text-white">Food Log</h3>
-        <span class="text-xs text-zinc-500">{allEntries.length} item{allEntries.length !== 1 ? 's' : ''}</span>
+        <div>
+          <h3 class="font-semibold text-white">Food Log</h3>
+          <span class="text-xs text-zinc-500">
+            {allEntries.length} item{allEntries.length !== 1 ? 's' : ''}
+            {#if entrySelectionMode}
+              · {selectedEntries.length} selected
+            {/if}
+          </span>
+        </div>
+        <div class="flex items-center gap-2">
+          {#if entrySelectionMode}
+            <button onclick={cancelEntrySelection}
+                    class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">
+              Cancel
+            </button>
+            <button onclick={startRecipeFromSelectedEntries}
+                    disabled={selectedEntries.length === 0}
+                    class="rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed bg-primary-600 text-white hover:bg-primary-500">
+              Make Recipe
+            </button>
+          {:else if allEntries.length > 0}
+            <button onclick={() => { entrySelectionMode = true; selectedEntryIds = new Set(); }}
+                    class="text-xs text-primary-400 hover:text-primary-300 font-medium transition-colors">
+              Select
+            </button>
+          {/if}
+        </div>
       </div>
 
       {#if allEntries.length > 0}
@@ -1043,28 +1121,45 @@
           {#each allEntries as entry}
             <div class="border-b border-zinc-800/30 last:border-b-0">
               <div class="flex items-center justify-between px-4 py-2.5">
-                <button onclick={() => startEditEntry(entry)} class="flex-1 min-w-0 text-left">
-                  <p class="text-sm text-white truncate">{entry.name}</p>
-                  <p class="text-xs text-zinc-500">{entry.quantity_g}g</p>
-                </button>
+                {#if entrySelectionMode}
+                  <button
+                    onclick={() => toggleEntrySelection(entry.id)}
+                    class="flex flex-1 items-center gap-3 min-w-0 text-left"
+                  >
+                    <div class="w-5 h-5 rounded-md border flex items-center justify-center text-xs transition-colors {selectedEntryIds.has(entry.id) ? 'border-primary-500 bg-primary-500 text-white' : 'border-zinc-700 text-transparent'}">
+                      ✓
+                    </div>
+                    <div class="min-w-0">
+                      <p class="text-sm text-white truncate">{entry.name}</p>
+                      <p class="text-xs text-zinc-500">{entry.quantity_g}g · {entry.meal}</p>
+                    </div>
+                  </button>
+                {:else}
+                  <button onclick={() => startEditEntry(entry)} class="flex-1 min-w-0 text-left">
+                    <p class="text-sm text-white truncate">{entry.name}</p>
+                    <p class="text-xs text-zinc-500">{entry.quantity_g}g</p>
+                  </button>
+                {/if}
                 <div class="flex items-center gap-2 shrink-0">
                   <div class="text-right">
                     <p class="text-sm font-medium text-white">{Math.round(entry.calories)} cal</p>
                     <p class="text-[10px] text-zinc-500">{Math.round(entry.protein)}g P</p>
                   </div>
-                  <button onclick={() => startEditEntry(entry)}
-                          class="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded transition-colors text-xs"
-                          title="Edit entry">
-                    ✎
-                  </button>
-                  <button onclick={() => removeEntry(entry.id)}
-                          class="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors text-xs"
-                          title="Delete entry">
-                    ✕
-                  </button>
+                  {#if !entrySelectionMode}
+                    <button onclick={() => startEditEntry(entry)}
+                            class="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-blue-400 hover:bg-zinc-800 rounded transition-colors text-xs"
+                            title="Edit entry">
+                      ✎
+                    </button>
+                    <button onclick={() => removeEntry(entry.id)}
+                            class="w-7 h-7 flex items-center justify-center text-zinc-500 hover:text-red-400 hover:bg-zinc-800 rounded transition-colors text-xs"
+                            title="Delete entry">
+                      ✕
+                    </button>
+                  {/if}
                 </div>
               </div>
-              {#if editingEntry?.id === entry.id}
+              {#if !entrySelectionMode && editingEntry?.id === entry.id}
                 <div class="px-4 pb-3 space-y-2 border-t border-zinc-800/30 bg-zinc-900/50">
                   <div class="grid grid-cols-4 gap-2 pt-2">
                     <div>
@@ -1608,6 +1703,13 @@
               <!-- Recipe builder -->
               <div class="p-4 space-y-3 overflow-y-auto">
                 <button onclick={() => showRecipeBuilder = false} class="text-xs text-zinc-500 hover:text-zinc-300">← Back</button>
+                {#if recipeBuilderSource === 'selection'}
+                  <div class="rounded-xl border border-primary-500/20 bg-primary-500/10 px-3 py-2">
+                    <p class="text-xs text-primary-300">
+                      Prefilled from {selectedEntries.length} selected food log item{selectedEntries.length !== 1 ? 's' : ''}. Adjust anything below before saving.
+                    </p>
+                  </div>
+                {/if}
                 <input type="text" bind:value={newRecipeName} placeholder="Recipe name *" class="input" />
                 <input type="text" bind:value={newRecipeDesc} placeholder="Description (optional)" class="input" />
                 <div class="flex items-center gap-2">
