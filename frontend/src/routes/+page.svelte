@@ -161,6 +161,11 @@
     return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
+  function workoutHistoryHref(name: string | null): string | null {
+    if (!name?.trim()) return null;
+    return `/calendar/workout/${encodeURIComponent(name.trim())}`;
+  }
+
   // ── Quick stats ────────────────────────────────────────────────────────
   let weeklyVolume = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
@@ -1176,10 +1181,19 @@
       {#if recentSessions.length > 0}
         <div class="space-y-1">
           {#each recentSessions.slice(0, 3) as s}
-            <div class="flex items-center justify-between py-1.5 text-sm">
-              <span class="text-zinc-300 truncate">{s.name ?? 'Workout'}</span>
-              <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
-            </div>
+            {@const historyHref = workoutHistoryHref(s.name)}
+            {#if historyHref}
+              <a href={historyHref}
+                 class="flex items-center justify-between py-1.5 text-sm rounded-lg hover:bg-zinc-800/60 px-2 -mx-2 transition-colors">
+                <span class="text-zinc-300 truncate hover:text-white">{s.name ?? 'Workout'}</span>
+                <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
+              </a>
+            {:else}
+              <div class="flex items-center justify-between py-1.5 text-sm">
+                <span class="text-zinc-300 truncate">{s.name ?? 'Workout'}</span>
+                <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
+              </div>
+            {/if}
           {/each}
         </div>
       {/if}
@@ -1198,16 +1212,31 @@
       </div>
       <div class="space-y-1">
         {#each recentSessions as s}
-          <div class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0">
-            <div>
-              <p class="text-sm font-medium text-zinc-200">{s.name ?? 'Workout'}</p>
-              <p class="text-xs text-zinc-500 mt-0.5">{fmtDate(s.date)}</p>
+          {@const historyHref = workoutHistoryHref(s.name)}
+          {#if historyHref}
+            <a href={historyHref}
+               class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0 rounded-lg hover:bg-zinc-800/40 px-2 -mx-2 transition-colors">
+              <div>
+                <p class="text-sm font-medium text-zinc-200 hover:text-white">{s.name ?? 'Workout'}</p>
+                <p class="text-xs text-zinc-500 mt-0.5">{fmtDate(s.date)}</p>
+              </div>
+              <div class="text-right shrink-0 ml-4">
+                <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
+                <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
+              </div>
+            </a>
+          {:else}
+            <div class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0">
+              <div>
+                <p class="text-sm font-medium text-zinc-200">{s.name ?? 'Workout'}</p>
+                <p class="text-xs text-zinc-500 mt-0.5">{fmtDate(s.date)}</p>
+              </div>
+              <div class="text-right shrink-0 ml-4">
+                <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
+                <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
+              </div>
             </div>
-            <div class="text-right shrink-0 ml-4">
-              <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
-              <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
-            </div>
-          </div>
+          {/if}
         {/each}
       </div>
     </div>
