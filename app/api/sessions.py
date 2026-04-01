@@ -908,9 +908,27 @@ async def create_session_from_plan(
     )
     existing_planned = planned_result.scalars().first()
     if existing_planned:
-        # Return the existing PLANNED session so the client can /start it
-        existing_planned = await _get_session_with_sets(db, existing_planned.id, user_id=user.id)
-        return serialize_session(existing_planned)
+        # Check whether this cached PLANNED session has meaningful prefill data.
+        # If the session was created before week-1 was completed (no prior data
+        # existed at that time) all planned_weight_kg values will be NULL — the
+        # session is stale and must be regenerated so progressive overload is
+        # computed from the now-available prior session.
+        sets_result = await db.execute(
+            select(ExerciseSet).where(ExerciseSet.workout_session_id == existing_planned.id)
+        )
+        existing_sets = sets_result.scalars().all()
+        has_prefill = any(s.planned_weight_kg is not None for s in existing_sets)
+        if has_prefill:
+            # Return the existing PLANNED session so the client can /start it
+            existing_planned = await _get_session_with_sets(db, existing_planned.id, user_id=user.id)
+            return serialize_session(existing_planned)
+        else:
+            # Stale session — delete its sets then the session itself so we fall
+            # through and regenerate with up-to-date overload suggestions.
+            for s in existing_sets:
+                await db.delete(s)
+            await db.delete(existing_planned)
+            await db.flush()
 
     # ── Look up most recent prior session for the same plan + same day ────────
     # Require at least one set with actual_reps filled in — this is the real

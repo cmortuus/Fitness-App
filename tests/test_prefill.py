@@ -469,6 +469,98 @@ class TestEpleyRounding:
             assert w % 2.5 == 0, f"Weight suggestion {w} is not a multiple of 2.5"
 
 
+# ── Stale planned-session regeneration ───────────────────────────────────────
+
+class TestStalePlannedSessionRegeneration:
+    """
+    Reproduces the week-2 prefill bug:
+      1. User opens the app *before* completing week 1 → a PLANNED session is
+         created with all planned_weight_kg = NULL (no prior data yet).
+      2. User completes week 1 (logs reps/weights).
+      3. User opens the app again → the stale PLANNED session (still NULL) was
+         being returned, hiding the progressive overload suggestions.
+
+    The fix: when existing_planned has all-NULL planned_weight_kg, delete it
+    and regenerate with up-to-date prior data.
+    """
+
+    async def test_stale_planned_session_regenerated_after_week1_complete(
+        self, client: AsyncClient
+    ):
+        """Stale PLANNED session (no prefill) is discarded once week 1 is logged."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=2, reps=8)
+
+        # ── Step 1: open the plan before doing any workouts.
+        # This creates a PLANNED session with NULL planned_weight_kg.
+        stale = await start_session_from_plan(client, plan["id"])
+        assert all(s["planned_weight_kg"] is None for s in stale["sets"]), \
+            "Pre-week-1 session must have no prefill"
+
+        # ── Step 2: complete week 1 by starting the stale session and logging sets.
+        # The stale PLANNED session is still in the DB; we start it to make it
+        # IN_PROGRESS, log real weights/reps, then let start_session_from_plan
+        # auto-complete it when we open week 2.
+        w1_start = await client.post(f"/api/sessions/{stale['id']}/start")
+        assert w1_start.status_code == 200, w1_start.text
+        w1_data = w1_start.json()
+        for s in w1_data["sets"]:
+            await log_set(client, w1_data["id"], s["id"], 80.0, 8)
+
+        # ── Step 3: now open week 2. The stale session (which had NULL prefill)
+        # has been completed; from-plan should create a NEW session with
+        # proper overload suggestions derived from the week-1 data.
+        w2 = await start_session_from_plan(client, plan["id"])
+        weights = [s["planned_weight_kg"] for s in w2["sets"]]
+        reps = [s["planned_reps"] for s in w2["sets"]]
+        assert all(w is not None for w in weights), \
+            f"Week 2 must have prefill after week 1 completion, got weights={weights}"
+        assert all(r is not None for r in reps), \
+            f"Week 2 must have rep suggestions, got reps={reps}"
+        # Progressive overload: reps should advance (8→9 for rep-first style)
+        assert all(r >= 8 for r in reps), \
+            f"Suggested reps should be >= 8, got {reps}"
+
+    async def test_stale_planned_session_with_prefill_is_reused(
+        self, client: AsyncClient
+    ):
+        """A PLANNED session that already has prefill data is NOT regenerated."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=2, reps=8)
+
+        # Complete week 1
+        w1 = await start_session_from_plan(client, plan["id"])
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 60.0, 8)
+        cmp = await client.post(f"/api/sessions/{w1['id']}/complete")
+        assert cmp.status_code == 200, cmp.text
+
+        # Call from-plan directly (without /start) to create a PLANNED session
+        # with real prefill.  Using the raw endpoint mirrors the real client flow
+        # where from-plan is called first, then /start is called separately.
+        r1 = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep"},
+        )
+        assert r1.status_code == 201, r1.text
+        w2_first = r1.json()
+        assert all(s["planned_weight_kg"] is not None for s in w2_first["sets"]), \
+            "Week 2 first call should have prefill"
+        first_weight = w2_first["sets"][0]["planned_weight_kg"]
+
+        # Second call (without /start) → should reuse the same PLANNED session
+        r2 = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep"},
+        )
+        assert r2.status_code == 201, r2.text
+        w2_second = r2.json()
+        assert w2_second["id"] == w2_first["id"], \
+            "Second call should return the same PLANNED session"
+        assert w2_second["sets"][0]["planned_weight_kg"] == first_weight, \
+            "Prefill weight should be unchanged on reuse"
+
+
 # ── Multi-week progression chain ──────────────────────────────────────────────
 
 class TestMultiWeekChain:
