@@ -3335,7 +3335,8 @@
     </div><!-- /scrollable -->
 
     <!-- ─── Rest timer banner (always visible) ──────────────────────────────── -->
-    <div class="sticky bottom-0 z-30 flex items-center px-4 {restActive ? 'py-2.5' : 'py-2'} border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
+    <div class="sticky bottom-0 z-30 flex items-center px-4 {restActive ? 'py-2.5' : 'py-2'} border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}"
+         style="padding-bottom: max({restActive ? '0.625rem' : '0.5rem'}, env(safe-area-inset-bottom, 0px))">
       {#if restActive}
         <div class="flex items-center gap-3 flex-1">
           <div class="w-7 h-7 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
