@@ -15,6 +15,9 @@
   let rirPlan = $state<WorkoutPlan | null>(null);
   let rirOverridesDraft = $state<PlanRirOverrides>({ plan: null, muscles: {}, exercises: {} });
   let savingRir = $state(false);
+  let showGlobalRirModal = $state(false);
+  let globalRirDelta = $state<1 | 2>(1);
+  let applyingGlobalRir = $state(false);
   let recommendationsByPlan = $state<Record<number, PlanRecommendation[]>>({});
   let loadingRecommendations = $state<Record<number, boolean>>({});
   let applyingRecommendation = $state<string | null>(null);
@@ -142,6 +145,15 @@
     rirOverridesDraft = { plan: null, muscles: {}, exercises: {} };
   }
 
+  function openGlobalRirModal() {
+    globalRirDelta = 1;
+    showGlobalRirModal = true;
+  }
+
+  function closeGlobalRirModal() {
+    showGlobalRirModal = false;
+  }
+
   function getPlanMuscles(plan: WorkoutPlan): string[] {
     const muscles = new Set<string>();
     for (const day of plan.days) {
@@ -204,6 +216,33 @@
       showError('Failed to save RIR overrides.');
     } finally {
       savingRir = false;
+    }
+  }
+
+  async function applyGlobalRirBackoff() {
+    if (activePlans.length === 0) return;
+    applyingGlobalRir = true;
+    try {
+      const updatedPlans = await Promise.all(
+        activePlans.map(async (plan) => {
+          const currentPlanRir = plan.rir_overrides?.plan ?? 0;
+          const nextPlanRir = Math.min(5, Math.max(0, currentPlanRir + globalRirDelta));
+          return updatePlanRirOverrides(plan.id, {
+            plan: nextPlanRir,
+            muscles: { ...(plan.rir_overrides?.muscles ?? {}) },
+            exercises: { ...(plan.rir_overrides?.exercises ?? {}) },
+          });
+        })
+      );
+
+      const updatedById = new Map(updatedPlans.map((plan) => [plan.id, plan]));
+      localPlans = localPlans.map((plan) => updatedById.get(plan.id) ?? plan);
+      workoutPlans.set(localPlans);
+      closeGlobalRirModal();
+    } catch (error) {
+      showError('Failed to apply the global RIR backoff.');
+    } finally {
+      applyingGlobalRir = false;
     }
   }
 
@@ -331,7 +370,12 @@
 
   <div class="flex items-center justify-between">
     <h2 class="text-2xl font-bold">Workout Plans</h2>
-    <button onclick={() => goto('/plans/create')} class="btn-primary">+ New Plan</button>
+    <div class="flex items-center gap-2">
+      {#if activePlans.length > 0}
+        <button onclick={openGlobalRirModal} class="btn-secondary">Global RIR Backoff</button>
+      {/if}
+      <button onclick={() => goto('/plans/create')} class="btn-primary">+ New Plan</button>
+    </div>
   </div>
 
   <!-- Active Plans -->
@@ -651,6 +695,54 @@
         <button onclick={closeRirModal} class="btn-secondary">Cancel</button>
         <button onclick={saveRirOverrides} class="btn-primary" disabled={savingRir}>
           {savingRir ? 'Saving…' : 'Save RIR Targets'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
+{#if showGlobalRirModal}
+  <div class="fixed inset-0 bg-black/80 z-50 flex items-end sm:items-center justify-center">
+    <div class="bg-zinc-900 w-full sm:max-w-lg sm:rounded-2xl rounded-t-2xl border border-white/8 shadow-2xl">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-zinc-800">
+        <div>
+          <h3 class="font-semibold text-white">Global RIR Backoff</h3>
+          <p class="text-xs text-zinc-500 mt-0.5">Apply extra reps in reserve to every active plan at once.</p>
+        </div>
+        <button onclick={closeGlobalRirModal} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+
+      <div class="px-4 py-4 space-y-4">
+        <p class="text-sm text-zinc-300">
+          This raises the whole-plan RIR target across {activePlans.length} active {activePlans.length === 1 ? 'plan' : 'plans'} so next week keeps the same rep range but uses a lighter load.
+        </p>
+
+        <div class="grid grid-cols-2 gap-3">
+          {#each [1, 2] as delta}
+            <button
+              onclick={() => globalRirDelta = delta as 1 | 2}
+              class="rounded-xl border px-4 py-4 text-left transition-colors
+                {globalRirDelta === delta
+                  ? 'border-primary-500 bg-primary-500/15 text-white'
+                  : 'border-zinc-800 bg-zinc-800/50 text-zinc-300 hover:border-zinc-700'}"
+            >
+              <p class="text-sm font-semibold">+{delta} RIR</p>
+              <p class="text-xs text-zinc-500 mt-1">Back off effort across all active plans.</p>
+            </button>
+          {/each}
+        </div>
+
+        <div class="rounded-xl border border-zinc-800 bg-zinc-950/70 px-3 py-3">
+          <p class="text-xs text-zinc-400">
+            Existing muscle and exercise-specific overrides are preserved. This changes the whole-plan fallback target on each active plan.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-end gap-3 px-4 py-4 border-t border-zinc-800">
+        <button onclick={closeGlobalRirModal} class="btn-secondary">Cancel</button>
+        <button onclick={applyGlobalRirBackoff} class="btn-primary" disabled={applyingGlobalRir}>
+          {applyingGlobalRir ? 'Applying…' : `Apply +${globalRirDelta} RIR`}
         </button>
       </div>
     </div>
