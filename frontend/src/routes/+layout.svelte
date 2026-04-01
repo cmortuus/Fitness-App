@@ -234,8 +234,8 @@
     </div>
   {/if}
 
-  <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
-  <nav aria-label="Mobile navigation" class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
+  <!-- ── Bottom nav (mobile only) — hidden during active workout so it doesn't cover the rest timer ── -->
+  <nav aria-label="Mobile navigation" class="bottom-nav md:hidden" class:hidden={keyboardOpen || $page.url.pathname.startsWith('/workout/active')}>
     {#each mobileNavItems as item}
       <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
         <span class="text-xl leading-none">{item.icon}</span>
