@@ -651,6 +651,19 @@ async def update_set(
         )
 
     update_data = set_data.model_dump(exclude_unset=True)
+    if "exercise_id" in update_data and update_data["exercise_id"] is not None:
+        replacement_result = await db.execute(
+            select(Exercise).where(
+                Exercise.id == update_data["exercise_id"],
+                _exercise_scope(user.id),
+            )
+        )
+        replacement = replacement_result.scalar_one_or_none()
+        if replacement is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Exercise {update_data['exercise_id']} not found",
+            )
     for field, value in update_data.items():
         # Strip timezone info — DB uses naive timestamps
         if isinstance(value, datetime) and value.tzinfo is not None:
