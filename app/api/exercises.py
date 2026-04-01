@@ -124,6 +124,53 @@ async def _replace_exercise_in_sessions(
     return len(sets)
 
 
+async def _remove_exercise_from_plans(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    exercise_id: int,
+) -> int:
+    updated = 0
+    result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.user_id == user_id))
+    for plan in result.scalars().all():
+        try:
+            planned_data = json.loads(plan.planned_exercises) if plan.planned_exercises else {}
+        except (json.JSONDecodeError, TypeError):
+            planned_data = {}
+        changed = False
+        for day in planned_data.get("days", []):
+            exercises = day.get("exercises", [])
+            filtered = [exercise for exercise in exercises if exercise.get("exercise_id") != exercise_id]
+            if len(filtered) != len(exercises):
+                day["exercises"] = filtered
+                changed = True
+        if changed:
+            plan.planned_exercises = json.dumps(planned_data)
+            updated += 1
+    return updated
+
+
+async def _delete_planned_session_sets(
+    db: AsyncSession,
+    *,
+    user_id: int,
+    exercise_id: int,
+) -> int:
+    result = await db.execute(
+        select(ExerciseSet)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.user_id == user_id,
+            WorkoutSession.status == WorkoutStatus.PLANNED,
+            ExerciseSet.exercise_id == exercise_id,
+        )
+    )
+    sets = result.scalars().all()
+    for exercise_set in sets:
+        await db.delete(exercise_set)
+    return len(sets)
+
+
 @router.get("/", response_model=list[ExerciseResponse])
 async def list_exercises(
     user: Annotated[User, Depends(get_current_user)],
@@ -397,9 +444,15 @@ async def delete_exercise(
             detail=f"Custom exercise {exercise_id} not found",
         )
 
-    # Check if exercise is used in any sets
+    # Block deletion if the exercise has been used beyond draft/planned work.
     sets_result = await db.execute(
-        select(ExerciseSet).where(ExerciseSet.exercise_id == exercise_id)
+        select(ExerciseSet)
+        .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+        .where(
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.status != WorkoutStatus.PLANNED,
+            ExerciseSet.exercise_id == exercise_id,
+        )
     )
     sets = sets_result.scalars().all()
 
@@ -408,6 +461,11 @@ async def delete_exercise(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Cannot delete exercise '{ex.display_name}' - it is used in {len(sets)} workout set(s)",
         )
+
+    # Remove future references so the exercise can be safely cleaned up.
+    await _remove_exercise_from_plans(db, user_id=user.id, exercise_id=exercise_id)
+    await _delete_planned_session_sets(db, user_id=user.id, exercise_id=exercise_id)
+    await db.flush()
 
     # Delete the exercise
     await db.execute(delete(Exercise).where(Exercise.id == exercise_id))

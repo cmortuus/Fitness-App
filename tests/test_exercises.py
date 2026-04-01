@@ -1,9 +1,12 @@
 """Tests for the exercises CRUD API."""
+import json
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
 
 from app.models.exercise import Exercise
+from app.models.workout import ExerciseSet, WorkoutPlan
 from tests.conftest import create_exercise, create_plan, start_session_from_plan, log_set
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
@@ -106,6 +109,28 @@ class TestExercisesCRUD:
 
         r = await client.delete(f"/api/exercises/{ex['id']}")
         assert r.status_code == 409
+
+    async def test_delete_exercise_used_only_in_planned_session(self, client: AsyncClient, db):
+        """DELETE removes planned-only references and succeeds."""
+        ex = await create_exercise(client, name="leg_press", display_name="Leg Press")
+        plan = await create_plan(client, ex["id"], sets=2, reps=10)
+
+        planned = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
+        )
+        assert planned.status_code == 201, planned.text
+
+        r = await client.delete(f"/api/exercises/{ex['id']}")
+        assert r.status_code == 204
+
+        stored_plan_result = await db.execute(select(WorkoutPlan).where(WorkoutPlan.id == plan["id"]))
+        stored_plan = stored_plan_result.scalar_one()
+        planned_data = json.loads(stored_plan.planned_exercises)
+        assert planned_data["days"][0]["exercises"] == []
+
+        set_rows = await db.execute(select(ExerciseSet).where(ExerciseSet.exercise_id == ex["id"]))
+        assert set_rows.scalars().all() == []
 
     async def test_exercise_history_empty(self, client: AsyncClient):
         """GET /exercises/{id}/history returns [] when no completed sets."""
