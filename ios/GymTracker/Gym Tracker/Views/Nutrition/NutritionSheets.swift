@@ -548,13 +548,8 @@ struct AddFoodView: View {
 
     private func lookupBarcode(_ barcode: String) async {
         do {
-            let results: [FoodSearchResult] = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
-            if let food = results.first {
-                await logFood(food)
-            } else {
-                pendingBarcode = barcode
-                showLabelScanner = true
-            }
+            let food: FoodSearchResult = try await APIClient.shared.get("/nutrition/barcode/\(barcode)")
+            await logFood(food)
         } catch {
             pendingBarcode = barcode
             showLabelScanner = true
