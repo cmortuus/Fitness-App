@@ -78,7 +78,7 @@ async def test_multi_user_promotion(client: AsyncClient):
             assert r2.status_code == 201
             data = r2.json()
             assert data["source"] == "community"
-            assert data["calories_per_100g"] == 410.0
+            assert data["calories_per_100g"] == 419.0
             assert data["protein_per_100g"] == 31.0
         finally:
             await client2.aclose()

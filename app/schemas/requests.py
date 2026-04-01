@@ -339,6 +339,17 @@ class FoodItemCreate(BaseModel):
     serving_label: str | None = None
     micronutrients: dict | None = None
 
+    @model_validator(mode="after")
+    def align_calories_with_macros(self) -> "FoodItemCreate":
+        macro_calories = round(
+            self.protein_per_100g * 4
+            + self.carbs_per_100g * 4
+            + self.fat_per_100g * 9,
+            1,
+        )
+        self.calories_per_100g = macro_calories
+        return self
+
 
 class FoodItemUpdate(FoodItemCreate):
     pass

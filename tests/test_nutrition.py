@@ -76,9 +76,57 @@ async def test_update_custom_food(client, db):
     payload = response.json()
     assert payload["name"] == "Chicken Breast, Cooked"
     assert payload["barcode"] == "123456789012"
-    assert payload["calories_per_100g"] == 180
+    assert payload["calories_per_100g"] == 168
     assert payload["serving_size_g"] == 112
     assert payload["serving_label"] == "4 oz"
+
+
+async def test_create_custom_food_aligns_calories_to_macros(client):
+    response = await client.post("/api/nutrition/foods", json={
+        "name": "Macro Match Bar",
+        "calories_per_100g": 999,
+        "protein_per_100g": 20,
+        "carbs_per_100g": 30,
+        "fat_per_100g": 10,
+        "serving_size_g": 50,
+        "serving_label": "1 bar",
+    })
+    assert response.status_code == 201, response.text
+
+    payload = response.json()
+    assert payload["calories_per_100g"] == 290
+
+
+async def test_update_custom_food_recomputes_calories_from_macros(client, db):
+    food = FoodItem(
+        user_id=1,
+        name="Protein Oats",
+        source="custom",
+        is_custom=True,
+        calories_per_100g=999,
+        protein_per_100g=10,
+        carbs_per_100g=10,
+        fat_per_100g=10,
+        serving_size_g=100,
+        serving_label="100g",
+    )
+    db.add(food)
+    await db.commit()
+    await db.refresh(food)
+
+    response = await client.put(f"/api/nutrition/foods/{food.id}", json={
+        "name": "Protein Oats",
+        "brand": None,
+        "barcode": None,
+        "calories_per_100g": 10,
+        "protein_per_100g": 25,
+        "carbs_per_100g": 40,
+        "fat_per_100g": 5,
+        "serving_size_g": 100,
+        "serving_label": "100g",
+    })
+    assert response.status_code == 200, response.text
+    assert response.json()["calories_per_100g"] == 305
 
 
 async def test_search_prioritizes_matching_recipes(client, db, monkeypatch):
