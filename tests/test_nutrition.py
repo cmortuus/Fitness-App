@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 
-import pytest
 import app.api.nutrition as nutrition_api
 from app.api.nutrition import _search_match_score
 from app.api.food_search import _relevance_score
