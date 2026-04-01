@@ -5,6 +5,7 @@ import HealthKit
 
 enum SettingsKey {
     static let branchPreference    = "branchPreference"
+    static let themePreference     = "themePreference"
     static let weightUnit          = "weightUnit"
     static let heightUnit          = "heightUnit"
     static let heightInches        = "heightInches"
@@ -77,6 +78,7 @@ private func normalizedActivityLevel(_ value: Double) -> Double {
 /// JSON structure matching the web app's settings format for cross-platform sync.
 struct SettingsJSON: Codable {
     var branchPreference: String?
+    var themePreference: String?
     var weightUnit: String?
     var heightUnit: String?
     var progressionStyle: String?
@@ -118,6 +120,7 @@ enum SettingsSync {
             let ud = UserDefaults.standard
 
             if let v = remote.branchPreference { ud.set(v, forKey: SettingsKey.branchPreference) }
+            if let v = remote.themePreference { ud.set(v, forKey: SettingsKey.themePreference) }
             if let v = remote.weightUnit { ud.set(v, forKey: SettingsKey.weightUnit) }
             if let v = remote.heightUnit { ud.set(v, forKey: SettingsKey.heightUnit) }
             if let v = remote.progressionStyle { ud.set(v, forKey: SettingsKey.progressionStyle) }
@@ -217,6 +220,7 @@ enum SettingsSync {
 
         let settings = SettingsJSON(
             branchPreference: ud.string(forKey: SettingsKey.branchPreference) ?? "main",
+            themePreference: ud.string(forKey: SettingsKey.themePreference) ?? "dark",
             weightUnit: ud.string(forKey: SettingsKey.weightUnit) ?? "lbs",
             heightUnit: normalizedHeightUnit(ud.string(forKey: SettingsKey.heightUnit)),
             progressionStyle: ud.string(forKey: SettingsKey.progressionStyle) ?? "rep",
@@ -274,6 +278,7 @@ struct SettingsView: View {
     // MARK: @AppStorage — all settings
 
     @AppStorage(SettingsKey.weightUnit) private var weightUnit: String = "lbs"
+    @AppStorage(SettingsKey.themePreference) private var themePreference: String = "dark"
     @AppStorage(SettingsKey.heightUnit) private var heightUnit: String = "imperial_split"
     @AppStorage(SettingsKey.heightInches) private var heightInches: Double = 67
     @AppStorage(SettingsKey.sex) private var sex: String = "male"
@@ -460,6 +465,12 @@ struct SettingsView: View {
 
     private var unitsSection: some View {
         Section("Units") {
+            Picker("Appearance", selection: $themePreference) {
+                Text("Dark").tag("dark")
+                Text("Light").tag("light")
+            }
+            .pickerStyle(.segmented)
+
             Picker("Weight Unit", selection: $weightUnit) {
                 Text("lbs").tag("lbs")
                 Text("kg").tag("kg")
