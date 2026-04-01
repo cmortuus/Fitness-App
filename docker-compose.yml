@@ -31,6 +31,7 @@ services:
 
   # Main (stable) branch
   main:
+    image: fitness-app-main
     build:
       context: .
       dockerfile: Dockerfile
@@ -47,6 +48,7 @@ services:
 
   # Dev branch
   dev:
+    image: fitness-app-dev
     build:
       context: .
       dockerfile: Dockerfile

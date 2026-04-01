@@ -185,19 +185,24 @@ docker_deploy() {
   log "Pulling latest code..."
   git fetch origin
 
-  if [ "$target" = "dev" ]; then
-    log "Updating dev branch only..."
-    git fetch origin dev
-
+  # Helper: build dev image from origin/dev without checking out the branch
+  build_dev_image() {
     log "Rebuilding dev container..."
     local tmpdir
     tmpdir=$(mktemp -d)
     git archive origin/dev | tar -x -C "$tmpdir"
-    docker build -t fitness-app-dev "$tmpdir"
+    # Copy shared files that might not be on dev yet (nginx, docker-compose, etc.)
+    cp -f "$APP_DIR/docker-compose.yml" "$tmpdir/" 2>/dev/null || true
+    docker build -t fitness-app-dev -f "$tmpdir/Dockerfile" "$tmpdir"
     rm -rf "$tmpdir"
+  }
 
-    # Stop old container, then recreate with the freshly built image
-    docker compose stop dev
+  if [ "$target" = "dev" ]; then
+    log "Updating dev branch only..."
+    git fetch origin dev
+
+    build_dev_image
+
     docker compose up -d --no-build --force-recreate dev
     docker_health_check_async dev
     return
@@ -208,7 +213,7 @@ docker_deploy() {
 
     log "Rebuilding main container..."
     docker compose build main
-    docker compose up -d main
+    docker compose up -d --no-build --force-recreate main
     docker_health_check_async main
     return
   else
@@ -219,12 +224,7 @@ docker_deploy() {
     log "Rebuilding main container..."
     docker compose build main
 
-    log "Rebuilding dev container..."
-    local tmpdir
-    tmpdir=$(mktemp -d)
-    git archive origin/dev | tar -x -C "$tmpdir"
-    docker build -t fitness-app-dev "$tmpdir"
-    rm -rf "$tmpdir"
+    build_dev_image
 
     docker compose up -d --no-build --force-recreate
   fi
@@ -426,12 +426,14 @@ watch_and_reload() {
 
     if [ "$cur_main" != "$last_main" ]; then
       changed_main=true
-      log "main branch changed: ${last_main:0:7} → ${cur_main:0:7}"
+      log "main changed: ${last_main:0:7} → ${cur_main:0:7}"
+      log "  $(git log --oneline ${last_main}..${cur_main} 2>/dev/null | head -5)"
     fi
 
     if [ "$cur_dev" != "$last_dev" ]; then
       changed_dev=true
-      log "dev branch changed: ${last_dev:0:7} → ${cur_dev:0:7}"
+      log "dev changed: ${last_dev:0:7} → ${cur_dev:0:7}"
+      log "  $(git log --oneline ${last_dev}..${cur_dev} 2>/dev/null | head -5)"
     fi
 
     # Rebuild only what changed
@@ -439,10 +441,8 @@ watch_and_reload() {
       log "Both branches changed — rebuilding all..."
       docker_deploy all
     elif $changed_main; then
-      log "Rebuilding main only..."
       docker_deploy main
     elif $changed_dev; then
-      log "Rebuilding dev only..."
       docker_deploy dev
     fi
 
