@@ -677,6 +677,21 @@ class TestDoubleProgression:
         # Sets 1 and 2 were at 12 (ceiling) — should stay at 12 (capped)
         assert w2["sets"][0]["planned_reps"] == 12, f"Set 1 at ceiling should stay 12, got {w2['sets'][0]['planned_reps']}"
 
+    async def test_double_weight_up_ignores_missing_reps(self, client: AsyncClient):
+        """Missing reps in one prior set should not block a weight increase."""
+        ex = await create_exercise(client)
+        plan = await self._create_plan_with_range(client, ex["id"], sets=3, reps=8, rep_range_top=12)
+
+        w1 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        await log_set(client, w1["id"], w1["sets"][0]["id"], 40.0, 12)
+        await log_set(client, w1["id"], w1["sets"][1]["id"], 40.0, 12)
+        # Leave set 3 without reps logged to simulate a skipped/incomplete set.
+
+        w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
+        for s in w2["sets"]:
+            assert s["planned_weight_kg"] == 42.5, f"Weight should increase to 42.5, got {s['planned_weight_kg']}"
+            assert s["planned_reps"] == 8, f"Reps should reset to 8, got {s['planned_reps']}"
+
     async def test_double_full_cycle(self, client: AsyncClient):
         """Full double progression cycle: reps build up, weight increases, repeat."""
         ex = await create_exercise(client)

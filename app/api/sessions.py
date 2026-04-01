@@ -1146,11 +1146,12 @@ async def create_session_from_plan(
             standard_prior = {k: v for k, v in prior_sets_for_ex.items()
                               if v.get("set_type", "standard") in ("standard", "myo_rep", "myo_rep_match")}
             if standard_prior:
+                completed_prior = [s for s in standard_prior.values() if s.get("reps") is not None]
                 all_hit_ceiling = all(
-                    (s.get("reps") or 0) >= rep_range_top
-                    for s in standard_prior.values()
+                    s.get("reps", 0) >= rep_range_top
+                    for s in completed_prior
                 )
-                double_weight_up = all_hit_ceiling
+                double_weight_up = bool(completed_prior) and all_hit_ceiling
 
         # Track set 1's planned values so myo_rep_match sets can copy them
         set1_weight_kg = None
