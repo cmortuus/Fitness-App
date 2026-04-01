@@ -14,6 +14,15 @@
   --text-muted: #71717a;
 }
 
+html[data-theme='light'] {
+  color-scheme: light;
+  --surface-1: #fafafa;
+  --surface-2: #f4f4f5;
+  --surface-3: #e4e4e7;
+  --border: rgba(24,24,27,0.10);
+  --text-muted: #71717a;
+}
+
 /* ── Base ──────────────────────────────────────────────────────────────── */
 body {
   @apply bg-zinc-950 text-zinc-100;
@@ -25,6 +34,11 @@ body {
 /* Prevent over-scroll bounce on iOS causing layout shifts */
 html, body {
   overscroll-behavior: none;
+}
+
+html[data-theme='light'] body {
+  background-color: #fafafa;
+  color: #18181b;
 }
 
 /* ── Components ────────────────────────────────────────────────────────── */
@@ -220,4 +234,135 @@ body.large-targets .card {
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
   border-width: 0;
+}
+
+/* ── Light theme overrides ─────────────────────────────────────────────── */
+html[data-theme='light'] .btn-secondary {
+  background-color: #ffffff;
+  color: #27272a;
+  border-color: #d4d4d8;
+}
+
+html[data-theme='light'] .btn-secondary:hover {
+  background-color: #f4f4f5;
+}
+
+html[data-theme='light'] .btn-ghost {
+  color: #52525b;
+}
+
+html[data-theme='light'] .btn-ghost:hover {
+  color: #18181b;
+  background-color: #f4f4f5;
+}
+
+html[data-theme='light'] .card,
+html[data-theme='light'] .exercise-card,
+html[data-theme='light'] .rest-bar,
+html[data-theme='light'] .bottom-nav {
+  background-color: #ffffff;
+  border-color: #e4e4e7;
+}
+
+html[data-theme='light'] .card-elevated {
+  background-color: #f4f4f5;
+  border-color: #d4d4d8;
+  box-shadow: 0 10px 30px rgba(24, 24, 27, 0.08);
+}
+
+html[data-theme='light'] .input,
+html[data-theme='light'] .set-input,
+html[data-theme='light'] .set-type-select {
+  background-color: #ffffff;
+  color: #18181b;
+  border-color: #d4d4d8;
+}
+
+html[data-theme='light'] .input::placeholder,
+html[data-theme='light'] .set-input::placeholder {
+  color: #a1a1aa;
+}
+
+html[data-theme='light'] .set-input:focus {
+  background-color: #fafafa;
+}
+
+html[data-theme='light'] .set-row-done .set-input {
+  background-color: #f4f4f5;
+  border-color: #e4e4e7;
+  color: #a1a1aa;
+}
+
+html[data-theme='light'] .bottom-nav-item {
+  color: #71717a;
+}
+
+html[data-theme='light'] .bottom-nav-item.active {
+  color: #2563eb;
+}
+
+html[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: #d4d4d8;
+}
+
+html[data-theme='light'] .bg-zinc-950,
+html[data-theme='light'] .min-h-screen.bg-zinc-950,
+html[data-theme='light'] .bg-zinc-950\/90,
+html[data-theme='light'] .bg-zinc-950\/95 {
+  background-color: #fafafa !important;
+}
+
+html[data-theme='light'] .bg-zinc-900,
+html[data-theme='light'] .bg-zinc-900\/95,
+html[data-theme='light'] .bg-zinc-900\/40,
+html[data-theme='light'] .bg-zinc-900\/20 {
+  background-color: #ffffff !important;
+}
+
+html[data-theme='light'] .bg-zinc-800,
+html[data-theme='light'] .bg-zinc-800\/60,
+html[data-theme='light'] .bg-zinc-800\/40 {
+  background-color: #f4f4f5 !important;
+}
+
+html[data-theme='light'] .bg-zinc-700 {
+  background-color: #e4e4e7 !important;
+}
+
+html[data-theme='light'] .text-zinc-100,
+html[data-theme='light'] .text-zinc-200,
+html[data-theme='light'] .text-zinc-300,
+html[data-theme='light'] .text-white,
+html[data-theme='light'] .text-gray-300 {
+  color: #18181b !important;
+}
+
+html[data-theme='light'] .text-zinc-400,
+html[data-theme='light'] .text-zinc-500,
+html[data-theme='light'] .text-gray-400,
+html[data-theme='light'] .text-gray-500 {
+  color: #71717a !important;
+}
+
+html[data-theme='light'] .text-zinc-600 {
+  color: #a1a1aa !important;
+}
+
+html[data-theme='light'] .border-zinc-800,
+html[data-theme='light'] .border-zinc-700,
+html[data-theme='light'] .border-zinc-600,
+html[data-theme='light'] .border-white\/5,
+html[data-theme='light'] .border-white\/10 {
+  border-color: #e4e4e7 !important;
+}
+
+html[data-theme='light'] .hover\:bg-zinc-900:hover,
+html[data-theme='light'] .hover\:bg-zinc-800:hover,
+html[data-theme='light'] .hover\:bg-zinc-700:hover,
+html[data-theme='light'] .hover\:bg-gray-600:hover {
+  background-color: #e4e4e7 !important;
+}
+
+html[data-theme='light'] .hover\:text-zinc-200:hover {
+  color: #18181b !important;
 }

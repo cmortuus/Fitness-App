@@ -57,6 +57,7 @@ export interface DeloadSettings {
 }
 
 export interface AppSettings {
+  themePreference: 'dark' | 'light';
   restDurations: RestDurations;
   weightUnit: 'lbs' | 'kg';
   heightUnit: 'in' | 'ft' | 'cm';
@@ -77,6 +78,7 @@ export interface AppSettings {
 const SETTINGS_KEY = 'hgt_settings';
 
 const defaultSettings: AppSettings = {
+  themePreference: 'dark',
   restDurations: {
     upperCompound:  180,
     upperIsolation:  90,
