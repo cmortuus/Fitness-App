@@ -161,7 +161,9 @@ async def search(
         recipe_matches.sort(key=lambda item: (item[1], item[0].created_at), reverse=True)
         results.extend([serialize_recipe_search_result(recipe) for recipe, _ in recipe_matches[:8]])
 
-    # Search local DB next (imported + community + custom foods)
+    # Search local DB next (imported + community + custom foods).
+    # Fetch a larger candidate set then rerank in Python so exact/prefix matches
+    # always float to the top regardless of insertion order.
     if db and user:
         local_result = await db.execute(
             select(FoodItem)
@@ -169,21 +171,37 @@ async def search(
                 FoodItem.name.ilike(f"%{query}%"),
                 (FoodItem.source != "pending") | (FoodItem.user_id == user.id),
             )
-            .order_by(
-                desc(FoodItem.source == "custom"),
-                desc(FoodItem.source == "community"),
-            )
-            .limit(15)
+            # Pull 60 candidates so we have enough to rerank properly
+            .limit(60)
         )
         local_foods = local_result.scalars().all()
-        results.extend([serialize_food_item(f) for f in local_foods])
 
-    # Only hit external APIs if local results are sparse
-    if len(results) < 5:
+        # Score and sort: custom/community items get a bonus so they still
+        # appear above generic imports when relevance is similar.
+        def _local_sort_key(item: FoodItem) -> float:
+            score = _search_match_score(item.name, query)
+            if item.source == "custom":
+                score += 200
+            elif item.source == "community":
+                score += 100
+            return -score  # negate for ascending sort
+
+        local_foods_sorted = sorted(local_foods, key=_local_sort_key)
+        results.extend([serialize_food_item(f) for f in local_foods_sorted[:20]])
+
+    # Hit external APIs when local results are sparse (fewer distinct food types).
+    # Also always try external when very few DB results so common foods aren't
+    # missed just because the local DB is sparse for that category.
+    if len(results) < 8:
         external = await search_foods(query, page=page)
-        # Deduplicate against local results by name
+        # Sort external results by relevance too
+        external_scored = sorted(
+            external,
+            key=lambda x: -_search_match_score(x.get("name", ""), query),
+        )
+        # Deduplicate against local results by name (exact lowercase)
         local_names = {r["name"].lower() for r in results}
-        for item in external:
+        for item in external_scored:
             if item["name"].lower() not in local_names:
                 results.append(item)
 

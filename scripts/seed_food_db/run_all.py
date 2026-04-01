@@ -50,6 +50,8 @@ def main():
     run_usda = not args.off_only
 
     ok = True
+    # Always seed common foods first so basic staples are always searchable
+    ok = run_script("seed_common.py", extra) and ok
     if run_off:
         ok = run_script("import_openfoodfacts.py", extra) and ok
     if run_usda:
