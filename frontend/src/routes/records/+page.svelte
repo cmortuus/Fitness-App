@@ -2,26 +2,26 @@
   import { onMount } from 'svelte';
   import { settings } from '$lib/stores';
   import { getPersonalRecords } from '$lib/api';
+  import type { PersonalRecord } from '$lib/api';
 
   const KG_TO_LBS = 2.20462;
 
-  interface PR {
-    exercise_id: number;
-    display_name: string;
-    max_weight_kg: number;
-    max_reps: number;
-    best_1rm_kg: number;
-    best_set_weight_kg: number;
-    best_set_reps: number;
-  }
-
-  let records = $state<PR[]>([]);
+  let records = $state<PersonalRecord[]>([]);
   let loading = $state(true);
   let filter = $state('');
 
   function w(kg: number): string {
     const val = $settings.weightUnit === 'lbs' ? kg * KG_TO_LBS : kg;
     return Math.round(val).toLocaleString();
+  }
+
+  function formatDate(dateStr: string | null): string {
+    if (!dateStr) return '—';
+    return new Date(`${dateStr}T12:00:00`).toLocaleDateString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    });
   }
 
   let unit = $derived($settings.weightUnit);
@@ -65,14 +65,17 @@
                 <div>
                   <p class="text-xs text-zinc-500">Best Weight</p>
                   <p class="text-sm font-mono text-primary-400">{w(pr.max_weight_kg)} {unit}</p>
+                  <p class="text-[10px] text-zinc-600">{formatDate(pr.max_weight_date)}</p>
                 </div>
                 <div>
                   <p class="text-xs text-zinc-500">Most Reps</p>
                   <p class="text-sm font-mono text-green-400">{pr.max_reps}</p>
+                  <p class="text-[10px] text-zinc-600">{formatDate(pr.max_reps_date)}</p>
                 </div>
                 <div>
                   <p class="text-xs text-zinc-500">Est. 1RM</p>
                   <p class="text-sm font-mono text-amber-400">{w(pr.best_1rm_kg)} {unit}</p>
+                  <p class="text-[10px] text-zinc-600">{formatDate(pr.best_1rm_date)}</p>
                 </div>
               </div>
               <p class="text-[10px] text-zinc-600 mt-1">Best set: {w(pr.best_set_weight_kg)} × {pr.best_set_reps}</p>
