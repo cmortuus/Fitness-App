@@ -1,6 +1,7 @@
 """Nutrition tracking API endpoints — food log, custom foods, goals, and search."""
 
 import json
+from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
@@ -12,7 +13,7 @@ from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
-from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, Recipe, TDEEHistory, WaterEntry
 from app.models.user import User
 from app.schemas.requests import FoodItemCreate, FoodItemUpdate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
 from app.services.expenditure import compute_adaptive_tdee
@@ -42,6 +43,27 @@ def serialize_food_item(item: FoodItem, submission_count: int | None = None) -> 
     if submission_count is not None:
         d["submission_count"] = submission_count
     return d
+
+
+def serialize_recipe_search_result(recipe: Recipe) -> dict:
+    servings = recipe.servings if recipe.servings > 0 else 1.0
+    return {
+        "name": recipe.name,
+        "brand": None,
+        "barcode": None,
+        "source": "recipe",
+        "source_id": str(recipe.id),
+        "calories_per_100g": recipe.total_calories / servings,
+        "protein_per_100g": recipe.total_protein / servings,
+        "carbs_per_100g": recipe.total_carbs / servings,
+        "fat_per_100g": recipe.total_fat / servings,
+        # Search UIs already treat serving_size_g as the default quantity to log.
+        # Using 100 keeps the existing quantity math equivalent to 1 serving.
+        "serving_size_g": 100,
+        "serving_label": "1 serving",
+        "is_custom": False,
+        "micronutrients": None,
+    }
 
 
 def serialize_entry(entry: NutritionEntry) -> dict:
@@ -74,6 +96,39 @@ def serialize_goal(goal: MacroGoal) -> dict:
     }
 
 
+def _search_match_score(name: str, query: str) -> float:
+    candidate = " ".join(name.lower().split())
+    needle = " ".join(query.lower().split())
+    if not candidate or not needle:
+        return 0.0
+    if candidate == needle:
+        return 1000.0
+
+    score = 0.0
+    if candidate.startswith(needle):
+        score = max(score, 900.0 - max(len(candidate) - len(needle), 0))
+    if f" {needle}" in candidate:
+        score = max(score, 825.0)
+    if needle in candidate:
+        score = max(score, 700.0)
+
+    candidate_words = candidate.split()
+    query_words = needle.split()
+    if query_words:
+        matched_words = sum(1 for word in query_words if word in candidate)
+        prefix_matches = sum(
+            1 for word in query_words if any(part.startswith(word) for part in candidate_words)
+        )
+        if matched_words:
+            score = max(score, 520.0 + matched_words * 70.0 + prefix_matches * 20.0)
+
+    similarity = SequenceMatcher(None, needle, candidate).ratio()
+    if similarity >= 0.55:
+        score = max(score, similarity * 600.0)
+
+    return score
+
+
 # ── Food search (proxy) ──────────────────────────────────────────────────────
 
 @router.get("/search")
@@ -90,7 +145,23 @@ async def search(
     query = q.strip()
     results: list[dict] = []
 
-    # Search local DB first (imported + community + custom foods)
+    # Promote the user's own recipes whenever they are a close match.
+    if db and user:
+        recipe_result = await db.execute(
+            select(Recipe)
+            .where(Recipe.user_id == user.id)
+            .order_by(desc(Recipe.created_at))
+            .limit(200)
+        )
+        recipe_matches = [
+            (recipe, _search_match_score(recipe.name, query))
+            for recipe in recipe_result.scalars().all()
+        ]
+        recipe_matches = [item for item in recipe_matches if item[1] >= 520]
+        recipe_matches.sort(key=lambda item: (item[1], item[0].created_at), reverse=True)
+        results.extend([serialize_recipe_search_result(recipe) for recipe, _ in recipe_matches[:8]])
+
+    # Search local DB next (imported + community + custom foods)
     if db and user:
         local_result = await db.execute(
             select(FoodItem)
