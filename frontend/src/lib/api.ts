@@ -512,7 +512,21 @@ export async function recalculateWeights(pattern: string, oldBaseKg: number, new
 }
 
 // Personal records
-export async function getPersonalRecords(): Promise<any[]> {
+export interface PersonalRecord {
+  exercise_id: number;
+  display_name: string;
+  name: string;
+  max_weight_kg: number;
+  max_weight_date: string | null;
+  max_reps: number;
+  max_reps_date: string | null;
+  best_1rm_kg: number;
+  best_1rm_date: string | null;
+  best_set_weight_kg: number;
+  best_set_reps: number;
+}
+
+export async function getPersonalRecords(): Promise<PersonalRecord[]> {
   const response = await api.get('/progress/records');
   return response.data;
 }
