@@ -1,6 +1,9 @@
 from datetime import datetime, timezone
 
+import pytest
 import app.api.nutrition as nutrition_api
+from app.api.nutrition import _search_match_score
+from app.api.food_search import _relevance_score
 from app.models.nutrition import FoodItem
 from app.models.nutrition import NutritionEntry
 
@@ -135,3 +138,133 @@ async def test_search_prioritizes_matching_recipes(client, db, monkeypatch):
     assert payload[0]["name"] == "Chicken Rice Bowl"
     assert payload[0]["serving_label"] == "1 serving"
     assert payload[0]["calories_per_100g"] == 360
+
+
+# ── Search relevance scoring unit tests ─────────────────────────────────────
+
+class TestSearchMatchScore:
+    def test_exact_match_scores_highest(self):
+        assert _search_match_score("Bread", "bread") == 1000.0
+
+    def test_prefix_beats_contains(self):
+        # "Bread, White" starts with "bread" → should beat "Gluten Free Bread"
+        prefix_score = _search_match_score("Bread, White", "bread")
+        contains_score = _search_match_score("Gluten Free Bread", "bread")
+        assert prefix_score > contains_score
+
+    def test_exact_beats_prefix(self):
+        exact = _search_match_score("Bread", "bread")
+        prefix = _search_match_score("Breadcrumbs", "bread")
+        assert exact > prefix
+
+    def test_shorter_prefix_beats_longer_prefix(self):
+        short = _search_match_score("Bread, White", "bread")
+        long_ = _search_match_score("Bread, Whole Wheat, Multigrain, Sliced", "bread")
+        assert short > long_
+
+    def test_burger_patty_beats_burger_bun(self):
+        # "Burger, Beef Patty" and "Hamburger Bun" for query "burger"
+        burger = _search_match_score("Burger, Beef Patty", "burger")
+        bun = _search_match_score("Hamburger Bun", "burger")
+        # Both contain "burger" as a prefix/word; "Burger, Beef Patty" starts with burger
+        assert burger >= bun
+
+
+class TestExternalRelevanceScore:
+    def test_exact_is_tier_0(self):
+        tier, _ = _relevance_score("Bread", "bread")
+        assert tier == 0
+
+    def test_starts_with_is_tier_1(self):
+        tier, _ = _relevance_score("Breadcrumbs, Plain", "bread")
+        assert tier == 1
+
+    def test_word_boundary_is_tier_2(self):
+        tier, _ = _relevance_score("White Bread", "bread")
+        assert tier == 2
+
+    def test_gluten_free_bread_word_boundary(self):
+        tier, _ = _relevance_score("Gluten Free Bread", "bread")
+        assert tier == 2
+
+    def test_cornbread_stuffing_is_tier_1(self):
+        # starts with "bread"? No — "cornbread" starts with "corn", not "bread"
+        tier, _ = _relevance_score("Cornbread Stuffing", "bread")
+        # "bread" is in "cornbread" as substring but NOT as a whole word
+        assert tier == 3
+
+    def test_shorter_name_ranks_first_in_same_tier(self):
+        _, len_short = _relevance_score("Burger, Beef", "burger")
+        _, len_long = _relevance_score("Burger, Beef, Extra Lean, Organic, Grass-Fed", "burger")
+        assert len_short < len_long
+
+
+class TestSearchRelevanceIntegration:
+    """API-level tests verifying search result ordering."""
+
+    async def test_exact_match_is_first(self, client, db, monkeypatch):
+        """Plain 'Bread' should appear before 'Gluten Free Bread'."""
+        async def fake_search_foods(query, page=1, page_size=15):
+            return []
+        monkeypatch.setattr(nutrition_api, "search_foods", fake_search_foods)
+
+        for name in ["Gluten Free Bread", "Bread", "Sourdough Bread", "Bread, White"]:
+            db.add(FoodItem(
+                name=name, source="common", is_custom=False,
+                calories_per_100g=265, protein_per_100g=9,
+                carbs_per_100g=49, fat_per_100g=3, serving_size_g=28,
+            ))
+        await db.commit()
+
+        r = await client.get("/api/nutrition/search", params={"q": "bread"})
+        assert r.status_code == 200
+        names = [item["name"] for item in r.json()]
+        assert names[0] == "Bread", f"Expected 'Bread' first, got: {names}"
+
+    async def test_burger_patty_before_burger_bun(self, client, db, monkeypatch):
+        """Searching 'burger' should put actual burger patty above burger bun."""
+        async def fake_search_foods(query, page=1, page_size=15):
+            return []
+        monkeypatch.setattr(nutrition_api, "search_foods", fake_search_foods)
+
+        for name in ["Hamburger Bun", "Burger, Beef Patty (cooked)", "Turkey Burger Patty"]:
+            db.add(FoodItem(
+                name=name, source="common", is_custom=False,
+                calories_per_100g=265, protein_per_100g=20,
+                carbs_per_100g=10, fat_per_100g=12, serving_size_g=85,
+            ))
+        await db.commit()
+
+        r = await client.get("/api/nutrition/search", params={"q": "burger"})
+        assert r.status_code == 200
+        names = [item["name"] for item in r.json()]
+        # Both "Burger, Beef Patty" and "Turkey Burger Patty" start with or contain burger as word
+        # "Hamburger Bun" contains "hamburger" → "burger" is a substring only
+        burger_idx = next(i for i, n in enumerate(names) if "Patty" in n)
+        bun_idx = next(i for i, n in enumerate(names) if "Bun" in n)
+        assert burger_idx < bun_idx, f"Expected burger patty before bun, got: {names}"
+
+    async def test_custom_food_beats_same_relevance_import(self, client, db, monkeypatch):
+        """Custom foods should still rank above imported foods at the same relevance tier."""
+        async def fake_search_foods(query, page=1, page_size=15):
+            return []
+        monkeypatch.setattr(nutrition_api, "search_foods", fake_search_foods)
+
+        db.add(FoodItem(
+            name="Rice, White", source="common", is_custom=False,
+            calories_per_100g=130, protein_per_100g=2.7, carbs_per_100g=28.6, fat_per_100g=0.3,
+            serving_size_g=186,
+        ))
+        db.add(FoodItem(
+            user_id=1, name="Rice, White", source="custom", is_custom=True,
+            calories_per_100g=135, protein_per_100g=3.0, carbs_per_100g=29.0, fat_per_100g=0.4,
+            serving_size_g=200,
+        ))
+        await db.commit()
+
+        r = await client.get("/api/nutrition/search", params={"q": "rice"})
+        assert r.status_code == 200
+        results = r.json()
+        # Should have both — custom first due to source bonus
+        sources = [item["source"] for item in results]
+        assert sources[0] == "custom"

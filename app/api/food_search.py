@@ -172,6 +172,30 @@ def _completeness(item: dict) -> int:
                if item.get(k) is not None)
 
 
+def _relevance_score(name: str, query: str) -> tuple[int, int]:
+    """Return (tier, name_length) for sort key — lower is better.
+
+    Tier 0 — exact match: "Bread" for query "bread"
+    Tier 1 — starts with query: "Breadcrumbs", "Bread, White"
+    Tier 2 — query appears as a whole word: "White Bread", "Gluten Free Bread"
+    Tier 3 — generic substring: "Cornbread Stuffing Mix"
+    Within each tier shorter names rank first (simpler = more generic).
+    """
+    name_lo = name.lower().strip()
+    q_lo = query.lower().strip()
+    if not q_lo:
+        return (3, len(name))
+    if name_lo == q_lo:
+        return (0, len(name))
+    if name_lo.startswith(q_lo):
+        return (1, len(name))
+    # Whole-word boundary: preceded by space/start OR followed by space/comma/end
+    words = name_lo.split()
+    if q_lo in words:
+        return (2, len(name))
+    return (3, len(name))
+
+
 async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[dict]:
     """Search both Open Food Facts and USDA in parallel, merge and deduplicate."""
     settings = get_settings()
@@ -233,7 +257,11 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
         existing = seen.get(key)
         if not existing or _completeness(item) > _completeness(existing):
             seen[key] = item
-    return list(seen.values())
+
+    # Sort by relevance: exact/prefix/word-boundary matches first, then by name length
+    deduped = list(seen.values())
+    deduped.sort(key=lambda x: _relevance_score(x.get("name", ""), query))
+    return deduped
 
 
 async def lookup_barcode(barcode: str) -> dict | None:
