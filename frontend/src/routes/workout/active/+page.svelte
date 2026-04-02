@@ -2925,9 +2925,9 @@
               </div>
               <div class="flex items-center gap-1 ml-3 mt-0.5">
                 <!-- Reorder buttons -->
-                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i > 0) { [uiExercises[i-1], uiExercises[i]] = [uiExercises[i], uiExercises[i-1]]; uiExercises = [...uiExercises]; } }}
+                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i > 0) moveExercise(i, -1); }}
                         class="text-zinc-500 hover:text-white px-1 text-sm">▲</button>
-                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i < uiExercises.length - 1) { [uiExercises[i], uiExercises[i+1]] = [uiExercises[i+1], uiExercises[i]]; uiExercises = [...uiExercises]; } }}
+                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i < uiExercises.length - 1) moveExercise(i, 1); }}
                         class="text-zinc-500 hover:text-white px-1 text-sm">▼</button>
                 {#if exercise?.description}
                   <button
