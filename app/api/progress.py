@@ -377,20 +377,23 @@ async def get_insights(
     )
     recent_sess_list = recent_sessions.scalars().all()
     if len(recent_sess_list) >= 3:
-        # Group sets by exercise across sessions, track 1RM per session
+        # Group sets by exercise across sessions, track best 1RM per session.
+        # Sessions are in DESC date order so history[0] = most recent.
+        # Declining = history[0] < history[1] < history[2] (each session lower than the one before).
         exercise_1rm_history: dict[int, list[float]] = {}
         for sess in recent_sess_list[:5]:
+            # First pass: find the best estimated 1RM per exercise within this session
+            session_best: dict[int, float] = {}
             for s in (sess.sets or []):
                 if s.actual_reps and s.actual_weight_kg and s.actual_weight_kg > 0 and (s.set_type or 'standard') != 'warmup':
                     est = s.actual_weight_kg * (1 + s.actual_reps / 30)
-                    if s.exercise_id not in exercise_1rm_history:
-                        exercise_1rm_history[s.exercise_id] = []
-                    # Keep best 1RM per session per exercise
-                    if len(exercise_1rm_history[s.exercise_id]) == 0 or exercise_1rm_history[s.exercise_id][-1] < est:
-                        if len(exercise_1rm_history[s.exercise_id]) > 0:
-                            exercise_1rm_history[s.exercise_id][-1] = max(exercise_1rm_history[s.exercise_id][-1], est)
-                        else:
-                            exercise_1rm_history[s.exercise_id].append(est)
+                    if s.exercise_id not in session_best or est > session_best[s.exercise_id]:
+                        session_best[s.exercise_id] = est
+            # Second pass: append this session's best to the per-exercise history
+            for eid, best in session_best.items():
+                if eid not in exercise_1rm_history:
+                    exercise_1rm_history[eid] = []
+                exercise_1rm_history[eid].append(best)
 
         declining = []
         for eid, history in exercise_1rm_history.items():
