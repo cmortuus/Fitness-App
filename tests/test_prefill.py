@@ -353,6 +353,45 @@ class TestPlanIsolation:
         assert all(w is not None for w in b2_weights), \
             f"Plan B week 2 should be pre-filled from its own week-1: {b2_weights}"
 
+    async def test_new_plan_cross_meso_uses_unilateral_rep_evidence(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        """Cross-meso prefill should accept legacy unilateral rows with only side reps."""
+        ex = await create_exercise(
+            client,
+            name="split_squat_cross",
+            display_name="Split Squat Cross",
+            is_unilateral=True,
+        )
+        plan_a = await create_plan(client, ex["id"], sets=1, reps=8, name="Cross A")
+        plan_b = await create_plan(client, ex["id"], sets=1, reps=8, name="Cross B")
+
+        sess_a = await start_session_from_plan(client, plan_a["id"])
+        set_id = sess_a["sets"][0]["id"]
+        logged = await client.patch(
+            f"/api/sessions/{sess_a['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 30.0,
+                "actual_reps": 8,
+                "reps_left": 8,
+                "reps_right": 10,
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert logged.status_code == 200, logged.text
+        complete = await client.post(f"/api/sessions/{sess_a['id']}/complete")
+        assert complete.status_code == 200, complete.text
+
+        row = await db.execute(select(ExerciseSet).where(ExerciseSet.id == set_id))
+        exercise_set = row.scalar_one()
+        exercise_set.actual_reps = None
+        await db.commit()
+
+        sess_b = await start_session_from_plan(client, plan_b["id"])
+        next_set = sess_b["sets"][0]
+        assert next_set["planned_weight_kg"] is not None, next_set
+        assert next_set["planned_reps"] is not None, next_set
+
 
 # ── Assisted exercises ────────────────────────────────────────────────────────
 

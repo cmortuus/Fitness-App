@@ -143,7 +143,7 @@ def _set_total_volume_kg(exercise_set: ExerciseSet) -> float:
 
 
 def _set_rep_evidence(exercise_set: ExerciseSet) -> int | None:
-    """Return the best rep signal available for progression calculations."""
+    """Return the strongest usable rep signal for progression logic."""
     if exercise_set.actual_reps is not None and exercise_set.actual_reps > 0:
         return exercise_set.actual_reps
 
@@ -1101,7 +1101,11 @@ async def create_session_from_plan(
             .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
             .where(
                 ExerciseSet.exercise_id.in_(day_exercise_ids),
-                ExerciseSet.actual_reps.is_not(None),
+                or_(
+                    ExerciseSet.actual_reps.is_not(None),
+                    ExerciseSet.reps_left.is_not(None),
+                    ExerciseSet.reps_right.is_not(None),
+                ),
                 ExerciseSet.actual_weight_kg.is_not(None),
                 ExerciseSet.actual_weight_kg > 0,
                 ExerciseSet.set_type.in_(["standard", None]),
@@ -1114,12 +1118,15 @@ async def create_session_from_plan(
         for row, _date in recent_sets_q.all():
             ex_id = row.exercise_id
             if ex_id not in cross_meso_data:  # keep first = most recent
+                rep_evidence = _set_rep_evidence(row)
+                if rep_evidence is None:
+                    continue
                 w = row.actual_weight_kg
                 ex_m = exercise_model_map.get(ex_id)
                 # Correct legacy assisted data (see prior_set_data block above)
                 if ex_m and ex_m.is_assisted and body_weight_kg > 0 and w > body_weight_kg * 0.5:
                     w = max(0.0, body_weight_kg - w)
-                cross_meso_data[ex_id] = {"weight": w, "reps": row.actual_reps}
+                cross_meso_data[ex_id] = {"weight": w, "reps": rep_evidence}
 
     # ── Fatigue-freshness reorder detection ───────────────────────────────────
     # When the exercise order changes between sessions each exercise is performed
