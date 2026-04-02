@@ -302,8 +302,9 @@
     const hits = getPrHits(ex, set, personalRecordsByExercise);
     if (hits.length > 0) {
       updateLivePersonalRecords(ex, set);
-      const hit = hits[0];
-      const label = hit.type === 'weight' ? 'Weight PR' : hit.type === 'reps' ? 'Rep PR' : '1RM PR';
+      const hit = hits.find((candidate) => candidate.type === '1rm');
+      if (!hit) return;
+      const label = '1RM PR';
       prCelebration = { exercise: exercise.display_name, type: label, value: hit.value };
       if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
       fireConfetti();
@@ -2199,22 +2200,14 @@
       if (!exercise) continue;
       const doneSetsEx = ex.sets.filter(s => s.done);
       if (doneSetsEx.length === 0) continue;
-      let bestWeight: PRHit | null = null;
-      let bestReps: PRHit | null = null;
       let bestOneRm: PRHit | null = null;
       for (const s of doneSetsEx) {
         for (const hit of getPrHits(ex, s, startingPersonalRecordsByExercise)) {
-          if (hit.type === 'weight' && (!bestWeight || hit.rawValue > bestWeight.rawValue)) {
-            bestWeight = hit;
-          } else if (hit.type === 'reps' && (!bestReps || hit.rawValue > bestReps.rawValue)) {
-            bestReps = hit;
-          } else if (hit.type === '1rm' && (!bestOneRm || hit.rawValue > bestOneRm.rawValue)) {
+          if (hit.type === '1rm' && (!bestOneRm || hit.rawValue > bestOneRm.rawValue)) {
             bestOneRm = hit;
           }
         }
       }
-      if (bestWeight) results.push({ exerciseName: exercise.display_name, type: 'weight', value: bestWeight.value });
-      if (bestReps) results.push({ exerciseName: exercise.display_name, type: 'reps', value: bestReps.value });
       if (bestOneRm) results.push({ exerciseName: exercise.display_name, type: '1rm', value: bestOneRm.value });
     }
     return results;
@@ -3827,12 +3820,11 @@
 
 <!-- PR Celebration Toast -->
 {#if prCelebration}
-  <div class="fixed top-4 left-4 right-4 z-50 animate-bounce">
-    <div class="bg-gradient-to-r from-amber-600 to-yellow-500 rounded-2xl px-5 py-4 shadow-2xl text-center">
-      <p class="text-2xl mb-1">🎉🏆🎉</p>
-      <p class="text-lg font-bold text-white">{prCelebration.type}!</p>
-      <p class="text-sm text-white/90">{prCelebration.exercise}</p>
-      <p class="text-xl font-bold text-white mt-1">{prCelebration.value}</p>
+  <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50">
+    <div class="bg-amber-500/95 text-white px-4 py-2 rounded-xl shadow-xl shadow-amber-500/20 text-center backdrop-blur-sm min-w-[14rem]">
+      <div class="text-[11px] font-semibold uppercase tracking-wide opacity-90">{prCelebration.type}</div>
+      <div class="text-sm font-semibold truncate">{prCelebration.exercise}</div>
+      <div class="text-base font-bold">{prCelebration.value}</div>
     </div>
   </div>
 {/if}
@@ -3855,16 +3847,5 @@
       isLbs={primePegBanner.isLbs}
       prevPegWeights={primePegBanner.prevPegWeights}
     />
-  </div>
-{/if}
-
-<!-- PR celebration overlay -->
-{#if prCelebration}
-  <div class="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
-    <div class="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 text-white px-6 py-3 rounded-2xl shadow-2xl shadow-yellow-500/30 text-center backdrop-blur-sm">
-      <div class="text-2xl font-black">🏆 NEW PR!</div>
-      <div class="text-sm font-semibold opacity-90">{prCelebration.exercise}</div>
-      <div class="text-lg font-bold">{prCelebration.type}: {prCelebration.value}</div>
-    </div>
   </div>
 {/if}
