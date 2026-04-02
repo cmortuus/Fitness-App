@@ -635,16 +635,18 @@
 
       <div class="flex-1 overflow-y-auto px-4 py-4 space-y-5">
         <div class="space-y-2">
-          <div>
-            <label class="label">Whole Plan</label>
-            <p class="text-xs text-zinc-500">Fallback target for every exercise unless a muscle or exercise override is set.</p>
+          <div class="flex items-center justify-between gap-3 rounded-lg bg-zinc-800/50 px-3 py-2">
+            <div class="min-w-0">
+              <div class="text-sm text-zinc-300">Whole Plan</div>
+              <div class="text-xs text-zinc-500">Fallback for every exercise unless overridden.</div>
+            </div>
+            <select class="input !w-28 shrink-0" value={rirOverridesDraft.plan ?? ''} onchange={(e) => setDraftPlanRir((e.currentTarget as HTMLSelectElement).value)}>
+              <option value="">Auto</option>
+              {#each [0, 1, 2, 3, 4, 5] as rir}
+                <option value={rir}>{rir === 5 ? '5+' : rir}</option>
+              {/each}
+            </select>
           </div>
-          <select class="input" value={rirOverridesDraft.plan ?? ''} onchange={(e) => setDraftPlanRir((e.currentTarget as HTMLSelectElement).value)}>
-            <option value="">Auto</option>
-            {#each [0, 1, 2, 3, 4, 5] as rir}
-              <option value={rir}>{rir === 5 ? '5+' : rir}</option>
-            {/each}
-          </select>
         </div>
 
         <div class="space-y-2">
@@ -656,7 +658,7 @@
             {#each getPlanMuscles(rirPlan) as muscle}
               <div class="flex items-center justify-between gap-3 rounded-lg bg-zinc-800/50 px-3 py-2">
                 <div class="text-sm text-zinc-300 capitalize">{muscle.replace(/_/g, ' ')}</div>
-                <select class="input w-28" value={rirOverridesDraft.muscles[muscle] ?? ''} onchange={(e) => setDraftMuscleRir(muscle, (e.currentTarget as HTMLSelectElement).value)}>
+                <select class="input !w-28 shrink-0" value={rirOverridesDraft.muscles[muscle] ?? ''} onchange={(e) => setDraftMuscleRir(muscle, (e.currentTarget as HTMLSelectElement).value)}>
                   <option value="">Auto</option>
                   {#each [0, 1, 2, 3, 4, 5] as rir}
                     <option value={rir}>{rir === 5 ? '5+' : rir}</option>
@@ -679,7 +681,7 @@
                   <div class="text-sm text-zinc-300 truncate">{row.name}</div>
                   <div class="text-xs text-zinc-500 capitalize">{row.muscles.map(m => m.replace(/_/g, ' ')).join(', ') || 'No primary muscles'}</div>
                 </div>
-                <select class="input w-28 shrink-0" value={rirOverridesDraft.exercises[String(row.id)] ?? ''} onchange={(e) => setDraftExerciseRir(row.id, (e.currentTarget as HTMLSelectElement).value)}>
+                <select class="input !w-28 shrink-0" value={rirOverridesDraft.exercises[String(row.id)] ?? ''} onchange={(e) => setDraftExerciseRir(row.id, (e.currentTarget as HTMLSelectElement).value)}>
                   <option value="">Auto</option>
                   {#each [0, 1, 2, 3, 4, 5] as rir}
                     <option value={rir}>{rir === 5 ? '5+' : rir}</option>
