@@ -1,6 +1,10 @@
 from datetime import datetime, timezone
+import json
+from types import SimpleNamespace
 
 import app.api.nutrition as nutrition_api
+import app.api.food_search as food_search
+import httpx
 from app.api.nutrition import _search_match_score
 from app.api.food_search import _relevance_score
 from app.models.nutrition import FoodItem
@@ -244,6 +248,36 @@ class TestExternalRelevanceScore:
         _, len_short = _relevance_score("Burger, Beef", "burger")
         _, len_long = _relevance_score("Burger, Beef, Extra Lean, Organic, Grass-Fed", "burger")
         assert len_short < len_long
+
+
+class TestExternalFoodSearch:
+    async def test_search_foods_handles_short_response_list(self, monkeypatch):
+        class FakeClient:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, url, params=None, headers=None):
+                if "openfoodfacts" in url:
+                    payload = {"products": [{"product_name": "Bread", "nutriments": {}}]}
+                else:
+                    payload = {"foods": []}
+                return httpx.Response(200, content=json.dumps(payload).encode("utf-8"))
+
+        async def fake_gather(*tasks, return_exceptions=True):
+            first = await tasks[0]
+            for task in tasks[1:]:
+                task.close()
+            return [first]
+
+        monkeypatch.setattr(food_search.httpx, "AsyncClient", lambda timeout=None: FakeClient())
+        monkeypatch.setattr(food_search, "get_settings", lambda: SimpleNamespace(usda_api_key="test", calorieninjas_api_key=None))
+        monkeypatch.setattr(food_search.asyncio, "gather", fake_gather)
+
+        results = await food_search.search_foods("bread")
+        assert [item["name"] for item in results] == ["Bread"]
 
 
 class TestSearchRelevanceIntegration:
