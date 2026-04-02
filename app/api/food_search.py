@@ -223,8 +223,8 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
             )
         responses = await asyncio.gather(*tasks, return_exceptions=True)
 
-    off_resp = responses[0]
-    usda_resp = responses[1]
+    off_resp = responses[0] if len(responses) > 0 else None
+    usda_resp = responses[1] if len(responses) > 1 else None
     cn_resp = responses[2] if len(responses) > 2 else None
 
     results: list[dict] = []
