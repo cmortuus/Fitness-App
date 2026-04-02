@@ -41,32 +41,62 @@
     count: number;
   }
 
-  function calcPlates(weight: number): PlateSlice[] {
+  interface PlateBreakdown {
+    plates: PlateSlice[];
+    remainder: number;
+    targetPerSide: number;
+    loadablePerSide: number;
+  }
+
+  function calcPlates(weight: number): PlateBreakdown {
     const perSide = oneSided ? (weight - barWeight) : (weight - barWeight) / 2;
-    if (perSide <= 0) return [];
+    if (perSide <= 0) {
+      return {
+        plates: [],
+        remainder: 0,
+        targetPerSide: 0,
+        loadablePerSide: 0,
+      };
+    }
 
     const available = isLbs ? PLATES_LBS : PLATES_KG;
     let remaining = perSide;
-    const result: PlateSlice[] = [];
+    const plates: PlateSlice[] = [];
 
     for (const [w, color, height] of available) {
       const count = Math.floor(remaining / w);
       if (count > 0) {
-        result.push({ weight: w, color, height, count });
+        plates.push({ weight: w, color, height, count });
         remaining -= count * w;
       }
     }
-    if (remaining > 0.1) return []; // can't make exact weight
-    return result;
+    return {
+      plates,
+      remainder: remaining,
+      targetPerSide: perSide,
+      loadablePerSide: perSide - remaining,
+    };
   }
 
-  let plates = $derived(calcPlates(totalWeight));
+  let breakdown = $derived(calcPlates(totalWeight));
+  let plates = $derived(breakdown.plates);
+  let hasExactDistribution = $derived(breakdown.remainder <= 0.1);
+  let unmatchedLabel = $derived.by(() => {
+    if (hasExactDistribution || breakdown.remainder <= 0) return null;
+    const rounded = Number(breakdown.remainder.toFixed(2));
+    return `${rounded} ${isLbs ? 'lb' : 'kg'}${rounded === 1 ? '' : 's'}`;
+  });
+  let closestLoadableTotal = $derived.by(() => {
+    if (oneSided) return barWeight + breakdown.loadablePerSide;
+    return barWeight + breakdown.loadablePerSide * 2;
+  });
 
   // Plate delta — what to add/remove compared to previous weight
   let plateDelta = $derived.by(() => {
     if (prevWeight == null || prevWeight === totalWeight || prevWeight <= barWeight) return null;
-    const prevPlates = calcPlates(prevWeight);
-    if (prevPlates.length === 0 || plates.length === 0) return null;
+    const prevBreakdown = calcPlates(prevWeight);
+    const prevPlates = prevBreakdown.plates;
+    if (!hasExactDistribution || prevBreakdown.remainder > 0.1 || prevPlates.length === 0 || plates.length === 0) return null;
 
     // Build weight→count maps
     const prevMap = new Map<number, number>();
@@ -90,76 +120,89 @@
   });
 </script>
 
+{#if oneSided}
+  <!-- Single-pin vertical view (T-bar row, landmine) -->
+  <div class="flex items-end gap-0.5 justify-center mt-0.5">
+    <!-- Vertical post -->
+    <div style="width: 6px; height: 3.5rem; background: #52525b; border-radius: 1px 1px 0 0;"></div>
+    <!-- Collar -->
+    <div style="width: 10px; height: 8px; background: #71717a; border-radius: 1px; align-self: flex-end; margin-left: -2px; margin-right: 2px;"></div>
+    <!-- Plates stacked horizontally from post outward -->
+    {#each plates as plate}
+      {#each Array(plate.count) as _}
+        <div
+          style="width: 6px; height: {plate.height}; background: {plate.color}; border-radius: 1px; align-self: flex-end;"
+          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+        ></div>
+      {/each}
+    {/each}
+    <!-- Pin end cap -->
+    <div style="width: 4px; height: 10px; background: #3f3f46; border-radius: 0 2px 2px 0; align-self: flex-end;"></div>
+  </div>
+{:else}
+  <!-- Horizontal barbell view -->
+  <div class="flex items-center gap-0.5 justify-center mt-0.5">
+    <!-- Left bar end -->
+    <div style="width: 10px; height: 4px; background: #52525b; border-radius: 1px 0 0 1px;"></div>
+    <!-- Left side: smallest outside, biggest near bar -->
+    {#each [...plates].reverse() as plate}
+      {#each Array(plate.count) as _}
+        <div
+          style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
+          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+        ></div>
+      {/each}
+    {/each}
+    <!-- Sleeve -->
+    <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
+    <!-- Bar -->
+    <div style="width: 30px; height: 4px; background: #52525b; border-radius: 1px;"></div>
+    <!-- Sleeve -->
+    <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
+    <!-- Right side: biggest near bar, smallest outside -->
+    {#each plates as plate}
+      {#each Array(plate.count) as _}
+        <div
+          style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
+          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+        ></div>
+      {/each}
+    {/each}
+    <!-- Right bar end -->
+    <div style="width: 10px; height: 4px; background: #52525b; border-radius: 0 1px 1px 0;"></div>
+  </div>
+{/if}
 {#if plates.length > 0}
-  {#if oneSided}
-    <!-- Single-pin vertical view (T-bar row, landmine) -->
-    <div class="flex items-end gap-0.5 justify-center mt-0.5">
-      <!-- Vertical post -->
-      <div style="width: 6px; height: 3.5rem; background: #52525b; border-radius: 1px 1px 0 0;"></div>
-      <!-- Collar -->
-      <div style="width: 10px; height: 8px; background: #71717a; border-radius: 1px; align-self: flex-end; margin-left: -2px; margin-right: 2px;"></div>
-      <!-- Plates stacked horizontally from post outward -->
-      {#each plates as plate}
-        {#each Array(plate.count) as _}
-          <div
-            style="width: 6px; height: {plate.height}; background: {plate.color}; border-radius: 1px; align-self: flex-end;"
-            title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-          ></div>
-        {/each}
-      {/each}
-      <!-- Pin end cap -->
-      <div style="width: 4px; height: 10px; background: #3f3f46; border-radius: 0 2px 2px 0; align-self: flex-end;"></div>
-    </div>
-  {:else}
-    <!-- Horizontal barbell view -->
-    <div class="flex items-center gap-0.5 justify-center mt-0.5">
-      <!-- Left bar end -->
-      <div style="width: 10px; height: 4px; background: #52525b; border-radius: 1px 0 0 1px;"></div>
-      <!-- Left side: smallest outside, biggest near bar -->
-      {#each [...plates].reverse() as plate}
-        {#each Array(plate.count) as _}
-          <div
-            style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
-            title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-          ></div>
-        {/each}
-      {/each}
-      <!-- Sleeve -->
-      <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
-      <!-- Bar -->
-      <div style="width: 30px; height: 4px; background: #52525b; border-radius: 1px;"></div>
-      <!-- Sleeve -->
-      <div style="width: 12px; height: 6px; background: #71717a; border-radius: 1px;"></div>
-      <!-- Right side: biggest near bar, smallest outside -->
-      {#each plates as plate}
-        {#each Array(plate.count) as _}
-          <div
-            style="width: 5px; height: {plate.height}; background: {plate.color}; border-radius: 1px;"
-            title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-          ></div>
-        {/each}
-      {/each}
-      <!-- Right bar end -->
-      <div style="width: 10px; height: 4px; background: #52525b; border-radius: 0 1px 1px 0;"></div>
-    </div>
-  {/if}
   <p class="text-[9px] text-zinc-500 text-center">
     {plates.map(p => `${p.count}×${p.weight}`).join(' + ')} {oneSided ? '' : '/side'}
   </p>
-  {#if plateDelta}
-    <p class="text-[9px] text-center mt-0.5">
-      {#if plateDelta.remove.length > 0}
-        <span class="text-red-400">−{plateDelta.remove.join(', ')}</span>
-      {/if}
-      {#if plateDelta.remove.length > 0 && plateDelta.add.length > 0}
-        <span class="text-zinc-600"> → </span>
-      {/if}
-      {#if plateDelta.add.length > 0}
-        <span class="text-green-400">+{plateDelta.add.join(', ')}</span>
-      {/if}
-      {#if !oneSided}
-        <span class="text-zinc-600"> /side</span>
-      {/if}
-    </p>
-  {/if}
+{:else}
+  <p class="text-[9px] text-zinc-500 text-center">
+    No plates needed
+  </p>
+{/if}
+{#if !hasExactDistribution}
+  <p class="text-[9px] text-amber-400 text-center mt-0.5">
+    Can't load exactly. Closest is {closestLoadableTotal.toFixed(1).replace(/\.0$/, '')} {isLbs ? 'lb' : 'kg'}
+    {#if unmatchedLabel}
+      with {unmatchedLabel} left over {oneSided ? 'on the pin' : 'per side'}
+    {/if}
+    .
+  </p>
+{/if}
+{#if plateDelta}
+  <p class="text-[9px] text-center mt-0.5">
+    {#if plateDelta.remove.length > 0}
+      <span class="text-red-400">−{plateDelta.remove.join(', ')}</span>
+    {/if}
+    {#if plateDelta.remove.length > 0 && plateDelta.add.length > 0}
+      <span class="text-zinc-600"> → </span>
+    {/if}
+    {#if plateDelta.add.length > 0}
+      <span class="text-green-400">+{plateDelta.add.join(', ')}</span>
+    {/if}
+    {#if !oneSided}
+      <span class="text-zinc-600"> /side</span>
+    {/if}
+  </p>
 {/if}

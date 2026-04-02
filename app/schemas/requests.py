@@ -127,13 +127,14 @@ class SetCreate(BaseModel):
 
 
 class SetUpdate(BaseModel):
+    exercise_id: int | None = None
     actual_reps: int | None = None
     actual_weight_kg: float | None = None
     reps_left: int | None = None
     reps_right: int | None = None
     set_type: str | None = None
     sub_sets: list | str | None = None
-    peg_weights: str | None = None  # JSON: {"peg1":kg,"peg2":kg,"peg3":kg} per side
+    peg_weights: dict | list | str | None = None  # JSON: {"peg1":kg,"peg2":kg,"peg3":kg} per side
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None
@@ -147,6 +148,10 @@ class SetUpdate(BaseModel):
 class SetResponse(BaseModel):
     id: int
     exercise_id: int
+    exercise_name: str | None = None
+    movement_type: str | None = None
+    body_region: str | None = None
+    equipment_type: str | None = None
     set_number: int
     planned_reps: int | None = None
     planned_reps_left: int | None = None
@@ -333,6 +338,17 @@ class FoodItemCreate(BaseModel):
     serving_size_g: float = Field(default=100, gt=0)
     serving_label: str | None = None
     micronutrients: dict | None = None
+
+    @model_validator(mode="after")
+    def align_calories_with_macros(self) -> "FoodItemCreate":
+        macro_calories = round(
+            self.protein_per_100g * 4
+            + self.carbs_per_100g * 4
+            + self.fat_per_100g * 9,
+            1,
+        )
+        self.calories_per_100g = macro_calories
+        return self
 
 
 class FoodItemUpdate(FoodItemCreate):

@@ -7,10 +7,10 @@
     getExercises, getPlan, getPlans, getNextWorkout, getRecentExercises, getSession, getSessions,
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
-    getExerciseHistory, getAllExerciseNotes, setExerciseNote,
+    getExerciseHistory, getAllExerciseNotes, setExerciseNote, getPersonalRecords,
     saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution } from '$lib/api';
+  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution, PersonalRecord } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
@@ -141,6 +141,8 @@
   let sessionId = $state<number | null>(null);
   let workoutName = $state('Workout');
   let allExercises = $state<Exercise[]>([]);
+  let personalRecordsByExercise = $state<Record<number, PersonalRecord>>({});
+  let startingPersonalRecordsByExercise = $state<Record<number, PersonalRecord>>({});
   let uiExercises = $state<UIExercise[]>([]);
 
   let exerciseGroups = $derived(computeGroups(uiExercises));
@@ -194,25 +196,115 @@
   let prCelebration = $state<{ exercise: string; type: string; value: string } | null>(null);
   let prTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  function checkForPR(ex: UIExercise, set: UISet) {
+  function indexPersonalRecords(records: PersonalRecord[]): Record<number, PersonalRecord> {
+    return Object.fromEntries(records.map((record) => [record.exercise_id, record]));
+  }
+
+  function emptyPersonalRecord(exercise: Exercise): PersonalRecord {
+    return {
+      exercise_id: exercise.id,
+      display_name: exercise.display_name,
+      name: exercise.name,
+      max_weight_kg: 0,
+      max_weight_date: null,
+      max_reps: 0,
+      max_reps_date: null,
+      best_1rm_kg: 0,
+      best_1rm_date: null,
+      best_set_weight_kg: 0,
+      best_set_reps: 0,
+    };
+  }
+
+  function getSetRepCount(ex: UIExercise, set: UISet): number {
+    return ex.isUnilateral
+      ? Math.min(set.repsLeft ?? 0, set.repsRight ?? 0)
+      : (set.reps ?? 0);
+  }
+
+  function getSetWeightKg(set: UISet): number {
+    return set.weightLbs != null ? toKg(set.weightLbs) : 0;
+  }
+
+  function getEstimatedOneRmKg(weightKg: number, reps: number): number {
+    return weightKg > 0 && reps > 0 ? weightKg * (1 + reps / 30) : 0;
+  }
+
+  function formatDisplayWeight(kg: number): string {
+    return `${fromKg(kg)} ${unit}`;
+  }
+
+  type PRHit = {
+    type: 'weight' | 'reps' | '1rm';
+    value: string;
+    rawValue: number;
+  };
+
+  function getPrHits(
+    ex: UIExercise,
+    set: UISet,
+    recordMap: Record<number, PersonalRecord>,
+  ): PRHit[] {
     const exercise = allExercises.find(e => e.id === ex.exerciseId);
-    if (!exercise || !set.initWeight || !set.initReps) return;
-    const w = set.weightLbs ?? 0;
-    const r = ex.isUnilateral ? Math.min(set.repsLeft ?? 0, set.repsRight ?? 0) : (set.reps ?? 0);
+    if (!exercise) return [];
+
+    const baseline = recordMap[ex.exerciseId] ?? emptyPersonalRecord(exercise);
+    const reps = getSetRepCount(ex, set);
+    const weightKg = getSetWeightKg(set);
+    const estOneRmKg = getEstimatedOneRmKg(weightKg, reps);
     const isAsst = exercise.is_assisted ?? false;
 
-    let prType = '';
-    let prValue = '';
-    if (!isAsst && w > (set.initWeight ?? 0)) {
-      prType = 'Weight PR';
-      prValue = `${w} ${unit}`;
-    } else if (r > (set.initReps ?? 0)) {
-      prType = 'Rep PR';
-      prValue = `${r} reps`;
+    const hits: PRHit[] = [];
+    if (!isAsst && weightKg > baseline.max_weight_kg) {
+      hits.push({ type: 'weight', value: formatDisplayWeight(weightKg), rawValue: weightKg });
+    }
+    if (reps > baseline.max_reps) {
+      hits.push({ type: 'reps', value: `${reps} reps`, rawValue: reps });
+    }
+    if (!isAsst && estOneRmKg > baseline.best_1rm_kg) {
+      hits.push({ type: '1rm', value: formatDisplayWeight(estOneRmKg), rawValue: estOneRmKg });
+    }
+    return hits;
+  }
+
+  function updateLivePersonalRecords(ex: UIExercise, set: UISet) {
+    const exercise = allExercises.find(e => e.id === ex.exerciseId);
+    if (!exercise) return;
+
+    const current = personalRecordsByExercise[ex.exerciseId] ?? emptyPersonalRecord(exercise);
+    const reps = getSetRepCount(ex, set);
+    const weightKg = getSetWeightKg(set);
+    const estOneRmKg = getEstimatedOneRmKg(weightKg, reps);
+    const updated: PersonalRecord = { ...current };
+
+    if (weightKg > updated.max_weight_kg) {
+      updated.max_weight_kg = weightKg;
+    }
+    if (reps > updated.max_reps) {
+      updated.max_reps = reps;
+    }
+    if (estOneRmKg > updated.best_1rm_kg) {
+      updated.best_1rm_kg = estOneRmKg;
+      updated.best_set_weight_kg = weightKg;
+      updated.best_set_reps = reps;
     }
 
-    if (prType) {
-      prCelebration = { exercise: exercise.display_name, type: prType, value: prValue };
+    personalRecordsByExercise = {
+      ...personalRecordsByExercise,
+      [ex.exerciseId]: updated,
+    };
+  }
+
+  function checkForPR(ex: UIExercise, set: UISet) {
+    const exercise = allExercises.find(e => e.id === ex.exerciseId);
+    if (!exercise) return;
+
+    const hits = getPrHits(ex, set, personalRecordsByExercise);
+    if (hits.length > 0) {
+      updateLivePersonalRecords(ex, set);
+      const hit = hits[0];
+      const label = hit.type === 'weight' ? 'Weight PR' : hit.type === 'reps' ? 'Rep PR' : '1RM PR';
+      prCelebration = { exercise: exercise.display_name, type: label, value: hit.value };
       if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
       fireConfetti();
       if (prTimeout) clearTimeout(prTimeout);
@@ -719,9 +811,15 @@
       const dayNumber = parseInt(params.get('day') || '1');
       const isDeload = params.get('deload') === 'true';
 
-      const [exData, notesData] = await Promise.all([getExercises(), getAllExerciseNotes()]);
+      const [exData, notesData, recordData] = await Promise.all([
+        getExercises(),
+        getAllExerciseNotes(),
+        getPersonalRecords().catch(() => []),
+      ]);
       allExercises = exData;
       exerciseStore.set(allExercises);
+      personalRecordsByExercise = indexPersonalRecords(recordData);
+      startingPersonalRecordsByExercise = indexPersonalRecords(recordData);
       // Convert string keys to numbers
       for (const [k, v] of Object.entries(notesData)) {
         exerciseNotes[Number(k)] = v.note;
@@ -2143,26 +2241,25 @@
     for (const ex of uiExercises) {
       const exercise = getEx(ex.exerciseId);
       if (!exercise) continue;
-      const isAsst = exercise.is_assisted ?? false;
       const doneSetsEx = ex.sets.filter(s => s.done);
       if (doneSetsEx.length === 0) continue;
-      let foundWeight = false;
-      let foundReps = false;
+      let bestWeight: PRHit | null = null;
+      let bestReps: PRHit | null = null;
+      let bestOneRm: PRHit | null = null;
       for (const s of doneSetsEx) {
-        const w = s.weightLbs ?? 0;
-        const r = s.reps ?? (ex.isUnilateral ? Math.min(s.repsLeft ?? 0, s.repsRight ?? 0) : 0);
-        if (!s.initWeight || !s.initReps) continue;
-        // Weight PR: beat the suggested weight (not applicable for assisted)
-        if (!foundWeight && !isAsst && w > (s.initWeight ?? 0)) {
-          results.push({ exerciseName: exercise.display_name, type: 'weight', value: `${w} ${unit}` });
-          foundWeight = true;
-        }
-        // Rep PR: beat the suggested reps
-        if (!foundReps && r > (s.initReps ?? 0)) {
-          results.push({ exerciseName: exercise.display_name, type: 'reps', value: `${r} reps` });
-          foundReps = true;
+        for (const hit of getPrHits(ex, s, startingPersonalRecordsByExercise)) {
+          if (hit.type === 'weight' && (!bestWeight || hit.rawValue > bestWeight.rawValue)) {
+            bestWeight = hit;
+          } else if (hit.type === 'reps' && (!bestReps || hit.rawValue > bestReps.rawValue)) {
+            bestReps = hit;
+          } else if (hit.type === '1rm' && (!bestOneRm || hit.rawValue > bestOneRm.rawValue)) {
+            bestOneRm = hit;
+          }
         }
       }
+      if (bestWeight) results.push({ exerciseName: exercise.display_name, type: 'weight', value: bestWeight.value });
+      if (bestReps) results.push({ exerciseName: exercise.display_name, type: 'reps', value: bestReps.value });
+      if (bestOneRm) results.push({ exerciseName: exercise.display_name, type: '1rm', value: bestOneRm.value });
     }
     return results;
   }
@@ -2298,11 +2395,13 @@
   let historyExerciseId = $state<number | null>(null);
   let historyData = $state<ExerciseHistorySession[]>([]);
   let loadingHistory = $state(false);
+  let expandedHistorySessionKeys = $state<Set<string>>(new Set());
 
   async function openHistory(exerciseId: number) {
     historyExerciseId = exerciseId;
     historyData = [];
     loadingHistory = true;
+    expandedHistorySessionKeys = new Set();
     try {
       historyData = await getExerciseHistory(exerciseId, 8);
     } catch { /* silently fail */ }
@@ -2311,6 +2410,40 @@
 
   function fmtHistDate(iso: string) {
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function historySessionKey(session: ExerciseHistorySession): string {
+    return `${session.date}:${session.session_name ?? session.plan_name ?? 'session'}`;
+  }
+
+  function toggleHistorySession(key: string) {
+    if (expandedHistorySessionKeys.has(key)) expandedHistorySessionKeys.delete(key);
+    else expandedHistorySessionKeys.add(key);
+    expandedHistorySessionKeys = new Set(expandedHistorySessionKeys);
+  }
+
+  function historyBestSet(session: ExerciseHistorySession) {
+    const completedSets = session.sets.filter((set) =>
+      set.actual_weight_kg != null && (set.actual_reps != null || set.reps_left != null || set.reps_right != null)
+    );
+    if (completedSets.length === 0) return null;
+
+    return completedSets.reduce((best, current) => {
+      const bestReps = best.actual_reps ?? Math.min(best.reps_left ?? 0, best.reps_right ?? 0);
+      const currentReps = current.actual_reps ?? Math.min(current.reps_left ?? 0, current.reps_right ?? 0);
+      const bestWeight = best.actual_weight_kg ?? 0;
+      const currentWeight = current.actual_weight_kg ?? 0;
+      if (currentWeight > bestWeight) return current;
+      if (currentWeight === bestWeight && currentReps > bestReps) return current;
+      return best;
+    });
+  }
+
+  function historySetReps(set: ExerciseHistorySession['sets'][number]): string {
+    if (set.actual_reps == null && (set.reps_left != null || set.reps_right != null)) {
+      return `L:${set.reps_left ?? '—'}/R:${set.reps_right ?? '—'}`;
+    }
+    return `${set.actual_reps ?? '—'}`;
   }
 
   // ─── Un-complete a set ────────────────────────────────────────────────────
@@ -3673,44 +3806,60 @@
           <p class="text-zinc-500 text-sm text-center py-10">No history yet for this exercise.</p>
         {:else}
           {#each historyData as session}
-            <div>
-              <div class="flex items-baseline justify-between mb-1.5">
-                <div class="flex items-baseline gap-2">
-                  {#if session.week_number != null && session.plan_name}
-                    <span class="text-sm font-semibold text-primary-400">{session.plan_name} wk {session.week_number}</span>
-                  {:else if session.session_name}
-                    <span class="text-sm font-semibold text-zinc-300">{session.session_name}</span>
-                  {/if}
-                  <span class="text-xs text-zinc-500">{fmtHistDate(session.date)}</span>
-                </div>
-              </div>
-              <div class="bg-zinc-950 rounded-lg overflow-hidden">
-                <div class="grid px-3 py-1.5 border-b border-zinc-800" style="grid-template-columns: 2rem 1fr 1fr">
-                  <span class="text-xs text-zinc-500">#</span>
-                  <span class="text-xs text-zinc-500 text-right">{histEx?.is_assisted ? '−Assist' : `Wt (${unit})`}</span>
-                  <span class="text-xs text-zinc-500 text-right">Reps</span>
-                </div>
-                {#each session.sets as s}
-                  {@const dispW = s.actual_weight_kg != null
-                    ? (histEx?.is_assisted
-                        ? -fromKg(s.actual_weight_kg)   // assist amount stored directly; show as negative
-                        : fromKg(s.actual_weight_kg))
-                    : null}
-                  <div class="grid px-3 py-1.5 border-b border-gray-800 last:border-0" style="grid-template-columns: 2rem 1fr 1fr">
-                    <span class="text-xs text-zinc-500 font-mono">{s.set_number}</span>
-                    <span class="text-sm font-mono text-right {dispW != null ? 'text-white' : 'text-gray-600'}">
-                      {dispW != null ? dispW : '—'}
-                    </span>
-                    <span class="text-sm font-mono text-right {(s.actual_reps != null || s.reps_left != null || s.reps_right != null) ? 'text-white' : 'text-gray-600'}">
-                      {#if s.actual_reps == null && (s.reps_left != null || s.reps_right != null)}
-                        L:{s.reps_left ?? '—'}/R:{s.reps_right ?? '—'}
-                      {:else}
-                        {s.actual_reps ?? '—'}
-                      {/if}
-                    </span>
+            {@const sessionKey = historySessionKey(session)}
+            {@const bestSet = historyBestSet(session)}
+            {@const bestWeight = bestSet?.actual_weight_kg != null
+              ? (histEx?.is_assisted ? -fromKg(bestSet.actual_weight_kg) : fromKg(bestSet.actual_weight_kg))
+              : null}
+            <div class="bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800">
+              <button
+                onclick={() => toggleHistorySession(sessionKey)}
+                class="w-full flex items-center justify-between gap-3 px-3 py-3 text-left hover:bg-zinc-900/60 transition-colors"
+              >
+                <div class="min-w-0">
+                  <div class="flex items-baseline gap-2 flex-wrap">
+                    {#if session.week_number != null && session.plan_name}
+                      <span class="text-sm font-semibold text-primary-400">{session.plan_name} wk {session.week_number}</span>
+                    {:else if session.session_name}
+                      <span class="text-sm font-semibold text-zinc-300">{session.session_name}</span>
+                    {/if}
+                    <span class="text-xs text-zinc-500">{fmtHistDate(session.date)}</span>
                   </div>
-                {/each}
-              </div>
+                  <p class="text-xs text-zinc-500 mt-1">
+                    {session.sets.length} {session.sets.length === 1 ? 'set' : 'sets'}
+                    {#if bestSet && bestWeight != null}
+                      · Top set {bestWeight} {unit} × {historySetReps(bestSet)}
+                    {/if}
+                  </p>
+                </div>
+                <span class="text-xs text-zinc-500 shrink-0">
+                  {expandedHistorySessionKeys.has(sessionKey) ? 'Hide sets' : 'View sets'}
+                </span>
+              </button>
+
+              {#if expandedHistorySessionKeys.has(sessionKey)}
+                <div class="border-t border-zinc-800">
+                  <div class="grid px-3 py-1.5 border-b border-zinc-800" style="grid-template-columns: 2rem 1fr 1fr">
+                    <span class="text-xs text-zinc-500">#</span>
+                    <span class="text-xs text-zinc-500 text-right">{histEx?.is_assisted ? '−Assist' : `Wt (${unit})`}</span>
+                    <span class="text-xs text-zinc-500 text-right">Reps</span>
+                  </div>
+                  {#each session.sets as s}
+                    {@const dispW = s.actual_weight_kg != null
+                      ? (histEx?.is_assisted ? -fromKg(s.actual_weight_kg) : fromKg(s.actual_weight_kg))
+                      : null}
+                    <div class="grid px-3 py-1.5 border-b border-gray-800 last:border-0" style="grid-template-columns: 2rem 1fr 1fr">
+                      <span class="text-xs text-zinc-500 font-mono">{s.set_number}</span>
+                      <span class="text-sm font-mono text-right {dispW != null ? 'text-white' : 'text-gray-600'}">
+                        {dispW != null ? dispW : '—'}
+                      </span>
+                      <span class="text-sm font-mono text-right {(s.actual_reps != null || s.reps_left != null || s.reps_right != null) ? 'text-white' : 'text-gray-600'}">
+                        {historySetReps(s)}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         {/if}

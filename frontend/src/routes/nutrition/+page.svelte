@@ -52,6 +52,9 @@
   let saveAsCustom = $state(false);
   let showFullMacros = $state(false);
   let editingFood = $state<FoodItem | null>(null);
+  let customFoodMacroCalories = $derived(
+    Math.round(((manualProtein ?? 0) * 4 + (manualCarbs ?? 0) * 4 + (manualFat ?? 0) * 9) * 10) / 10
+  );
 
   // Inline entry editing
   let editingEntry = $state<NutritionEntry | null>(null);
@@ -470,7 +473,7 @@
       await createCustomFood({
         name: manualName.trim(),
         brand: manualBrand.trim() || undefined,
-        calories_per_100g: (manualCal ?? 0) * scale,
+        calories_per_100g: customFoodMacroCalories * scale,
         protein_per_100g: (manualProtein ?? 0) * scale,
         carbs_per_100g: (manualCarbs ?? 0) * scale,
         fat_per_100g: (manualFat ?? 0) * scale,
@@ -509,7 +512,7 @@
       name: manualName.trim(),
       brand: manualBrand.trim() || undefined,
       barcode: editingFood.barcode ?? undefined,
-      calories_per_100g: (manualCal ?? 0) * scale,
+      calories_per_100g: customFoodMacroCalories * scale,
       protein_per_100g: (manualProtein ?? 0) * scale,
       carbs_per_100g: (manualCarbs ?? 0) * scale,
       fat_per_100g: (manualFat ?? 0) * scale,
@@ -1564,6 +1567,11 @@
                 <input type="checkbox" bind:checked={saveAsCustom} class="rounded bg-zinc-800 border-zinc-700" />
                 Save as custom food
               </label>
+              {/if}
+              {#if editingFood || saveAsCustom}
+                <p class="text-xs text-zinc-500">
+                  Saved custom food calories will use macros: {customFoodMacroCalories} kcal for this serving.
+                </p>
               {/if}
               <button onclick={editingFood ? saveEditedFood : logManualEntry} disabled={!manualName.trim()}
                       class="btn-primary w-full disabled:opacity-40 disabled:cursor-not-allowed">
