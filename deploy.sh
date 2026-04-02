@@ -23,8 +23,15 @@ set -euo pipefail
 APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$APP_DIR"
 BACKUP_DIR="$APP_DIR/backups"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 LOG_TZ="${DEPLOY_LOG_TZ:-America/New_York}"
+
+# Files that track the SHA last successfully deployed for each branch.
+# Used by --watch so restarts pick up from what is actually running,
+# not from the current remote HEAD at the moment the script opens.
+LAST_DEPLOYED_MAIN="$APP_DIR/.last-deployed-main"
+LAST_DEPLOYED_DEV="$APP_DIR/.last-deployed-dev"
+
+fresh_timestamp() { date +%Y%m%d_%H%M%S; }
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -92,7 +99,7 @@ migrate_to_docker() {
   # 2. Backup current database
   mkdir -p "$BACKUP_DIR"
   if [ -f "$APP_DIR/homegym.db" ]; then
-    local backup_path="$BACKUP_DIR/homegym_pre_docker_${TIMESTAMP}.db"
+    local backup_path="$BACKUP_DIR/homegym_pre_docker_$(fresh_timestamp).db"
     log "Backing up database to: $(basename "$backup_path")"
     cp "$APP_DIR/homegym.db" "$backup_path"
   fi
@@ -147,7 +154,7 @@ migrate_to_docker() {
     docker compose exec -T main bash -c "PYTHONPATH=/app python scripts/migrate_sqlite_to_pg.py /tmp/homegym.db" || {
       warn "SQLite migration had issues — check manually"
     }
-    mv "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_pre_postgres_${TIMESTAMP}.db"
+    mv "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_pre_postgres_$(fresh_timestamp).db"
     log "SQLite backup saved. PostgreSQL is now the database."
   fi
 
@@ -173,13 +180,11 @@ migrate_to_docker() {
 
 docker_deploy() {
   local target="${1:-all}"
+  local ts
+  ts=$(fresh_timestamp)   # fresh timestamp per deploy, not from script open
 
-  log "Starting Docker deployment at $TIMESTAMP"
+  log "Starting Docker deployment at $ts"
   mkdir -p "$BACKUP_DIR"
-
-  # Save current HEAD to detect infra changes after pull
-  local prev_head
-  prev_head=$(git rev-parse HEAD 2>/dev/null || echo "none")
 
   # 1. Pull latest code
   log "Pulling latest code..."
@@ -188,6 +193,9 @@ docker_deploy() {
   if [ "$target" = "dev" ]; then
     log "Updating dev branch only..."
     git fetch origin dev
+
+    local deployed_dev
+    deployed_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
 
     log "Rebuilding dev container..."
     local tmpdir
@@ -200,21 +208,33 @@ docker_deploy() {
     docker compose stop dev
     docker compose up -d --no-build --force-recreate dev
     docker_health_check_async dev
+
+    # Record what we just deployed so --watch restarts use this as baseline
+    echo "$deployed_dev" > "$LAST_DEPLOYED_DEV"
     return
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
     git fetch origin main
     git reset --hard origin/main
 
+    local deployed_main
+    deployed_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
+
     log "Rebuilding main container..."
     docker compose build main
     docker compose up -d main
     docker_health_check_async main
+
+    echo "$deployed_main" > "$LAST_DEPLOYED_MAIN"
     return
   else
     log "Updating all branches..."
     git fetch origin
     git reset --hard origin/main
+
+    local deployed_main deployed_dev
+    deployed_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
+    deployed_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
 
     log "Rebuilding main container..."
     docker compose build main
@@ -227,6 +247,9 @@ docker_deploy() {
     rm -rf "$tmpdir"
 
     docker compose up -d --no-build --force-recreate
+
+    echo "$deployed_main" > "$LAST_DEPLOYED_MAIN"
+    echo "$deployed_dev"  > "$LAST_DEPLOYED_DEV"
   fi
 
   docker_health_check_async all
@@ -342,14 +365,15 @@ legacy_deploy() {
   warn "Running legacy bare-metal deploy. Run again to migrate to Docker."
   # ... (original deploy logic preserved below for one more run)
 
-  log "Starting legacy deployment at $TIMESTAMP"
+  local ts; ts=$(fresh_timestamp)
+  log "Starting legacy deployment at $ts"
   mkdir -p "$BACKUP_DIR" "$APP_DIR/logs"
 
   local current_ref
   current_ref=$(git -C "$APP_DIR" rev-parse HEAD 2>/dev/null || echo "none")
 
   if [ -f "$APP_DIR/homegym.db" ]; then
-    cp "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_${TIMESTAMP}.db"
+    cp "$APP_DIR/homegym.db" "$BACKUP_DIR/homegym_${ts}.db"
     ls -t "$BACKUP_DIR"/homegym_*.db 2>/dev/null | tail -n +11 | xargs rm -f 2>/dev/null || true
   fi
 
@@ -406,13 +430,25 @@ watch_and_reload() {
 
   log "Watching for changes every ${interval}s (Ctrl+C to stop)..."
 
-  # Store current remote HEADs
+  # Use the SHA that was last *deployed* as the baseline, not the current
+  # remote HEAD.  This means if --watch is restarted after pushes happened
+  # while it was stopped, those commits will be picked up and deployed on
+  # the very first poll — rather than silently skipped because the remote
+  # already shows those SHAs when the script opens.
   git fetch origin --quiet
   local last_main last_dev
-  last_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
-  last_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
+  if [ -f "$LAST_DEPLOYED_MAIN" ]; then
+    last_main=$(cat "$LAST_DEPLOYED_MAIN")
+  else
+    last_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
+  fi
+  if [ -f "$LAST_DEPLOYED_DEV" ]; then
+    last_dev=$(cat "$LAST_DEPLOYED_DEV")
+  else
+    last_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
+  fi
 
-  log "main: ${last_main:0:7}  dev: ${last_dev:0:7}"
+  log "Baseline — main: ${last_main:0:7}  dev: ${last_dev:0:7}"
 
   while true; do
     sleep "$interval"
