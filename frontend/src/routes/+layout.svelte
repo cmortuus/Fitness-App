@@ -78,6 +78,19 @@
     }
   });
 
+  // ── Theme preference ─────────────────────────────────────────────────
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    const theme = $settings.themePreference ?? 'dark';
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    document.body.dataset.theme = theme;
+
+    const themeColor = theme === 'light' ? '#f4f4f5' : '#09090b';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    meta?.setAttribute('content', themeColor);
+  });
+
   // ── Offline detection + sync ──────────────────────────────────────────
   $effect(() => {
     if (typeof window === 'undefined') return;

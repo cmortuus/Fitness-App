@@ -24,16 +24,49 @@ enum AppConstants {
 // MARK: - Design System (matching web Tailwind zinc palette)
 
 enum AppColors {
+    private static func dynamic(light: UIColor, dark: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in
+            traits.userInterfaceStyle == .dark ? dark : light
+        })
+    }
+
     // Zinc palette — matches Tailwind zinc scale
-    static let zinc950 = Color(red: 0.055, green: 0.055, blue: 0.063)  // bg
-    static let zinc900 = Color(red: 0.094, green: 0.094, blue: 0.106)  // card
-    static let zinc800 = Color(red: 0.153, green: 0.153, blue: 0.169)  // card-elevated, inputs
-    static let zinc700 = Color(red: 0.247, green: 0.247, blue: 0.267)  // borders
-    static let zinc600 = Color(red: 0.329, green: 0.329, blue: 0.353)  // input borders
-    static let zinc500 = Color(red: 0.443, green: 0.443, blue: 0.471)  // muted text
-    static let zinc400 = Color(red: 0.631, green: 0.631, blue: 0.659)  // secondary text
-    static let zinc300 = Color(red: 0.831, green: 0.831, blue: 0.847)  // primary text
-    static let zinc100 = Color(red: 0.953, green: 0.953, blue: 0.961)  // bright text
+    static let zinc950 = dynamic(
+        light: UIColor(red: 0.980, green: 0.980, blue: 0.985, alpha: 1),
+        dark: UIColor(red: 0.055, green: 0.055, blue: 0.063, alpha: 1)
+    )
+    static let zinc900 = dynamic(
+        light: UIColor(red: 1.0, green: 1.0, blue: 1.0, alpha: 1),
+        dark: UIColor(red: 0.094, green: 0.094, blue: 0.106, alpha: 1)
+    )
+    static let zinc800 = dynamic(
+        light: UIColor(red: 0.957, green: 0.957, blue: 0.965, alpha: 1),
+        dark: UIColor(red: 0.153, green: 0.153, blue: 0.169, alpha: 1)
+    )
+    static let zinc700 = dynamic(
+        light: UIColor(red: 0.894, green: 0.894, blue: 0.910, alpha: 1),
+        dark: UIColor(red: 0.247, green: 0.247, blue: 0.267, alpha: 1)
+    )
+    static let zinc600 = dynamic(
+        light: UIColor(red: 0.831, green: 0.831, blue: 0.847, alpha: 1),
+        dark: UIColor(red: 0.329, green: 0.329, blue: 0.353, alpha: 1)
+    )
+    static let zinc500 = dynamic(
+        light: UIColor(red: 0.443, green: 0.443, blue: 0.471, alpha: 1),
+        dark: UIColor(red: 0.443, green: 0.443, blue: 0.471, alpha: 1)
+    )
+    static let zinc400 = dynamic(
+        light: UIColor(red: 0.325, green: 0.325, blue: 0.353, alpha: 1),
+        dark: UIColor(red: 0.631, green: 0.631, blue: 0.659, alpha: 1)
+    )
+    static let zinc300 = dynamic(
+        light: UIColor(red: 0.149, green: 0.149, blue: 0.165, alpha: 1),
+        dark: UIColor(red: 0.831, green: 0.831, blue: 0.847, alpha: 1)
+    )
+    static let zinc100 = dynamic(
+        light: UIColor(red: 0.071, green: 0.071, blue: 0.090, alpha: 1),
+        dark: UIColor(red: 0.953, green: 0.953, blue: 0.961, alpha: 1)
+    )
 
     // Accent colors
     static let primary = Color(red: 0.231, green: 0.510, blue: 0.965)  // #3b82f6

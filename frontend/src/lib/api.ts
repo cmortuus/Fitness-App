@@ -184,6 +184,9 @@ export interface Set {
   id: number;
   exercise_id: number;
   exercise_name: string | null;
+  movement_type?: string | null;
+  body_region?: string | null;
+  equipment_type?: string | null;
   set_number: number;
   planned_reps: number | null;
   planned_reps_left: number | null;
@@ -199,6 +202,7 @@ export interface Set {
   skipped_at: string | null;
   set_type: string | null;
   sub_sets: { weight_kg: number; reps: number; type?: string }[] | null;
+  peg_weights?: { peg1?: number; peg2?: number; peg3?: number } | null;
   // Draft fields populated by the server for in-progress sets
   draft_weight_kg: number | null;
   draft_reps: number | null;
@@ -508,7 +512,21 @@ export async function recalculateWeights(pattern: string, oldBaseKg: number, new
 }
 
 // Personal records
-export async function getPersonalRecords(): Promise<any[]> {
+export interface PersonalRecord {
+  exercise_id: number;
+  display_name: string;
+  name: string;
+  max_weight_kg: number;
+  max_weight_date: string | null;
+  max_reps: number;
+  max_reps_date: string | null;
+  best_1rm_kg: number;
+  best_1rm_date: string | null;
+  best_set_weight_kg: number;
+  best_set_reps: number;
+}
+
+export async function getPersonalRecords(): Promise<PersonalRecord[]> {
   const response = await api.get('/progress/records');
   return response.data;
 }

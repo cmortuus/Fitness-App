@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct GymTrackerApp: App {
     @Environment(\.scenePhase) private var scenePhase
+    @AppStorage(SettingsKey.themePreference) private var themePreference: String = "dark"
     @State private var auth = AuthService.shared
 
     var body: some Scene {
@@ -25,7 +26,7 @@ struct GymTrackerApp: App {
                 }
             }
             .environment(auth)
-            .preferredColorScheme(.dark)
+            .preferredColorScheme(themePreference == "light" ? .light : .dark)
         }
     }
 }

@@ -448,10 +448,11 @@ async def get_personal_records(
 ) -> list[dict]:
     """Get personal records per exercise — heaviest weight, most reps, best estimated 1RM."""
     result = await db.execute(
-        select(ExerciseSet, Exercise.display_name, Exercise.name)
+        select(ExerciseSet, Exercise.display_name, Exercise.name, WorkoutSession.date)
         .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
         .join(Exercise, ExerciseSet.exercise_id == Exercise.id)
         .where(WorkoutSession.user_id == user.id)
+        .where(WorkoutSession.status == WorkoutStatus.COMPLETED)
         .where(ExerciseSet.actual_reps.isnot(None))
         .where(ExerciseSet.actual_weight_kg.isnot(None))
         .where(ExerciseSet.actual_weight_kg > 0)
@@ -461,11 +462,12 @@ async def get_personal_records(
 
     # Group by exercise
     exercise_data: dict[int, dict] = {}
-    for exercise_set, display_name, name in rows:
+    for exercise_set, display_name, name, session_date in rows:
         eid = exercise_set.exercise_id
         w = exercise_set.actual_weight_kg or 0
         r = exercise_set.actual_reps or 0
         est_1rm = w * (1 + r / 30) if r > 0 and w > 0 else 0
+        achieved_on = session_date.isoformat()
 
         if eid not in exercise_data:
             exercise_data[eid] = {
@@ -473,8 +475,11 @@ async def get_personal_records(
                 "display_name": display_name,
                 "name": name,
                 "max_weight_kg": 0,
+                "max_weight_date": None,
                 "max_reps": 0,
+                "max_reps_date": None,
                 "best_1rm_kg": 0,
+                "best_1rm_date": None,
                 "best_set_weight_kg": 0,
                 "best_set_reps": 0,
             }
@@ -482,10 +487,13 @@ async def get_personal_records(
         d = exercise_data[eid]
         if w > d["max_weight_kg"]:
             d["max_weight_kg"] = w
+            d["max_weight_date"] = achieved_on
         if r > d["max_reps"]:
             d["max_reps"] = r
+            d["max_reps_date"] = achieved_on
         if est_1rm > d["best_1rm_kg"]:
             d["best_1rm_kg"] = round(est_1rm, 1)
+            d["best_1rm_date"] = achieved_on
             d["best_set_weight_kg"] = w
             d["best_set_reps"] = r
 

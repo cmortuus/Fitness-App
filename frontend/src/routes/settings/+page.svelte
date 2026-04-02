@@ -486,6 +486,26 @@
     </div>
   </div>
 
+  <!-- ── Theme ───────────────────────────────────────────────────────── -->
+  <div class="card space-y-4">
+    <div>
+      <h3 class="text-lg font-semibold">Appearance</h3>
+      <p class="text-sm text-zinc-400 mt-1">Choose the app theme for the web app and sync it to your account.</p>
+    </div>
+    <div class="flex gap-3">
+      {#each [['dark', 'Dark'], ['light', 'Light']] as [val, label]}
+        <button
+          onclick={() => settings.update(s => ({ ...s, themePreference: val as 'dark' | 'light' }))}
+          class="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors {
+            $settings.themePreference === val
+              ? 'bg-primary-600 text-white'
+              : 'bg-zinc-800 hover:bg-gray-600 text-gray-300'
+          }"
+        >{label}</button>
+      {/each}
+    </div>
+  </div>
+
   <!-- ── Body Weight / Weigh-in Log ──────────────────────────────────── -->
   <div class="card space-y-4">
     <div>

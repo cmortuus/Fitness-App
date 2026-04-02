@@ -5,6 +5,8 @@ import HealthKit
 /// Handles body weight sync, workout logging, and authorization.
 final class HealthKitManager: @unchecked Sendable {
     static let shared = HealthKitManager()
+    private let workoutBrandNames = ["GymTracker", "Onyx Intake", "Onyx Expenditure"]
+    private let backendSessionIdMetadataKey = "BackendSessionID"
 
     private let store = HKHealthStore()
 
@@ -253,6 +255,16 @@ final class HealthKitManager: @unchecked Sendable {
             return false
         }
 
+        if let existingWorkout = await findExistingWorkout(
+            sessionId: sessionId,
+            name: name,
+            startDate: startDate,
+            endDate: endDate
+        ) {
+            print("[HealthKit] Skipping duplicate workout sync for session \(sessionId.map(String.init) ?? "?") because matching workout \(existingWorkout.uuid) already exists")
+            return true
+        }
+
         let calorieQuantity = HKQuantity(unit: .kilocalorie(), doubleValue: totalCalories)
 
         let config = HKWorkoutConfiguration()
@@ -278,12 +290,16 @@ final class HealthKitManager: @unchecked Sendable {
             try await builder.endCollection(at: endDate)
 
             // Add metadata before finishing
-            try await builder.addMetadata([
-                HKMetadataKeyWorkoutBrandName: "Onyx Intake",
+            var metadata: [String: Any] = [
+                HKMetadataKeyWorkoutBrandName: "Onyx Expenditure",
                 "WorkoutName": name,
                 "TotalSets": totalSets,
                 "TotalVolumeKg": totalVolume,
-            ])
+            ]
+            if let sessionId {
+                metadata[backendSessionIdMetadataKey] = sessionId
+            }
+            try await builder.addMetadata(metadata)
 
             try await builder.finishWorkout()
 
@@ -295,7 +311,7 @@ final class HealthKitManager: @unchecked Sendable {
         }
     }
 
-    /// Delete all GymTracker-created workouts from HealthKit
+    /// Delete workouts previously written by this app across legacy and current brand names.
     func deleteAllGymTrackerWorkouts() async -> Int {
         guard canWriteWorkouts else {
             print("[HealthKit] Cannot delete workouts — no write authorization")
@@ -303,7 +319,10 @@ final class HealthKitManager: @unchecked Sendable {
         }
 
         let workoutType = HKObjectType.workoutType()
-        let predicate = HKQuery.predicateForObjects(withMetadataKey: HKMetadataKeyWorkoutBrandName, allowedValues: ["GymTracker"])
+        let predicate = HKQuery.predicateForObjects(
+            withMetadataKey: HKMetadataKeyWorkoutBrandName,
+            allowedValues: workoutBrandNames
+        )
 
         return await withCheckedContinuation { continuation in
             let query = HKSampleQuery(sampleType: workoutType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { [weak self] _, samples, error in
@@ -313,7 +332,7 @@ final class HealthKitManager: @unchecked Sendable {
                     return
                 }
 
-                print("[HealthKit] Found \(workouts.count) GymTracker workouts to delete")
+                print("[HealthKit] Found \(workouts.count) branded workouts to delete")
                 guard !workouts.isEmpty else {
                     continuation.resume(returning: 0)
                     return
@@ -329,7 +348,7 @@ final class HealthKitManager: @unchecked Sendable {
                                 deletedWorkoutCount += 1
                             }
                         }
-                        print("[HealthKit] Deleted \(deletedWorkoutCount) GymTracker workouts and their samples")
+                        print("[HealthKit] Deleted \(deletedWorkoutCount) branded workouts and their samples")
                         continuation.resume(returning: deletedWorkoutCount)
                     } catch {
                         print("[HealthKit] Error deleting workouts: \(error.localizedDescription)")
@@ -368,5 +387,65 @@ final class HealthKitManager: @unchecked Sendable {
             }
             self.store.execute(query)
         }
+    }
+
+    private func findExistingWorkout(
+        sessionId: Int?,
+        name: String,
+        startDate: Date,
+        endDate: Date
+    ) async -> HKWorkout? {
+        let workoutType = HKObjectType.workoutType()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: startDate.addingTimeInterval(-60),
+            end: endDate.addingTimeInterval(60),
+            options: []
+        )
+
+        let workouts: [HKWorkout] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: workoutType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    print("[HealthKit] Existing workout lookup error: \(error.localizedDescription)")
+                    continuation.resume(returning: [])
+                    return
+                }
+                continuation.resume(returning: samples as? [HKWorkout] ?? [])
+            }
+            store.execute(query)
+        }
+
+        for workout in workouts {
+            guard workout.workoutActivityType == .traditionalStrengthTraining else { continue }
+            let metadata = workout.metadata ?? [:]
+            let brand = metadata[HKMetadataKeyWorkoutBrandName] as? String
+            guard brand.map({ workoutBrandNames.contains($0) }) ?? false else { continue }
+
+            if let sessionId,
+               let storedSessionId = metadata[backendSessionIdMetadataKey] as? NSNumber,
+               storedSessionId.intValue == sessionId {
+                return workout
+            }
+
+            if let sessionId,
+               let storedSessionId = metadata[backendSessionIdMetadataKey] as? String,
+               Int(storedSessionId) == sessionId {
+                return workout
+            }
+
+            let storedName = metadata["WorkoutName"] as? String
+            let sameName = storedName == name
+            let sameStart = abs(workout.startDate.timeIntervalSince(startDate)) < 1
+            let sameEnd = abs(workout.endDate.timeIntervalSince(endDate)) < 1
+            if sameName && sameStart && sameEnd {
+                return workout
+            }
+        }
+
+        return nil
     }
 }
