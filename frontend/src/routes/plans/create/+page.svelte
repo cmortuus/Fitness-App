@@ -1,6 +1,6 @@
 <script lang="ts">  import { onMount, untrack } from 'svelte';
   import { goto } from '$app/navigation';
-  import { exercises } from '$lib/stores';
+  import { exercises, settings } from '$lib/stores';
   import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise, getPlan, updatePlan } from '$lib/api';
   import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutPlan, WorkoutTemplate } from '$lib/api';
 
@@ -84,10 +84,16 @@
     exercise: Exercise | null;
   } | null>(null);
 
+  function getDefaultDoubleProgressionRange() {
+    const min = Math.max(1, Number($settings.progression?.minRepsForIncrease ?? 8) || 8);
+    const max = Math.max(min, Number($settings.progression?.maxRepsForIncrease ?? 12) || 12);
+    return { min, max };
+  }
+
   // Config values for the exercise being added
   let configSets = $state(3);
-  let configRepsMin = $state(8);
-  let configRepsMax = $state(12);
+  let configRepsMin = $state(getDefaultDoubleProgressionRange().min);
+  let configRepsMax = $state(getDefaultDoubleProgressionRange().max);
   let configSetType = $state('standard');
   let configDrops = $state<number | null>(null);
 
@@ -280,13 +286,14 @@
   }
 
   function selectExercise(exercise: Exercise) {
+    const defaultRange = getDefaultDoubleProgressionRange();
     configuringExercise = {
       exercise_id: exercise.id,
       exercise: exercise
     };
     configSets = 3;
-    configRepsMin = 8;
-    configRepsMax = 12;
+    configRepsMin = defaultRange.min;
+    configRepsMax = defaultRange.max;
     configSetType = 'standard';
     configDrops = null;
   }
