@@ -216,6 +216,7 @@ export interface WorkoutSession {
   date: string;
   status: 'planned' | 'in_progress' | 'completed' | 'skipped';
   workout_plan_id: number | null;
+  plan_day_number: number | null;
   total_volume_kg: number;
   total_sets: number;
   total_reps: number;

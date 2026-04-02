@@ -195,6 +195,7 @@ class WorkoutSessionResponse(BaseModel):
     date: date
     status: WorkoutStatusSchema
     workout_plan_id: int | None = None
+    plan_day_number: int | None = None
     total_volume_kg: float
     total_sets: int
     total_reps: int

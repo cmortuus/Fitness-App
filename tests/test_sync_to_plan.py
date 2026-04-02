@@ -230,3 +230,70 @@ class TestSyncStructural:
         assert exercises[0]["group_type"] == "superset"
         assert exercises[1]["group_id"] == "g-sync"
         assert exercises[1]["group_type"] == "superset"
+
+    async def test_sync_targets_same_day_after_day_rename(self, client: AsyncClient):
+        """Completed sessions should sync back to their original ordinal day even if labels changed."""
+        ex1 = await create_exercise(client, name="squat", display_name="Squat")
+        ex2 = await create_exercise(client, name="row", display_name="Row", primary_muscles=["back"])
+        plan = await _create_plan_with_exercises(client, [
+            {"exercise_id": ex1["id"], "sets": 2, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"},
+        ], day_name="Day 1")
+
+        # Expand to two days so day targeting matters.
+        expanded = await client.put(
+            f"/api/plans/{plan['id']}",
+            json={
+                "number_of_days": 2,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Day 1",
+                        "exercises": plan["days"][0]["exercises"],
+                    },
+                    {
+                        "day_number": 2,
+                        "day_name": "Day 2",
+                        "exercises": [
+                            {"exercise_id": ex2["id"], "sets": 2, "reps": 10, "starting_weight_kg": 0, "progression_type": "linear"},
+                        ],
+                    },
+                ],
+            },
+        )
+        assert expanded.status_code == 200, expanded.text
+
+        sess = await start_session_from_plan(client, plan["id"], day=2)
+        for s in sess["sets"]:
+            await client.patch(f"/api/sessions/{sess['id']}/sets/{s['id']}", json={
+                "actual_weight_kg": 55.0, "actual_reps": 10,
+            })
+        await _complete_session(client, sess["id"])
+
+        renamed = await client.put(
+            f"/api/plans/{plan['id']}",
+            json={
+                "number_of_days": 2,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Lower A",
+                        "exercises": expanded.json()["days"][0]["exercises"],
+                    },
+                    {
+                        "day_number": 2,
+                        "day_name": "Upper Pull",
+                        "exercises": expanded.json()["days"][1]["exercises"],
+                    },
+                ],
+            },
+        )
+        assert renamed.status_code == 200, renamed.text
+
+        sync = await client.post(f"/api/sessions/{sess['id']}/sync-to-plan")
+        assert sync.status_code == 200, sync.text
+
+        plan_after = await client.get(f"/api/plans/{plan['id']}")
+        assert plan_after.status_code == 200, plan_after.text
+        days = plan_after.json()["days"]
+        assert days[0]["exercises"][0]["starting_weight_kg"] == 0
+        assert days[1]["exercises"][0]["starting_weight_kg"] == 55.0
