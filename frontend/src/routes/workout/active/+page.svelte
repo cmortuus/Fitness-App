@@ -865,8 +865,12 @@
           try {
             const next = await getNextWorkout();
             if (next && next.plan && next.day && !next.is_complete) {
-              // Navigate to the correct plan+day URL so startFromPlan runs properly
+              // Update the URL bar so back-navigation works correctly.
+              // NOTE: goto() with replaceState does NOT re-run onMount (same-route
+              // navigation reuses the component), so we must call startFromPlan
+              // directly here rather than relying on the URL change to trigger it.
               goto(`/workout/active?plan=${next.plan.id}&day=${next.day.day_number}`, { replaceState: true });
+              await startFromPlan(next.plan.id, next.day.day_number);
               return;
             }
           } catch { /* fall through to picker if next-workout lookup fails */ }
