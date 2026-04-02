@@ -2378,15 +2378,20 @@
     expandedHistorySessionKeys = new Set(expandedHistorySessionKeys);
   }
 
+  function historyComparableReps(set: ExerciseHistorySession['sets'][number]): number {
+    return set.actual_reps ?? Math.min(set.reps_left ?? 0, set.reps_right ?? 0);
+  }
+
   function historyBestSet(session: ExerciseHistorySession) {
     const completedSets = session.sets.filter((set) =>
-      set.actual_weight_kg != null && (set.actual_reps != null || set.reps_left != null || set.reps_right != null)
+      set.actual_weight_kg != null
+      && historyComparableReps(set) >= 4
     );
     if (completedSets.length === 0) return null;
 
     return completedSets.reduce((best, current) => {
-      const bestReps = best.actual_reps ?? Math.min(best.reps_left ?? 0, best.reps_right ?? 0);
-      const currentReps = current.actual_reps ?? Math.min(current.reps_left ?? 0, current.reps_right ?? 0);
+      const bestReps = historyComparableReps(best);
+      const currentReps = historyComparableReps(current);
       const bestWeight = best.actual_weight_kg ?? 0;
       const currentWeight = current.actual_weight_kg ?? 0;
       if (currentWeight > bestWeight) return current;
