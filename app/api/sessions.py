@@ -20,6 +20,7 @@ from app.schemas.requests import (
     SetCreate,
     SetResponse,
     SetUpdate,
+    SyncSessionToPlanRequest,
     WorkoutSessionAuditResponse,
     WorkoutSessionCreate,
     WorkoutSessionResponse,
@@ -418,6 +419,7 @@ async def sync_session_to_plan(
     session_id: int,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    sync_data: Annotated[SyncSessionToPlanRequest | None, Body()] = None,
 ) -> dict:
     """Sync a completed session back to its plan — weights/reps AND structural changes.
 
@@ -451,7 +453,7 @@ async def sync_session_to_plan(
     all_sets_result = await db.execute(
         select(ExerciseSet)
         .where(ExerciseSet.workout_session_id == session_id)
-        .order_by(ExerciseSet.exercise_id, ExerciseSet.set_number)
+        .order_by(ExerciseSet.id, ExerciseSet.set_number)
     )
     all_sets = all_sets_result.scalars().all()
 
@@ -511,6 +513,20 @@ async def sync_session_to_plan(
     plan_exercise_ids = set(plan_exercise_map.keys())
     session_exercise_ids = set(seen_order)
 
+    structure_by_exercise_id: dict[int, dict] = {}
+    requested_order: list[int] = []
+    if sync_data and sync_data.exercises:
+        for item in sync_data.exercises:
+            if item.exercise_id not in structure_by_exercise_id:
+                requested_order.append(item.exercise_id)
+            structure_by_exercise_id[item.exercise_id] = item.model_dump()
+        ordered_from_client = [
+            eid for eid in requested_order
+            if eid in session_exercise_ids
+        ]
+        seen_set = set(ordered_from_client)
+        seen_order = ordered_from_client + [eid for eid in seen_order if eid not in seen_set]
+
     # Rebuild the day's exercise list in session order
     new_exercises = []
     updated_count = 0
@@ -538,9 +554,20 @@ async def sync_session_to_plan(
             if ex.get("set_type", "standard") != sdata["set_type"]:
                 ex["set_type"] = sdata["set_type"]
                 structural_changes += 1
+            structure = structure_by_exercise_id.get(eid)
+            if structure:
+                next_group_id = structure.get("group_id")
+                next_group_type = structure.get("group_type")
+                if ex.get("group_id") != next_group_id:
+                    ex["group_id"] = next_group_id
+                    structural_changes += 1
+                if ex.get("group_type") != next_group_type:
+                    ex["group_type"] = next_group_type
+                    structural_changes += 1
             new_exercises.append(ex)
         else:
             # New exercise added during session
+            structure = structure_by_exercise_id.get(eid, {})
             new_exercises.append({
                 "exercise_id": eid,
                 "sets": sdata["set_count"],
@@ -550,6 +577,8 @@ async def sync_session_to_plan(
                 "set_type": sdata["set_type"],
                 "rest_seconds": 90,
                 "notes": None,
+                "group_id": structure.get("group_id"),
+                "group_type": structure.get("group_type"),
             })
             structural_changes += 1
 

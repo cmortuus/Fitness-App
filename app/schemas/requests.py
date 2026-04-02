@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -230,6 +231,8 @@ class PlannedExercise(BaseModel):
     drops: int | None = None  # number of drops for drop sets
     rest_seconds: int | None = 90
     notes: str | None = None
+    group_id: str | None = None
+    group_type: Literal["superset", "circuit"] | None = None
 
 
 class PlanRirOverrides(BaseModel):
@@ -265,6 +268,16 @@ class WorkoutPlanCreate(BaseModel):
     auto_progression: bool = True
     is_draft: bool = False
     rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
+
+
+class SyncPlanExercise(BaseModel):
+    exercise_id: int
+    group_id: str | None = None
+    group_type: Literal["superset", "circuit"] | None = None
+
+
+class SyncSessionToPlanRequest(BaseModel):
+    exercises: list[SyncPlanExercise] = Field(default_factory=list)
 
 
 class WorkoutPlanResponse(BaseModel):

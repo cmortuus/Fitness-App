@@ -2189,7 +2189,13 @@
       }
       if (syncToPlan) {
         try {
-          const data = await syncSessionToPlan(sessionId);
+          const data = await syncSessionToPlan(sessionId, {
+            exercises: uiExercises.map((exercise) => ({
+              exercise_id: exercise.exerciseId,
+              group_id: exercise.groupId,
+              group_type: exercise.groupType,
+            })),
+          });
           syncCount = data.updated;
           syncStructural = data.structural_changes ?? 0;
         } catch (e) {

@@ -186,3 +186,47 @@ class TestSyncStructural:
         assert exercises[0]["rest_seconds"] == 120
         assert exercises[0]["notes"] == "Pause at bottom"
         assert exercises[0]["starting_weight_kg"] == 55.0
+
+    async def test_sync_uses_client_order_and_superset_grouping(self, client: AsyncClient):
+        """Sync respects the workout UI's final order and grouping metadata."""
+        ex1 = await create_exercise(client, name="bench_press", display_name="Bench Press")
+        ex2 = await create_exercise(client, name="barbell_row", display_name="Barbell Row", primary_muscles=["back"])
+        plan = await _create_plan_with_exercises(client, [
+            {"exercise_id": ex1["id"], "sets": 2, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"},
+            {"exercise_id": ex2["id"], "sets": 2, "reps": 10, "starting_weight_kg": 0, "progression_type": "linear"},
+        ])
+        sess = await start_session_from_plan(client, plan["id"])
+
+        for s in sess["sets"]:
+            await client.patch(f"/api/sessions/{sess['id']}/sets/{s['id']}", json={
+                "actual_weight_kg": 60.0,
+                "actual_reps": 8 if s["exercise_id"] == ex1["id"] else 10,
+            })
+
+        await _complete_session(client, sess["id"])
+        r = await client.post(
+            f"/api/sessions/{sess['id']}/sync-to-plan",
+            json={
+                "exercises": [
+                    {
+                        "exercise_id": ex2["id"],
+                        "group_id": "g-sync",
+                        "group_type": "superset",
+                    },
+                    {
+                        "exercise_id": ex1["id"],
+                        "group_id": "g-sync",
+                        "group_type": "superset",
+                    },
+                ]
+            },
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["structural_changes"] >= 1
+
+        exercises = await _get_plan_exercises(client, plan["id"])
+        assert [ex["exercise_id"] for ex in exercises] == [ex2["id"], ex1["id"]]
+        assert exercises[0]["group_id"] == "g-sync"
+        assert exercises[0]["group_type"] == "superset"
+        assert exercises[1]["group_id"] == "g-sync"
+        assert exercises[1]["group_type"] == "superset"
