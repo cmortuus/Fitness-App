@@ -132,6 +132,7 @@ async def get_progress(
         progress_list.append({
             "exercise_id": ex_id,
             "exercise_name": exercise.display_name,
+            "is_assisted": bool(exercise.is_assisted),
             "date": session.date.isoformat(),
             "estimated_1rm": round(estimated_1rm, 1) if estimated_1rm else None,
             "volume_load": round(volume, 1),
