@@ -101,6 +101,7 @@
 
   interface UIExercise {
     uiId: string;
+    persistKey: string;
     exerciseId: number;
     sets: UISet[];
     isUnilateral: boolean;     // overrides exercise default; shows L/R inputs
@@ -110,7 +111,7 @@
   }
 
   interface PersistedSessionExerciseStructure {
-    order: number[];
+    order: string[];
     groups: Record<string, { groupId: string | null; groupType: 'superset' | 'circuit' | null }>;
   }
 
@@ -118,6 +119,12 @@
     groupId: string | null;
     groupType: 'superset' | 'circuit' | null;
     exercises: UIExercise[];
+  }
+
+  function makePersistKey(exerciseId: number, sets: { backendId: number | null; setNumber: number }[], fallback: string) {
+    const firstBackendId = sets.find((set) => set.backendId != null)?.backendId;
+    if (firstBackendId != null) return `set-${firstBackendId}`;
+    return `tmp-${exerciseId}-${fallback}`;
   }
 
   function computeGroups(exercises: UIExercise[]): ExerciseGroup[] {
@@ -1072,6 +1079,7 @@
           }
           return {
             uiId: `${pe.exercise_id}-${Date.now()}-${Math.random()}`,
+            persistKey: makePersistKey(pe.exercise_id, sets, `${Date.now()}-${Math.random()}`),
             exerciseId: pe.exercise_id,
             sets,
             isUnilateral: isUni,
@@ -1236,6 +1244,7 @@
 
         return {
           uiId: `${exerciseId}-${Date.now()}-${Math.random()}`,
+          persistKey: makePersistKey(exerciseId, sets, `${Date.now()}-${Math.random()}`),
           exerciseId,
           sets,
           isUnilateral: isUni,
@@ -1769,10 +1778,10 @@
     const key = exerciseStructureKey(sessionId);
     if (!key || typeof localStorage === 'undefined') return;
     const payload: PersistedSessionExerciseStructure = {
-      order: uiExercises.map(e => e.exerciseId),
+      order: uiExercises.map(e => e.persistKey),
       groups: Object.fromEntries(
         uiExercises.map(e => [
-          String(e.exerciseId),
+          e.persistKey,
           { groupId: e.groupId, groupType: e.groupType },
         ]),
       ),
@@ -1791,18 +1800,18 @@
         const order = Array.isArray(saved.order) ? saved.order : [];
         const groups = saved.groups ?? {};
         const ordered = order
-          .map(id => exercises.find(e => e.exerciseId === id))
+          .map(key => exercises.find(e => e.persistKey === key))
           .filter((e): e is UIExercise => e != null)
           .map((exercise) => {
-            const group = groups[String(exercise.exerciseId)];
+            const group = groups[exercise.persistKey];
             return group
               ? { ...exercise, groupId: group.groupId ?? null, groupType: group.groupType ?? null }
               : exercise;
           });
         const rest = exercises
-          .filter(e => !order.includes(e.exerciseId))
+          .filter(e => !order.includes(e.persistKey))
           .map((exercise) => {
-            const group = groups[String(exercise.exerciseId)];
+            const group = groups[exercise.persistKey];
             return group
               ? { ...exercise, groupId: group.groupId ?? null, groupType: group.groupType ?? null }
               : exercise;
@@ -2171,6 +2180,7 @@
         }
         uiExercises[idx] = {
           uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+          persistKey: oldEx.persistKey,
           exerciseId: pickingExercise.id,
           sets: newSets,
           isUnilateral: pickingExercise.is_unilateral,
@@ -2202,6 +2212,7 @@
       }));
       uiExercises = [...uiExercises, {
         uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+        persistKey: `tmp-${pickingExercise.id}-${Date.now()}-${Math.random()}`,
         exerciseId: pickingExercise.id,
         sets,
         isUnilateral: pickingExercise.is_unilateral,
