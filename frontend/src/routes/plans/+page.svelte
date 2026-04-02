@@ -431,6 +431,14 @@
                           </div>
                         {/each}
                       {/if}
+                      <div class="pt-2">
+                        <button
+                          onclick={() => goto(`/plans/create?edit=${plan.id}&day=${day.day_number}`)}
+                          class="text-xs text-primary-400 hover:text-primary-300"
+                        >
+                          Edit This Day
+                        </button>
+                      </div>
                     </div>
                   {/if}
                 </div>
@@ -476,7 +484,7 @@
               <div class="flex items-center gap-2 pt-2 border-t border-zinc-800">
                 <button onclick={() => goto(`/plans/create?edit=${plan.id}`)}
                         class="btn-secondary text-sm">
-                  Edit Week
+                  Edit Future Days
                 </button>
                 <button onclick={() => openRirModal(plan)}
                         class="btn-secondary text-sm">

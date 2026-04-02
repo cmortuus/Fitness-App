@@ -1,4 +1,4 @@
-<script lang="ts">  import { onMount, untrack } from 'svelte';
+<script lang="ts">  import { onMount, tick, untrack } from 'svelte';
   import { goto } from '$app/navigation';
   import { exercises, settings } from '$lib/stores';
   import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise, getPlan, updatePlan } from '$lib/api';
@@ -30,6 +30,8 @@
   let editingPlanId = $state<number | null>(null);
   let loadingExistingPlan = $state(false);
   let savingPlan = $state(false);
+  let focusedDayNumber = $state<number | null>(null);
+  let focusDayHint = $state('');
 
   // Template browser state
   let templates = $state<WorkoutTemplate[]>([]);
@@ -169,6 +171,13 @@
     currentStep = 2;
   }
 
+  async function focusDay(dayNumber: number | null, behavior: ScrollBehavior = 'smooth') {
+    focusedDayNumber = dayNumber;
+    if (dayNumber == null) return;
+    await tick();
+    document.getElementById(`plan-day-${dayNumber}`)?.scrollIntoView({ behavior, block: 'start', inline: 'nearest' });
+  }
+
   onMount(() => {
     let autosaveInterval: ReturnType<typeof setInterval> | null = null;
     (async () => {
@@ -186,12 +195,20 @@
 
         const params = new URLSearchParams(window.location.search);
         const editId = Number.parseInt(params.get('edit') ?? '', 10);
+        const requestedDay = Number.parseInt(params.get('day') ?? '', 10);
 
         if (Number.isInteger(editId) && editId > 0) {
           loadingExistingPlan = true;
           try {
             const plan = await getPlan(editId);
             hydratePlan(plan);
+            if (Number.isInteger(requestedDay) && requestedDay > 0) {
+              const hasDay = plan.days.some((day) => day.day_number === requestedDay);
+              if (hasDay) {
+                focusDayHint = `Editing ${plan.days.find((day) => day.day_number === requestedDay)?.day_name ?? `Day ${requestedDay}`} so you can adjust future programming ahead of time.`;
+                await focusDay(requestedDay, 'auto');
+              }
+            }
           } catch (error) {
             console.error('Failed to load existing plan:', error);
             alert('Failed to load the selected plan for editing.');
@@ -541,6 +558,11 @@
     goto('/plans');
   }
 
+  function editSpecificDay(dayNumber: number) {
+    focusDayHint = `Editing ${days.find((day) => day.day_number === dayNumber)?.day_name ?? `Day ${dayNumber}`} so you can adjust future programming ahead of time.`;
+    focusDay(dayNumber);
+  }
+
   function moveDay(dayNum: number, direction: -1 | 1) {
     const index = days.findIndex((d) => d.day_number === dayNum);
     const targetIndex = index + direction;
@@ -689,6 +711,22 @@
   </div>
 
   <div class="p-6 max-w-7xl mx-auto space-y-6">
+    {#if currentStep === 2 && focusedDayNumber !== null}
+      <div class="rounded-xl border border-primary-500/30 bg-primary-500/10 px-4 py-3 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium text-primary-200">
+            Focused on {days.find((day) => day.day_number === focusedDayNumber)?.day_name ?? `Day ${focusedDayNumber}`}
+          </p>
+          <p class="text-xs text-zinc-300 mt-1">{focusDayHint || 'Changes here update future programming only. Completed workout history stays untouched.'}</p>
+        </div>
+        <button
+          onclick={() => focusDay(null)}
+          class="text-xs text-primary-200 hover:text-white shrink-0"
+        >
+          Clear Focus
+        </button>
+      </div>
+    {/if}
 
     <!-- Step 0: Choose method -->
     {#if createMode === 'choose'}
@@ -893,7 +931,8 @@
         <div class="grid gap-4" style="grid-template-columns: repeat({Math.min(numberOfDays, 7)}, minmax(280px, 1fr));">
           {#each days as day}
             <div
-              class="border border-zinc-800 rounded-lg p-4 min-h-[400px] transition-colors {dragOverDay === day.day_number ? 'border-primary-500 bg-zinc-800/30' : 'bg-zinc-900'}"
+              id={"plan-day-" + day.day_number}
+              class="border rounded-lg p-4 min-h-[400px] transition-colors {focusedDayNumber === day.day_number ? 'border-primary-500 bg-primary-500/5' : dragOverDay === day.day_number ? 'border-primary-500 bg-zinc-800/30' : 'border-zinc-800 bg-zinc-900'}"
               ondragover={(e) => handleDragOver(day.day_number, e)}
               ondragleave={handleDragLeave}
               ondrop={(e) => handleDrop(day.day_number, e)}
@@ -933,7 +972,15 @@
                     </button>
                   </div>
                 </div>
-                <p class="text-xs text-zinc-500">Day {day.day_number}</p>
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs text-zinc-500">Day {day.day_number}</p>
+                  <button
+                    onclick={() => editSpecificDay(day.day_number)}
+                    class="text-[11px] text-primary-400 hover:text-primary-300"
+                  >
+                    Focus Day
+                  </button>
+                </div>
               </div>
 
               <!-- Add exercise button -->
