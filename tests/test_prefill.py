@@ -561,6 +561,42 @@ class TestStalePlannedSessionRegeneration:
             "Prefill weight should be unchanged on reuse"
 
 
+class TestStructuredPlanDayIdentity:
+    async def test_prefill_survives_plan_and_day_rename(self, client: AsyncClient):
+        """Prefill should continue after renaming the plan and the day label."""
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=2, reps=8, name="Push Block")
+
+        w1 = await start_session_from_plan(client, plan["id"])
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 80.0, 8)
+        complete = await client.post(f"/api/sessions/{w1['id']}/complete")
+        assert complete.status_code == 200, complete.text
+
+        renamed = await client.put(
+            f"/api/plans/{plan['id']}",
+            json={
+                "name": "Push Block v2",
+                "number_of_days": 1,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Press Day",
+                        "exercises": plan["days"][0]["exercises"],
+                    }
+                ],
+            },
+        )
+        assert renamed.status_code == 200, renamed.text
+
+        w2 = await start_session_from_plan(client, plan["id"])
+        assert w2["plan_day_number"] == 1
+        weights = [s["planned_weight_kg"] for s in w2["sets"]]
+        reps = [s["planned_reps"] for s in w2["sets"]]
+        assert all(w is not None for w in weights), f"Expected renamed week 2 to keep weight prefill, got {weights}"
+        assert all(r is not None for r in reps), f"Expected renamed week 2 to keep rep prefill, got {reps}"
+
+
 # ── Multi-week progression chain ──────────────────────────────────────────────
 
 class TestMultiWeekChain:

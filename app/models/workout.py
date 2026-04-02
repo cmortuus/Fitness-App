@@ -98,6 +98,7 @@ class WorkoutSession(Base):
     workout_plan_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("workout_plans.id"), nullable=True
     )
+    plan_day_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)

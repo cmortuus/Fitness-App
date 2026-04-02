@@ -106,6 +106,7 @@ def serialize_session(workout_session: WorkoutSession) -> dict:
         "date": workout_session.date,
         "status": workout_session.status,
         "workout_plan_id": workout_session.workout_plan_id,
+        "plan_day_number": workout_session.plan_day_number,
         "total_volume_kg": workout_session.total_volume_kg,
         "total_sets": workout_session.total_sets,
         "total_reps": workout_session.total_reps,
@@ -138,6 +139,25 @@ def _set_total_reps(exercise_set: ExerciseSet) -> int:
 
 def _set_total_volume_kg(exercise_set: ExerciseSet) -> float:
     return _set_total_reps(exercise_set) * (exercise_set.actual_weight_kg or 0)
+
+
+def _find_plan_day_for_session(session: WorkoutSession, days: list[dict]) -> dict | None:
+    """Prefer structured day identity; fall back to legacy name parsing."""
+    if session.plan_day_number is not None:
+        matched = next(
+            (day for day in days if day.get("day_number") == session.plan_day_number),
+            None,
+        )
+        if matched is not None:
+            return matched
+
+    if session.name and " - " in session.name:
+        session_day_name = session.name.split(" - ", 1)[1]
+        matched = next((day for day in days if day.get("day_name") == session_day_name), None)
+        if matched is not None:
+            return matched
+
+    return days[0] if days else None
 
 
 async def record_session_audit(
@@ -495,13 +515,8 @@ async def sync_session_to_plan(
     planned = json.loads(plan.planned_exercises) if isinstance(plan.planned_exercises, str) else plan.planned_exercises
     days = planned.get("days", [])
 
-    # Find the matching day by parsing day_name from session name ("Plan - DayName")
-    target_day = None
-    if session.name and " - " in session.name:
-        session_day_name = session.name.split(" - ", 1)[1]
-        target_day = next((d for d in days if d.get("day_name") == session_day_name), None)
-    if target_day is None and days:
-        target_day = days[0]
+    # Find the matching day using structured day identity first, then legacy name parsing.
+    target_day = _find_plan_day_for_session(session, days)
     if target_day is None:
         return {"updated": 0, "structural_changes": 0}
 
@@ -948,7 +963,13 @@ async def create_session_from_plan(
     planned_result = await db.execute(
         select(WorkoutSession).where(
             WorkoutSession.workout_plan_id == plan_id,
-            WorkoutSession.name == f"{plan.name} - {day_name}",
+            or_(
+                WorkoutSession.plan_day_number == day_number,
+                (
+                    WorkoutSession.plan_day_number.is_(None)
+                    & (WorkoutSession.name == f"{plan.name} - {day_name}")
+                ),
+            ),
             WorkoutSession.status == WorkoutStatus.PLANNED,
             WorkoutSession.started_at.is_(None),
             WorkoutSession.user_id == user.id,
@@ -991,9 +1012,15 @@ async def create_session_from_plan(
         select(WorkoutSession)
         .where(
             WorkoutSession.workout_plan_id == plan_id,
-            WorkoutSession.name == f"{plan.name} - {day_name}",
             WorkoutSession.id.in_(sessions_with_data),
             WorkoutSession.user_id == user.id,
+            or_(
+                WorkoutSession.plan_day_number == day_number,
+                (
+                    WorkoutSession.plan_day_number.is_(None)
+                    & (WorkoutSession.name == f"{plan.name} - {day_name}")
+                ),
+            ),
         )
         .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id))
         .limit(1)
@@ -1159,6 +1186,7 @@ async def create_session_from_plan(
         date=date.today(),
         name=f"{plan.name} - {day_name}",
         workout_plan_id=plan_id,
+        plan_day_number=day_number,
         status=WorkoutStatus.PLANNED,
         user_id=user.id,
     )
