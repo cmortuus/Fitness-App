@@ -15,7 +15,7 @@ from app.models.exercise import Exercise
 from app.models.user import User
 from app.models.workout import ExerciseFeedback, ExerciseSet, WorkoutPlan, WorkoutSession, WorkoutSessionAudit, WorkoutStatus
 from app.services.plan_rir import resolve_rir_override
-from app.services.progression import adjust_load_for_target_rir, compute_overload
+from app.services.progression import adjust_load_for_target_rir, compute_overload, epley_weight_for_reps
 from app.schemas.requests import (
     SetCreate,
     SetResponse,
@@ -1036,6 +1036,53 @@ async def create_session_from_plan(
                 "set_type": s.set_type or "standard",
             }
 
+    # ── Cross-meso prefill: week 1 of a brand-new plan ───────────────────────
+    # When there is no prior session for this plan day we have no performance
+    # history to overload from.  Instead, find the most recent completed set
+    # for each exercise from ANY session, then convert via Epley to the new
+    # plan's target reps and RIR target so week 1 starts at the right weight.
+    #
+    # Guard: only fire when the plan has NEVER had any completed session at
+    # all.  If the plan already has sessions on other days (multi-day plans)
+    # those days should still start blank — the cross-meso prefill is only
+    # for the very first week of a genuinely new mesocycle.
+    plan_has_any_history = bool(
+        (await db.execute(
+            select(WorkoutSession.id)
+            .where(
+                WorkoutSession.workout_plan_id == plan_id,
+                WorkoutSession.id.in_(sessions_with_data),
+                WorkoutSession.user_id == user.id,
+            )
+            .limit(1)
+        )).scalar_one_or_none()
+    )
+    cross_meso_data: dict[int, dict] = {}
+    if not prior_session and not plan_has_any_history and day_exercise_ids:
+        recent_sets_q = await db.execute(
+            select(ExerciseSet, WorkoutSession.date.label("sess_date"))
+            .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
+            .where(
+                ExerciseSet.exercise_id.in_(day_exercise_ids),
+                ExerciseSet.actual_reps.is_not(None),
+                ExerciseSet.actual_weight_kg.is_not(None),
+                ExerciseSet.actual_weight_kg > 0,
+                ExerciseSet.set_type.in_(["standard", None]),
+                WorkoutSession.status == WorkoutStatus.COMPLETED,
+                WorkoutSession.user_id == user.id,
+            )
+            .order_by(desc(WorkoutSession.date), desc(ExerciseSet.id))
+        )
+        for row, _date in recent_sets_q.all():
+            ex_id = row.exercise_id
+            if ex_id not in cross_meso_data:  # keep first = most recent
+                w = row.actual_weight_kg
+                ex_m = exercise_model_map.get(ex_id)
+                # Correct legacy assisted data (see prior_set_data block above)
+                if ex_m and ex_m.is_assisted and body_weight_kg > 0 and w > body_weight_kg * 0.5:
+                    w = max(0.0, body_weight_kg - w)
+                cross_meso_data[ex_id] = {"weight": w, "reps": row.actual_reps}
+
     def _overload_for_side(
         prior_weight: float | None,
         prior_reps: int | None,
@@ -1097,7 +1144,26 @@ async def create_session_from_plan(
         """
         ex_sets = prior_set_data.get(exercise_id)
         if not ex_sets:
-            return None, None, None, None
+            # No same-plan history — try cross-meso Epley prefill
+            cross = cross_meso_data.get(exercise_id)
+            if not cross:
+                return None, None, None, None
+            prior_w = cross["weight"]
+            prior_r = cross["reps"]
+            tr = target_reps if target_reps > 0 else prior_r
+            ex_rir = resolve_rir_override(
+                planned_data, exercise_id,
+                ex_model.primary_muscles if ex_model else None,
+            )
+            is_assisted = bool(ex_model and ex_model.is_assisted)
+            effective_reps = tr + (ex_rir or 0)
+            if is_assisted and body_weight_kg > 0:
+                prior_net = max(0.0, body_weight_kg - prior_w)
+                net = epley_weight_for_reps(prior_net, prior_r, effective_reps)
+                weight_kg = max(0.0, round((body_weight_kg - net) / 2.5) * 2.5)
+            else:
+                weight_kg = round(epley_weight_for_reps(prior_w, prior_r, effective_reps) / 2.5) * 2.5
+            return weight_kg, tr, None, None
 
         # Filter prior sets to only those matching the current set_type
         matched_sets = {
