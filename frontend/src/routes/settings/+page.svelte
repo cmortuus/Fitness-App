@@ -634,14 +634,61 @@
     {#if $settings.progressionStyle === 'double'}
       <div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 space-y-1">
         <p class="font-medium text-gray-300">How double progression works</p>
-        <p>Each exercise has a rep range (set in the plan, default 8-12):</p>
+        <p>Each exercise has a rep range. New plan exercises default to the range you set here:</p>
         <ul class="list-disc list-inside space-y-0.5 pl-1">
           <li>Each set independently progresses +1 rep per session</li>
           <li>Reps are capped at the top of the range</li>
           <li>When <strong>every set</strong> hits the top, weight increases by one increment</li>
           <li>Reps reset to the bottom of the range and the cycle repeats</li>
         </ul>
-        <p class="pt-1">Example at 40 kg with 8-12 range: 3x8 &rarr; 3x9 &rarr; ... &rarr; 3x12 &rarr; 42.5 kg x 3x8</p>
+        <p class="pt-1">Example at 40 kg with an 8-12 range: 3x8 &rarr; 3x9 &rarr; ... &rarr; 3x12 &rarr; 42.5 kg x 3x8</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label">Default double progression range start</label>
+          <input
+            type="number"
+            min="1"
+            max="30"
+            value={$settings.progression?.minRepsForIncrease ?? 8}
+            onchange={(e) => {
+              const nextMin = Math.max(1, parseInt((e.target as HTMLInputElement).value) || 1);
+              settings.update((s) => ({
+                ...s,
+                progression: {
+                  ...s.progression,
+                  minRepsForIncrease: nextMin,
+                  maxRepsForIncrease: Math.max(nextMin, s.progression.maxRepsForIncrease),
+                },
+              }));
+            }}
+            class="input"
+            style="font-size: 16px;"
+          />
+        </div>
+        <div>
+          <label class="label">Default double progression range end</label>
+          <input
+            type="number"
+            min={$settings.progression?.minRepsForIncrease ?? 8}
+            max="50"
+            value={$settings.progression?.maxRepsForIncrease ?? 12}
+            onchange={(e) => {
+              const floor = $settings.progression?.minRepsForIncrease ?? 8;
+              const nextMax = Math.max(floor, parseInt((e.target as HTMLInputElement).value) || floor);
+              settings.update((s) => ({
+                ...s,
+                progression: {
+                  ...s.progression,
+                  maxRepsForIncrease: nextMax,
+                },
+              }));
+            }}
+            class="input"
+            style="font-size: 16px;"
+          />
+        </div>
       </div>
     {/if}
 
@@ -917,20 +964,37 @@
     <!-- Rep range -->
     <div class="grid grid-cols-2 gap-4">
       <div>
-        <label class="label">Min reps to increase weight</label>
+        <label class="label">Default rep range start</label>
         <input type="number" min="1" max="30"
                value={$settings.progression?.minRepsForIncrease ?? 8}
-               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, minRepsForIncrease: parseInt((e.target as HTMLInputElement).value) } }))}
+               onchange={(e) => {
+                 const nextMin = Math.max(1, parseInt((e.target as HTMLInputElement).value) || 1);
+                 settings.update(s => ({
+                   ...s,
+                   progression: {
+                     ...s.progression,
+                     minRepsForIncrease: nextMin,
+                     maxRepsForIncrease: Math.max(nextMin, s.progression.maxRepsForIncrease),
+                   }
+                 }));
+               }}
                class="input" style="font-size: 16px;" />
       </div>
       <div>
-        <label class="label">Max reps before forced increase</label>
-        <input type="number" min="1" max="50"
+        <label class="label">Default rep range end</label>
+        <input type="number" min={$settings.progression?.minRepsForIncrease ?? 8} max="50"
                value={$settings.progression?.maxRepsForIncrease ?? 12}
-               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, maxRepsForIncrease: parseInt((e.target as HTMLInputElement).value) } }))}
+               onchange={(e) => {
+                 const floor = $settings.progression?.minRepsForIncrease ?? 8;
+                 const nextMax = Math.max(floor, parseInt((e.target as HTMLInputElement).value) || floor);
+                 settings.update(s => ({ ...s, progression: { ...s.progression, maxRepsForIncrease: nextMax } }));
+               }}
                class="input" style="font-size: 16px;" />
       </div>
     </div>
+    <p class="text-xs text-zinc-500 -mt-2">
+      These defaults feed new plan exercises, and double progression uses them as the default rep range until you override an exercise inside a plan.
+    </p>
 
     <!-- Max sets -->
     <div class="flex items-center justify-between">
