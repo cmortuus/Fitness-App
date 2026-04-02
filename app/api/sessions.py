@@ -142,6 +142,18 @@ def _set_total_volume_kg(exercise_set: ExerciseSet) -> float:
     return _set_total_reps(exercise_set) * (exercise_set.actual_weight_kg or 0)
 
 
+def _set_rep_evidence(exercise_set: ExerciseSet) -> int | None:
+    """Return the best rep signal available for progression calculations."""
+    if exercise_set.actual_reps is not None and exercise_set.actual_reps > 0:
+        return exercise_set.actual_reps
+
+    left = exercise_set.reps_left if exercise_set.reps_left is not None and exercise_set.reps_left > 0 else None
+    right = exercise_set.reps_right if exercise_set.reps_right is not None and exercise_set.reps_right > 0 else None
+    if left is not None and right is not None:
+        return min(left, right)
+    return left if left is not None else right
+
+
 def _find_plan_day_for_session(session: WorkoutSession, days: list[dict]) -> dict | None:
     """Prefer structured day identity; fall back to legacy name parsing."""
     if session.plan_day_number is not None:
@@ -1002,12 +1014,17 @@ async def create_session_from_plan(
             await db.flush()
 
     # ── Look up most recent prior session for the same plan + same day ────────
-    # Require at least one set with actual_reps filled in — this is the real
-    # quality gate. Sessions with no completed sets (e.g. abandoned mid-start)
-    # are useless for progression and must be skipped regardless of status.
+    # Require at least one set with usable rep evidence. This accepts
+    # unilateral/legacy rows that stored reps_left/right but left actual_reps null.
     sessions_with_data = (
         select(ExerciseSet.workout_session_id)
-        .where(ExerciseSet.actual_reps.is_not(None))
+        .where(
+            or_(
+                ExerciseSet.actual_reps.is_not(None),
+                ExerciseSet.reps_left.is_not(None),
+                ExerciseSet.reps_right.is_not(None),
+            )
+        )
     )
     prior_result = await db.execute(
         select(WorkoutSession)
@@ -1044,7 +1061,8 @@ async def create_session_from_plan(
         for s in prior_sets_result.scalars().all():
             if s.skipped_at is not None:
                 continue  # Skipped sets don't count for progression
-            if s.actual_weight_kg is None or s.actual_reps is None:
+            rep_evidence = _set_rep_evidence(s)
+            if s.actual_weight_kg is None or rep_evidence is None:
                 continue
             ex_id = s.exercise_id
             if ex_id not in prior_set_data:
@@ -1061,7 +1079,7 @@ async def create_session_from_plan(
 
             prior_set_data[ex_id][s.set_number] = {
                 "weight": weight,
-                "reps": s.actual_reps,
+                "reps": rep_evidence,
                 "planned_reps": s.planned_reps,
                 "reps_left": s.reps_left,
                 "reps_right": s.reps_right,
