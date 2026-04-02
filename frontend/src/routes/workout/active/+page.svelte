@@ -4,13 +4,13 @@
   import { beforeNavigate } from '$app/navigation';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
-    getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
+    getExercises, getPlan, getPlans, getNextWorkout, getRecentExercises, getSession, getSessions,
     createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote,
     saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession } from '$lib/api';
+  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
@@ -765,7 +765,16 @@
           currentSession.set(inProgress);
           await resumeSession();
         } else {
-          // ── No active session: show plan picker ────────────────────────
+          // ── No active session: auto-start next scheduled workout if known ─
+          try {
+            const next = await getNextWorkout();
+            if (next && next.plan && next.day && !next.is_complete) {
+              // Navigate to the correct plan+day URL so startFromPlan runs properly
+              goto(`/workout/active?plan=${next.plan.id}&day=${next.day.day_number}`, { replaceState: true });
+              return;
+            }
+          } catch { /* fall through to picker if next-workout lookup fails */ }
+          // ── Fall back to manual plan picker ───────────────────────────────
           plans = await getPlans();
           showPicker = true;
           loading = false;
@@ -1129,6 +1138,9 @@
           groupType: null,
         };
       });
+
+      // Restore user-defined exercise order if they reordered during this session
+      uiExercises = loadExerciseOrder(uiExercises);
 
       await restoreFeedbackState(sess.id);
     } catch (e) {
@@ -1639,12 +1651,41 @@
     uiExercises = [...uiExercises];
   }
 
+  function exerciseOrderKey(sid: number | null) {
+    return sid ? `hgt_exercise_order_${sid}` : null;
+  }
+
+  function saveExerciseOrder() {
+    const key = exerciseOrderKey(sessionId);
+    if (!key || typeof localStorage === 'undefined') return;
+    localStorage.setItem(key, JSON.stringify(uiExercises.map(e => e.exerciseId)));
+  }
+
+  function loadExerciseOrder(exercises: UIExercise[]): UIExercise[] {
+    const key = exerciseOrderKey(sessionId);
+    if (!key || typeof localStorage === 'undefined') return exercises;
+    try {
+      const saved = localStorage.getItem(key);
+      if (!saved) return exercises;
+      const order: number[] = JSON.parse(saved);
+      // Reorder to match saved order; append any new exercises not in saved list
+      const ordered = order
+        .map(id => exercises.find(e => e.exerciseId === id))
+        .filter((e): e is UIExercise => e != null);
+      const rest = exercises.filter(e => !order.includes(e.exerciseId));
+      return [...ordered, ...rest];
+    } catch {
+      return exercises;
+    }
+  }
+
   function moveExercise(idx: number, dir: -1 | 1) {
     const target = idx + dir;
     if (target < 0 || target >= uiExercises.length) return;
     const arr = [...uiExercises];
     [arr[idx], arr[target]] = [arr[target], arr[idx]];
     uiExercises = arr;
+    saveExerciseOrder();
   }
 
   async function removeExercise(exUiId: string) {
@@ -2034,6 +2075,9 @@
     finishing = true;
     try {
       await completeSession(sessionId);
+      // Clean up any saved exercise order for this session
+      const orderKey = exerciseOrderKey(sessionId);
+      if (orderKey && typeof localStorage !== 'undefined') localStorage.removeItem(orderKey);
       // Persist any notes the user entered
       const noteKey = `hgt_session_note_${sessionId}`;
       const savedNote = localStorage.getItem(noteKey)?.trim();
