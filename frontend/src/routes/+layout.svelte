@@ -235,14 +235,14 @@
 
   <!-- ── Offline banner ──────────────────────────────────────────────── -->
   {#if !$isOnline}
-    <div role="alert" class="fixed top-0 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium">
+    <div role="alert" class="fixed bottom-16 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium md:bottom-0">
       📡 Offline — changes will sync when reconnected
       {#if $pendingSyncCount > 0}
         <span class="ml-1 opacity-80">({$pendingSyncCount} pending)</span>
       {/if}
     </div>
   {:else if $syncStatus === 'syncing'}
-    <div class="fixed top-0 left-0 right-0 z-50 bg-blue-600 text-white text-center text-xs py-1.5 font-medium">
+    <div class="fixed bottom-16 left-0 right-0 z-50 bg-blue-600 text-white text-center text-xs py-1.5 font-medium md:bottom-0">
       🔄 Syncing offline changes... ({$pendingSyncCount} remaining)
     </div>
   {/if}
