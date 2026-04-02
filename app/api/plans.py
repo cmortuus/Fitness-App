@@ -334,9 +334,12 @@ async def get_plan_recommendations(
         if feedback.rir is None:
             continue
 
-        primary_muscle = (exercise.primary_muscles or [None])[0]
-        muscle_landmarks = VOLUME_LANDMARKS.get(primary_muscle or "", {"mev": 4, "mav": 10, "mrv": 16})
-        weekly_sets = muscle_planned_sets.get(primary_muscle or "", 0)
+        primary_muscle = exercise.primary_muscles[0] if exercise.primary_muscles else None
+        if primary_muscle is None:
+            # No muscle data — can't make meaningful volume recommendations
+            continue
+        muscle_landmarks = VOLUME_LANDMARKS.get(primary_muscle, {"mev": 4, "mav": 10, "mrv": 16})
+        weekly_sets = muscle_planned_sets.get(primary_muscle, 0)
 
         if feedback.rir <= 1 and feedback.recovery_rating in {"poor", "ok"}:
             add_set = weekly_sets < muscle_landmarks["mav"]
