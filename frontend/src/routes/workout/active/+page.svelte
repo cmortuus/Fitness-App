@@ -93,6 +93,7 @@
     // Original suggestions for deviation warning
     initWeight: number | null;
     initReps: number | null;
+    isExtrapolated: boolean;  // weight adjusted for fatigue/freshness due to reorder
     setType: string;  // 'standard' | 'standard_partials' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
     partialReps: number | null;  // for standard_partials — partial ROM reps after full ROM
     drops: { weightLbs: number | null; reps: number | null }[];  // for drop sets only
@@ -1064,6 +1065,7 @@
               oneRM,
               initWeight: suggestedWeight,
               initReps:   suggestedReps,
+              isExtrapolated: bset?.is_extrapolated ?? false,
               setType: bset?.set_type || 'standard',
               partialReps: bset?.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
               drops: bset?.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
@@ -1228,6 +1230,7 @@
             oneRM,
             initWeight: sugW,
             initReps: sugR,
+            isExtrapolated: bset.is_extrapolated ?? false,
             setType: bset.set_type || 'standard',
             partialReps: bset.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
             drops: bset.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
@@ -3085,6 +3088,9 @@
                             {#if isAssistedEx && set.weightLbs !== null}
                               <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
                             {/if}
+                            {#if set.isExtrapolated && !set.done}
+                              <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
+                            {/if}
                             {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                               {#if estReps < 5}
@@ -3269,6 +3275,9 @@
                       />
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
+                      {/if}
+                      {#if set.isExtrapolated && !set.done}
+                        <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
                       {/if}
                       {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
