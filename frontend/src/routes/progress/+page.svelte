@@ -68,8 +68,8 @@
     error = null;
     try {
       const endDate = localDateString();
-      const daysBack = parseInt(timeRange.replace('d', ''));
-      const startDate = daysAgoLocalDateString(daysBack);
+      const daysBack = timeRange === 'all' ? 3650 : parseInt(timeRange.replace('d', ''));
+      const startDate = timeRange === 'all' ? '2000-01-01' : daysAgoLocalDateString(daysBack);
 
       const [progress, recs, exList] = await Promise.all([
         getProgress({ start_date: startDate, end_date: endDate }),
@@ -306,7 +306,10 @@
       <select bind:value={timeRange} onchange={loadData} class="input">
         <option value="7d">Last 7 days</option>
         <option value="30d">Last 30 days</option>
-        <option value="90d">Last 90 days</option>
+        <option value="90d">Last 3 months</option>
+        <option value="180d">Last 6 months</option>
+        <option value="365d">Last year</option>
+        <option value="all">All time</option>
       </select>
     </div>
   </div>
