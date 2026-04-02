@@ -314,6 +314,7 @@ export interface PlanRecommendation {
 export interface ProgressMetric {
   exercise_id: number;
   exercise_name: string;
+  is_assisted: boolean;
   date: string;
   estimated_1rm: number | null;
   volume_load: number;
