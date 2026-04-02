@@ -21,6 +21,13 @@ from app.services.overload import OverloadInput, calculate_overload, epley_1rm
 
 router = APIRouter()
 
+_WEIGHT_INCREMENT = 2.5  # kg — standard gym plate increment (~5 lb)
+
+
+def _round_recommended(weight_kg: float) -> float:
+    """Round a recommended weight to the nearest standard increment (2.5 kg ≈ 5 lb)."""
+    return round(weight_kg / _WEIGHT_INCREMENT) * _WEIGHT_INCREMENT
+
 
 def get_training_level(user: User) -> str:
     """Read the saved progression training level from user settings."""
@@ -136,7 +143,7 @@ async def get_progress(
             "date": session.date.isoformat(),
             "estimated_1rm": round(estimated_1rm, 1) if estimated_1rm else None,
             "volume_load": round(volume, 1),
-            "recommended_weight": round(max_weight * 1.05, 1),
+            "recommended_weight": _round_recommended(max_weight * 1.05),
         })
 
     # Sort by date then exercise name for stable output
@@ -235,7 +242,7 @@ async def get_recommendations(
             "exercise_id": ex_id,
             "exercise_name": exercise.display_name,
             "current_weight": round(current_weight, 1),
-            "recommended_weight": round(recommended_weight, 1),
+            "recommended_weight": _round_recommended(recommended_weight),
             "reason": reason,
             "confidence": min(perf["set_count"] / 5, 1.0),
         })

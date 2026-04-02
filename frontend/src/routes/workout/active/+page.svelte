@@ -27,13 +27,11 @@
     return $settings.weightUnit === 'lbs' ? lbsToKg(val) : Math.round(val * 100) / 100;
   }
 
-  // Convert kg from backend to user's display unit, rounded to nearest 5 lbs / 2.5 kg
+  // Convert kg from backend to user's display unit — no rounding (preserves user input)
   const KG_TO_LBS = 2.20462;
   function fromKg(kg: number): number {
     const v = $settings.weightUnit === 'lbs' ? kg * KG_TO_LBS : kg;
-    return $settings.weightUnit === 'lbs'
-      ? Math.round(v / 5) * 5
-      : Math.round(v / 2.5) * 2.5;
+    return Math.round(v * 100) / 100;  // 2 decimal places only
   }
 
   // Round weight to the nearest 5 lbs / 2.5 kg increment
@@ -1008,8 +1006,9 @@
               s => s.exercise_id === pe.exercise_id && s.set_number === i
             );
             // Pre-fill with progressive overload suggestions when available (0 = blank)
+            // Round suggested weights to nearest increment — user inputs stay unrounded
             const suggestedWeight = bset?.planned_weight_kg != null && bset.planned_weight_kg > 0
-              ? fromKg(bset.planned_weight_kg)
+              ? roundWeight(fromKg(bset.planned_weight_kg))
               : null;
             const suggestedReps = (bset?.planned_reps ?? 0) > 0 ? bset!.planned_reps : null;
             // Per-side planned reps for unilateral exercises (null for bilateral)
@@ -1165,8 +1164,8 @@
             // Incomplete with draft: user was mid-edit before navigating away
             weightVal = fromKg(bset.draft_weight_kg);
           } else if (bset.planned_weight_kg != null && bset.planned_weight_kg > 0) {
-            // Incomplete: use planned/suggested weight
-            weightVal = fromKg(bset.planned_weight_kg);
+            // Incomplete: use planned/suggested weight (rounded to nearest increment)
+            weightVal = roundWeight(fromKg(bset.planned_weight_kg));
           }
 
           let repsVal: number | null;
@@ -1191,7 +1190,7 @@
 
           // Assisted exercises store the assist amount directly — no BW math needed.
           const sugW = bset.planned_weight_kg != null && bset.planned_weight_kg > 0
-            ? fromKg(bset.planned_weight_kg)
+            ? roundWeight(fromKg(bset.planned_weight_kg))
             : null;
           const sugR = bset.planned_reps ?? null;
           const oneRM = sugW && sugW > 0 && sugR && sugR > 0 ? sugW * (1 + sugR / 30) : null;
