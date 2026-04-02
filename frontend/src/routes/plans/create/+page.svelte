@@ -95,6 +95,22 @@
   let draggedExercise = $state<{ dayNum: number; index: number; exercise: PlannedExercise } | null>(null);
   let dragOverDay = $state<number | null>(null);
 
+  // Unique ID counter for exercise DOM keying — ensures Svelte moves DOM nodes
+  // (preserving input state) rather than reusing them by position when exercises
+  // are reordered via ▲▼ or drag-and-drop.
+  let _exUiCounter = 0;
+  function nextExUiId(): string { return `ex-${++_exUiCounter}`; }
+
+  /** Attach a stable _uiId to every PlannedExercise that doesn't have one yet. */
+  function ensureUiIds(days: PlannedDay[]): PlannedDay[] {
+    return days.map(day => ({
+      ...day,
+      exercises: day.exercises.map(ex =>
+        (ex as any)._uiId ? ex : { ...ex, _uiId: nextExUiId() }
+      ),
+    }));
+  }
+
   // Weight conversion helpers
   const LBS_TO_KG = 0.453592;
   const KG_TO_LBS = 2.20462;
@@ -142,7 +158,7 @@
     numberOfDays = plan.number_of_days;
     durationWeeks = plan.duration_weeks;
     blockType = plan.block_type;
-    days = cloneDays(plan.days);
+    days = ensureUiIds(cloneDays(plan.days));
     createMode = 'custom';
     currentStep = 2;
   }
@@ -281,7 +297,7 @@
     const dayIndex = days.findIndex(d => d.day_number === selectingForDay);
     if (dayIndex === -1) return;
 
-    const newExercise: PlannedExercise = {
+    const newExercise: PlannedExercise & { _uiId: string } = {
       exercise_id: configuringExercise.exercise_id,
       sets: configSets,
       reps: configRepsMin,
@@ -291,7 +307,8 @@
       rest_seconds: 90,
       notes: null,
       set_type: configSetType,
-      drops: configSetType === 'drop_set' ? configDrops : null
+      drops: configSetType === 'drop_set' ? configDrops : null,
+      _uiId: nextExUiId(),
     };
 
     days[dayIndex].exercises = [...days[dayIndex].exercises, newExercise];
@@ -411,13 +428,21 @@
   }
 
   function buildPlanData(isDraft: boolean = false) {
+    // Strip frontend-only _uiId before sending to backend
+    const cleanDays = days.map(day => ({
+      ...day,
+      exercises: day.exercises.map(ex => {
+        const { _uiId, ...rest } = ex as any;
+        return rest as PlannedExercise;
+      }),
+    }));
     return {
       name: newPlanName || (isDraft ? 'Untitled Draft' : ''),
       description: newPlanDescription,
       block_type: blockType,
       duration_weeks: durationWeeks,
       number_of_days: numberOfDays,
-      days: days,
+      days: cleanDays,
       auto_progression: true,
       is_draft: isDraft,
     };
@@ -486,7 +511,7 @@
       blockType = draft.blockType || 'other';
       durationWeeks = draft.durationWeeks || 4;
       numberOfDays = draft.numberOfDays || 3;
-      days = draft.days || [];
+      days = ensureUiIds(draft.days || []);
       currentStep = draft.currentStep || 1;
       return true;
     } catch { return false; }
@@ -516,7 +541,7 @@
 
     const reordered = [...days];
     [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
-    days = cloneDays(reordered);
+    days = ensureUiIds(cloneDays(reordered));
   }
 
   function clearDay(dayNum: number) {
@@ -916,7 +941,7 @@
 
               <!-- Exercises list -->
               <div class="space-y-2">
-                {#each day.exercises as ex, idx}
+                {#each day.exercises as ex, idx ((ex as any)._uiId ?? ex.exercise_id + '-' + idx)}
                   <div
                     class="bg-zinc-800 rounded-lg p-3 cursor-move hover:bg-gray-600 transition-colors"
                     draggable="true"
