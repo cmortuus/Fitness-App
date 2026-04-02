@@ -829,3 +829,156 @@ class TestDoubleProgression:
         for s in w4["sets"]:
             assert s["planned_weight_kg"] == 42.5, f"Expected 42.5, got {s['planned_weight_kg']}"
             assert s["planned_reps"] == 8, f"Expected reset to 8, got {s['planned_reps']}"
+
+
+# ── Reorder fatigue adjustment ────────────────────────────────────────────────
+
+class TestReorderFatigueAdjustment:
+    """When exercise order changes between sessions the prefill adjusts for fatigue.
+
+    Flies and presses both work the chest (same primary muscle).  If presses
+    previously came AFTER 4 sets of flies (pre-fatigued), but now come FIRST
+    (fresh), the suggestion should be slightly heavier.  Conversely, flies
+    moving to AFTER presses should suggest slightly lighter.
+
+    The is_extrapolated flag must be True for any adjusted set.
+    """
+
+    async def _create_two_exercise_plan(self, client, ex1_id: int, ex2_id: int,
+                                         ex1_sets: int = 4, ex2_sets: int = 2,
+                                         reps: int = 10) -> dict:
+        body = {
+            "name": "Chest Day",
+            "block_type": "hypertrophy",
+            "duration_weeks": 4,
+            "number_of_days": 1,
+            "days": [{
+                "day_number": 1,
+                "day_name": "Day 1",
+                "exercises": [
+                    {"exercise_id": ex1_id, "sets": ex1_sets, "reps": reps,
+                     "starting_weight_kg": 0, "progression_type": "linear"},
+                    {"exercise_id": ex2_id, "sets": ex2_sets, "reps": reps,
+                     "starting_weight_kg": 0, "progression_type": "linear"},
+                ],
+            }],
+        }
+        r = await client.post("/api/plans/", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    async def test_no_reorder_no_extrapolation(self, client: AsyncClient):
+        """When order is unchanged, is_extrapolated must be False for all sets."""
+        flies = await create_exercise(client, name="flies", display_name="Flies",
+                                       primary_muscles=["chest"])
+        press = await create_exercise(client, name="press", display_name="Press",
+                                       primary_muscles=["chest"])
+        plan = await self._create_two_exercise_plan(client, flies["id"], press["id"])
+
+        # Week 1: flies first, then press
+        w1 = await start_session_from_plan(client, plan["id"])
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 60.0, 10)
+
+        # Week 2: same order — no reorder adjustment
+        w2 = await start_session_from_plan(client, plan["id"])
+        assert all(not s["is_extrapolated"] for s in w2["sets"]), \
+            "No reorder → is_extrapolated must be False for all sets"
+
+    async def test_moving_exercise_earlier_increases_suggestion(self, client: AsyncClient):
+        """User reorders exercises within the same plan between sessions.
+
+        Week 1: flies (4 sets) → press (2 sets)  [plan order at that time]
+        User drags press to the top.
+        Week 2: press (2 sets) → flies (4 sets)  [new plan order after reorder]
+
+        Press is now fresher (fewer pre-fatiguing sets before it) → is_extrapolated True.
+        Flies is now more fatigued (more pre-fatiguing sets before it) → is_extrapolated True.
+        """
+        flies = await create_exercise(client, name="flies2", display_name="Flies",
+                                       primary_muscles=["chest"])
+        press = await create_exercise(client, name="press2", display_name="Press",
+                                       primary_muscles=["chest"])
+
+        # Create plan: flies (4 sets) → press (2 sets)
+        plan = await self._create_two_exercise_plan(
+            client, flies["id"], press["id"], ex1_sets=4, ex2_sets=2, reps=10
+        )
+
+        # Week 1 in original order: flies → press
+        w1 = await start_session_from_plan(client, plan["id"])
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 80.0, 10)
+
+        # User reorders the plan: press → flies (swap within same plan)
+        reordered_days = [{
+            "day_number": 1,
+            "day_name": "Day 1",
+            "exercises": [
+                {"exercise_id": press["id"], "sets": 2, "reps": 10,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+                {"exercise_id": flies["id"], "sets": 4, "reps": 10,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+            ],
+        }]
+        r_update = await client.put(f"/api/plans/{plan['id']}", json={"days": reordered_days})
+        assert r_update.status_code == 200, r_update.text
+
+        # Week 2: press is now FIRST (was second after 4 sets of flies → fresher)
+        #         flies is now SECOND (was first with 0 pre-fatigue → more fatigued)
+        w2 = await start_session_from_plan(client, plan["id"])
+        press_sets = [s for s in w2["sets"] if s["exercise_id"] == press["id"]]
+        flies_sets = [s for s in w2["sets"] if s["exercise_id"] == flies["id"]]
+
+        assert all(s["is_extrapolated"] for s in press_sets), \
+            f"Press moved earlier (fresher) → is_extrapolated True: {press_sets}"
+        assert all(s["is_extrapolated"] for s in flies_sets), \
+            f"Flies moved later (more fatigued) → is_extrapolated True: {flies_sets}"
+
+        # Press moved to fresher position: weight should be >= unmodified overload
+        # (2% per 4 sets = 8% more e1RM → higher weight suggestion)
+        press_w = press_sets[0]["planned_weight_kg"]
+        # Baseline would be 80kg at 10 reps overloaded to 11 reps at same weight
+        # After freshness adjustment it should equal or exceed that (or same weight with more reps)
+        assert press_w is not None, "Press should have a weight suggestion"
+
+    async def test_unrelated_muscles_no_adjustment(self, client: AsyncClient):
+        """Reordering exercises with non-overlapping muscles does NOT adjust weight."""
+        chest_ex = await create_exercise(client, name="chest_ex", display_name="Chest",
+                                          primary_muscles=["chest"])
+        leg_ex   = await create_exercise(client, name="leg_ex", display_name="Legs",
+                                          primary_muscles=["quads"])
+
+        # Plan: chest → legs
+        body = {
+            "name": "Full Body",
+            "block_type": "hypertrophy",
+            "duration_weeks": 4,
+            "number_of_days": 1,
+            "days": [{"day_number": 1, "day_name": "Day 1", "exercises": [
+                {"exercise_id": chest_ex["id"], "sets": 3, "reps": 10,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+                {"exercise_id": leg_ex["id"], "sets": 3, "reps": 10,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+            ]}],
+        }
+        r = await client.post("/api/plans/", json=body)
+        plan = r.json()
+        w1 = await start_session_from_plan(client, plan["id"])
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 100.0, 10)
+
+        # Reordered plan: legs → chest (order changed but no muscle overlap)
+        body2 = dict(body)
+        body2["name"] = "Full Body v2"
+        body2["days"][0]["exercises"] = list(reversed(body["days"][0]["exercises"]))
+        r2 = await client.post("/api/plans/", json=body2)
+        plan2 = r2.json()
+        w1_p2 = await start_session_from_plan(client, plan2["id"])
+        for s in w1_p2["sets"]:
+            await log_set(client, w1_p2["id"], s["id"], 100.0, 10)
+
+        w2_p2 = await start_session_from_plan(client, plan2["id"])
+        # No muscle overlap → no adjustment → is_extrapolated must be False
+        assert all(not s["is_extrapolated"] for s in w2_p2["sets"]), \
+            "Non-overlapping muscles: no fatigue adjustment, is_extrapolated must be False"

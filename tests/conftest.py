@@ -36,17 +36,11 @@ app.dependency_overrides[get_db] = override_get_db
 
 @pytest_asyncio.fixture(autouse=True)
 async def setup_db():
-    """Create all tables before each test, truncate after."""
+    """Drop and recreate all tables before each test for clean schema + isolation."""
     async with test_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
     yield
-    # Truncate all tables and reset sequences for clean isolation
-    async with test_engine.begin() as conn:
-        tables = ", ".join(
-            f'"{t.name}"' for t in reversed(Base.metadata.sorted_tables)
-        )
-        if tables:
-            await conn.exec_driver_sql(f"TRUNCATE {tables} RESTART IDENTITY CASCADE")
 
 
 @pytest_asyncio.fixture

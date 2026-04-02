@@ -173,6 +173,7 @@ class SetResponse(BaseModel):
     draft_reps_left: int | None = None
     draft_reps_right: int | None = None
     skipped_at: str | None = None
+    is_extrapolated: bool = False
 
     model_config = {"from_attributes": True}
 

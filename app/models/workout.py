@@ -69,6 +69,11 @@ class ExerciseSet(Base):
     draft_reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
     draft_reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Fatigue-adjusted prefill flag: True when the planned weight was adjusted
+    # because the exercise moved to a more/less fatigued position vs last session.
+    # Shown as a visual indicator so the user knows it's an estimate.
+    is_extrapolated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     # Notes and timestamps
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

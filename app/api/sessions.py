@@ -93,6 +93,7 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
         "draft_reps_left": exercise_set.draft_reps_left,
         "draft_reps_right": exercise_set.draft_reps_right,
         "skipped_at": exercise_set.skipped_at.isoformat() if exercise_set.skipped_at else None,
+        "is_extrapolated": bool(exercise_set.is_extrapolated) if exercise_set.is_extrapolated else False,
     }
 
 
@@ -1003,10 +1004,15 @@ async def create_session_from_plan(
     # Build per-exercise PER-SET lookup from prior session so each set can
     # be progressively overloaded from its own corresponding prior-session set.
     # Structure: prior_set_data[exercise_id][set_number] = {weight, reps, planned_reps}
+    # Also track prior_exercise_order (exercise_ids in set-creation order) so we
+    # can detect reordering and apply a fatigue-freshness adjustment.
     prior_set_data: dict[int, dict[int, dict]] = {}
+    prior_exercise_order: list[int] = []  # exercise_ids in order they were worked
     if prior_session:
         prior_sets_result = await db.execute(
-            select(ExerciseSet).where(ExerciseSet.workout_session_id == prior_session.id)
+            select(ExerciseSet)
+            .where(ExerciseSet.workout_session_id == prior_session.id)
+            .order_by(ExerciseSet.id)
         )
         for s in prior_sets_result.scalars().all():
             if s.skipped_at is not None:
@@ -1015,6 +1021,7 @@ async def create_session_from_plan(
                 continue
             ex_id = s.exercise_id
             if ex_id not in prior_set_data:
+                prior_exercise_order.append(ex_id)  # first appearance = exercise order
                 prior_set_data[ex_id] = {}
 
             weight = s.actual_weight_kg
@@ -1068,6 +1075,57 @@ async def create_session_from_plan(
                 if ex_m and ex_m.is_assisted and body_weight_kg > 0 and w > body_weight_kg * 0.5:
                     w = max(0.0, body_weight_kg - w)
                 cross_meso_data[ex_id] = {"weight": w, "reps": row.actual_reps}
+
+    # ── Fatigue-freshness reorder detection ───────────────────────────────────
+    # When the exercise order changes between sessions each exercise is performed
+    # with a different level of accumulated fatigue from similar-muscle work.
+    # We model this as ~2 % e1RM reduction per additional preceding set whose
+    # primary muscles overlap with the current exercise.
+    #
+    # "Similar" = any primary-muscle overlap (e.g. flies and presses both work
+    # pecs). Only movements that share at least one primary muscle group are
+    # considered fatiguing to one another.
+    FATIGUE_PER_SIMILAR_SET = 0.02  # 2 % e1RM per similar set
+
+    # Build a map of exercise_id → primary muscle set for the day's exercises.
+    exercise_primary_muscles: dict[int, set[str]] = {
+        ex_id: set(exercise_model_map[ex_id].primary_muscles or [])
+        for ex_id in day_exercise_ids
+        if ex_id in exercise_model_map
+    }
+
+    # New plan exercise order (current day array index order).
+    new_exercise_order: list[int] = [
+        ex.get("exercise_id")
+        for ex in day_exercises
+        if ex.get("exercise_id")
+    ]
+
+    # Sets-per-exercise lookups (used to accumulate fatigue load).
+    prior_sets_count: dict[int, int] = {
+        ex_id: len(sets) for ex_id, sets in prior_set_data.items()
+    }
+    new_sets_count: dict[int, int] = {
+        ex.get("exercise_id"): ex.get("sets", 3)
+        for ex in day_exercises
+        if ex.get("exercise_id")
+    }
+
+    def _similar_sets_before(target_ex_id: int, order: list[int],
+                              sets_count: dict[int, int]) -> int:
+        """Count sets of exercises whose primary muscles overlap with target_ex_id
+        that appear BEFORE target_ex_id in the given exercise order."""
+        muscles_target = exercise_primary_muscles.get(target_ex_id, set())
+        if not muscles_target:
+            return 0
+        total = 0
+        for ex_id in order:
+            if ex_id == target_ex_id:
+                break
+            muscles_other = exercise_primary_muscles.get(ex_id, set())
+            if muscles_target & muscles_other:
+                total += sets_count.get(ex_id, 3)
+        return total
 
     def _overload_for_side(
         prior_weight: float | None,
@@ -1291,6 +1349,30 @@ async def create_session_from_plan(
                 if overload_style == "double" and rep_range_top > 0 and suggested_reps and suggested_reps > rep_range_top:
                     suggested_reps = rep_range_top
 
+            # ── Fatigue-freshness adjustment when exercise order changed ──────
+            # Only applies when we have prior session data AND the exercise has
+            # a valid weight suggestion AND primary muscles are known.
+            is_extrapolated = False
+            if (
+                weight_kg is not None
+                and prior_exercise_order
+                and exercise_id in exercise_primary_muscles
+                and exercise_primary_muscles[exercise_id]
+            ):
+                prior_similar = _similar_sets_before(
+                    exercise_id, prior_exercise_order, prior_sets_count
+                )
+                new_similar = _similar_sets_before(
+                    exercise_id, new_exercise_order, new_sets_count
+                )
+                delta = new_similar - prior_similar
+                if delta != 0:
+                    # Positive delta → more pre-fatigue → lower e1RM estimate.
+                    # Clamp factor to [0.70, 1.30] to avoid absurd extrapolations.
+                    factor = max(0.70, min(1.30, 1.0 - delta * FATIGUE_PER_SIMILAR_SET))
+                    weight_kg = round(weight_kg * factor / 2.5) * 2.5
+                    is_extrapolated = True
+
             # Save set 1's values for myo_rep_match copying
             if set_num == 1:
                 set1_weight_kg = weight_kg
@@ -1307,6 +1389,7 @@ async def create_session_from_plan(
                 planned_reps_right=planned_right,
                 planned_weight_kg=weight_kg,
                 set_type=effective_set_type,
+                is_extrapolated=is_extrapolated or None,  # None = falsy, saves space
             )
             db.add(exercise_set)
 
