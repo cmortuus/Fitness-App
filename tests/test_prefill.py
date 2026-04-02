@@ -114,6 +114,46 @@ class TestAbandonedSessionIgnored:
         s1_w = next(s for s in sess2["sets"] if s["set_number"] == 1)["planned_weight_kg"]
         assert s1_w is not None, "Set 1 should be pre-filled when prior set 1 exists"
 
+    async def test_completed_unilateral_set_without_actual_reps_still_counts(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        """Legacy unilateral rows with only reps_left/right should still drive prefill."""
+        ex = await create_exercise(
+            client,
+            name="split_squat",
+            display_name="Split Squat",
+            is_unilateral=True,
+        )
+        plan = await create_plan(client, ex["id"], sets=1, reps=8)
+
+        sess1 = await start_session_from_plan(client, plan["id"])
+        set_id = sess1["sets"][0]["id"]
+        logged = await client.patch(
+            f"/api/sessions/{sess1['id']}/sets/{set_id}",
+            json={
+                "actual_weight_kg": 30.0,
+                "actual_reps": 8,
+                "reps_left": 8,
+                "reps_right": 10,
+                "completed_at": "2024-01-01T10:00:00",
+            },
+        )
+        assert logged.status_code == 200, logged.text
+        complete = await client.post(f"/api/sessions/{sess1['id']}/complete")
+        assert complete.status_code == 200, complete.text
+
+        row = await db.execute(select(ExerciseSet).where(ExerciseSet.id == set_id))
+        exercise_set = row.scalar_one()
+        exercise_set.actual_reps = None
+        await db.commit()
+
+        sess2 = await start_session_from_plan(client, plan["id"])
+        next_set = sess2["sets"][0]
+        assert next_set["planned_weight_kg"] is not None, next_set
+        assert next_set["planned_reps"] is not None, next_set
+        assert next_set["planned_reps_left"] is not None, next_set
+        assert next_set["planned_reps_right"] is not None, next_set
+
 
 # ── Week 2: per-set pre-fill ──────────────────────────────────────────────────
 
