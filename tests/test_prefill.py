@@ -275,22 +275,40 @@ class TestPerSetIndependence:
 # ── Different plans don't cross-pollinate ─────────────────────────────────────
 
 class TestPlanIsolation:
-    async def test_different_plans_dont_share_history(self, client: AsyncClient):
-        """Sessions from plan A must never pre-fill sessions from plan B."""
+    async def test_new_plan_uses_cross_meso_epley_prefill(self, client: AsyncClient):
+        """Week 1 of a new plan should be pre-filled via Epley from any prior history.
+
+        If the user has done 150 kg × 8 reps on Plan A, starting Plan B (same
+        exercise, same target reps) should pre-fill 150 kg — Epley converts
+        150×8 back to the same weight when target reps are identical.
+
+        Once Plan B has its own week-1 history the overload engine takes over
+        and Plan A data is no longer used.
+        """
         ex = await create_exercise(client)
         plan_a = await create_plan(client, ex["id"], sets=3, reps=8, name="Plan A")
         plan_b = await create_plan(client, ex["id"], sets=3, reps=8, name="Plan B")
 
-        # Complete a week of plan A
+        # Complete a week of plan A at 150 kg × 8 reps
         sess_a = await start_session_from_plan(client, plan_a["id"])
         for s in sess_a["sets"]:
             await log_set(client, sess_a["id"], s["id"], 150.0, 8)
 
-        # Plan B week 1 should still be completely blank
+        # Plan B week 1: cross-meso Epley prefill should populate 150 kg
+        # (Epley: e1RM = 150×(1+8/30) → weight for 8 reps = 150 → 150 kg)
         sess_b1 = await start_session_from_plan(client, plan_b["id"])
         weights = [s["planned_weight_kg"] for s in sess_b1["sets"]]
-        assert all(w is None for w in weights), \
-            f"Plan B should not inherit Plan A's data: {weights}"
+        assert all(w == 150.0 for w in weights), \
+            f"Plan B week 1 should be pre-filled via Epley from prior history: {weights}"
+
+        # Plan B week 2 must use its own week-1 data, not Plan A
+        for s in sess_b1["sets"]:
+            await log_set(client, sess_b1["id"], s["id"], 150.0, 8)
+        sess_b2 = await start_session_from_plan(client, plan_b["id"])
+        b2_weights = [s["planned_weight_kg"] for s in sess_b2["sets"]]
+        # Overload from Plan B's own week-1: should suggest same or slight increase
+        assert all(w is not None for w in b2_weights), \
+            f"Plan B week 2 should be pre-filled from its own week-1: {b2_weights}"
 
 
 # ── Assisted exercises ────────────────────────────────────────────────────────
