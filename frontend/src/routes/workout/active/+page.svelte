@@ -774,7 +774,6 @@
     { value: 'upper_back', label: 'Upper Back' },
     { value: 'mid_back', label: 'Mid Back' },
     { value: 'lower_back', label: 'Lower Back' },
-    { value: 'shoulders', label: 'Shoulders' },
     { value: 'traps', label: 'Traps' },
     { value: 'biceps', label: 'Biceps' },
     { value: 'triceps', label: 'Triceps' },

@@ -509,18 +509,34 @@ async def get_personal_records(
 # Evidence-based volume landmarks per muscle group (sets per week)
 # Based on RP/Israetel recommendations
 VOLUME_LANDMARKS = {
+    # Chest
     "chest":       {"mev": 8,  "mav": 14, "mrv": 20},
-    "back":        {"mev": 8,  "mav": 14, "mrv": 22},
-    "quads":       {"mev": 6,  "mav": 12, "mrv": 18},
+    # Back sub-muscles
+    "lats":        {"mev": 6,  "mav": 12, "mrv": 20},
+    "mid_back":    {"mev": 6,  "mav": 12, "mrv": 20},
+    "upper_back":  {"mev": 4,  "mav": 10, "mrv": 16},
+    "lower_back":  {"mev": 2,  "mav": 6,  "mrv": 10},
+    "traps":       {"mev": 0,  "mav": 8,  "mrv": 16},
+    # Shoulder sub-muscles
+    "front_delts": {"mev": 4,  "mav": 10, "mrv": 16},
+    "side_delts":  {"mev": 6,  "mav": 14, "mrv": 20},
+    "rear_delts":  {"mev": 4,  "mav": 12, "mrv": 20},
+    # Lower body
+    "quadriceps":  {"mev": 6,  "mav": 12, "mrv": 18},
     "hamstrings":  {"mev": 4,  "mav": 10, "mrv": 16},
     "glutes":      {"mev": 4,  "mav": 10, "mrv": 16},
-    "shoulders":   {"mev": 6,  "mav": 14, "mrv": 20},
+    "adductors":   {"mev": 2,  "mav": 6,  "mrv": 10},
+    "calves":      {"mev": 6,  "mav": 10, "mrv": 16},
+    # Arms
     "biceps":      {"mev": 4,  "mav": 10, "mrv": 18},
     "triceps":     {"mev": 4,  "mav": 10, "mrv": 16},
-    "calves":      {"mev": 6,  "mav": 10, "mrv": 16},
-    "abs":         {"mev": 0,  "mav": 8,  "mrv": 16},
-    "traps":       {"mev": 0,  "mav": 8,  "mrv": 16},
     "forearms":    {"mev": 0,  "mav": 6,  "mrv": 12},
+    # Core
+    "abs":         {"mev": 0,  "mav": 8,  "mrv": 16},
+    "core":        {"mev": 0,  "mav": 8,  "mrv": 16},
+    "obliques":    {"mev": 0,  "mav": 6,  "mrv": 12},
+    # Other
+    "neck":        {"mev": 0,  "mav": 4,  "mrv": 8},
 }
 
 

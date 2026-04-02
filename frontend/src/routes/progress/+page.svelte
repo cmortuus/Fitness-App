@@ -36,12 +36,13 @@
   let loading = $state(true);
   let error = $state<string | null>(null);
   let selectedGroup = $state<string | null>(null);
+  let selectedSubGroup = $state<string | null>(null);
 
   // Muscle group definitions — order determines display order
   const MUSCLE_GROUPS: Record<string, string[]> = {
-    Back:       ['lats', 'mid_back', 'traps'],
+    Back:       ['lats', 'mid_back', 'upper_back', 'lower_back', 'traps'],
     Chest:      ['chest'],
-    Shoulders:  ['shoulders'],
+    Shoulders:  ['front_delts', 'side_delts', 'rear_delts'],
     Quads:      ['quadriceps'],
     Hamstrings: ['hamstrings'],
     Glutes:     ['glutes'],
@@ -51,6 +52,22 @@
     Core:       ['abs', 'core', 'obliques'],
     Forearms:   ['forearms'],
     Neck:       ['neck'],
+  };
+
+  // Groups with sub-groups (2-level drill before exercises)
+  const SUB_GROUPS: Record<string, Record<string, string[]>> = {
+    Back: {
+      Lats:          ['lats'],
+      'Upper Back':  ['upper_back'],
+      'Mid Back':    ['mid_back'],
+      'Lower Back':  ['lower_back'],
+      Traps:         ['traps'],
+    },
+    Shoulders: {
+      'Front Delts': ['front_delts'],
+      'Side Delts':  ['side_delts'],
+      'Rear Delts':  ['rear_delts'],
+    },
   };
 
   const COLORS = [
@@ -109,6 +126,20 @@
       if (p.exercise_id != null) {
         const group = exerciseIdToGroup.get(p.exercise_id);
         if (group) map.set(p.exercise_name, group);
+      }
+    }
+    return map;
+  });
+
+  // exercise display name → primary muscles (for sub-group filtering)
+  let exerciseNameToMuscles = $derived.by(() => {
+    const idToMuscles = new Map<number, string[]>();
+    for (const ex of allExercises) idToMuscles.set(ex.id, ex.primary_muscles ?? []);
+    const map = new Map<string, string[]>();
+    for (const p of progressData) {
+      if (p.exercise_id != null) {
+        const muscles = idToMuscles.get(p.exercise_id);
+        if (muscles) map.set(p.exercise_name, muscles);
       }
     }
     return map;
@@ -209,37 +240,102 @@
     };
   });
 
-  // Drill-down chart: one line per exercise within selected group
+  // Helper: build Chart.js datasets from a list of labels and a series map
+  function buildChartDatasets(
+    labels: string[],
+    seriesMap: Map<string, Map<string, number>>,
+    dates: string[],
+  ) {
+    return labels.map((label, idx) => {
+      const s = seriesMap.get(label)!;
+      return {
+        label,
+        data: dates.map(d => s.has(d) ? Math.round(s.get(d)! * 10) / 10 : null) as (number | null)[],
+        borderColor: COLORS[idx % COLORS.length],
+        backgroundColor: COLORS[idx % COLORS.length] + '20',
+        tension: 0.3,
+        spanGaps: true,
+        pointRadius: 3,
+      };
+    });
+  }
+
+  // Sub-group aggregate % change series (one per sub-group of the selected group)
+  let subGroupPctSeries = $derived.by(() => {
+    if (!selectedGroup || !SUB_GROUPS[selectedGroup]) return new Map<string, Map<string, number>>();
+    const result = new Map<string, Map<string, number>>();
+    for (const [sgName, sgMuscles] of Object.entries(SUB_GROUPS[selectedGroup])) {
+      const exNames = [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => sgMuscles.includes(m))
+      );
+      if (exNames.length === 0) continue;
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const sgSeries = new Map<string, number>();
+      for (const date of [...allDates].sort()) {
+        const vals: number[] = [];
+        for (const n of exNames) {
+          const v = exercisePctSeries.get(n)?.get(date);
+          if (v != null) vals.push(v);
+        }
+        if (vals.length > 0) sgSeries.set(date, vals.reduce((s, v) => s + v, 0) / vals.length);
+      }
+      result.set(sgName, sgSeries);
+    }
+    return result;
+  });
+
+  // Trained sub-groups with data (in SUB_GROUPS order)
+  let trainedSubGroups = $derived.by(() => {
+    if (!selectedGroup || !SUB_GROUPS[selectedGroup]) return [] as string[];
+    return Object.keys(SUB_GROUPS[selectedGroup]).filter(sg => subGroupPctSeries.has(sg));
+  });
+
+  // Drill-down chart: 3-level logic
   let drilldownChartData = $derived.by(() => {
     if (!selectedGroup) return { labels: [], datasets: [] };
-    const exNames = [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
-    if (exNames.length === 0) return { labels: [], datasets: [] };
-    const allDates = new Set<string>();
-    for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
-    const dates = [...allDates].sort();
-    return {
-      labels: dates,
-      datasets: exNames.map((name, idx) => {
-        const series = exercisePctSeries.get(name)!;
-        return {
-          label: name,
-          data: dates.map(d => series.has(d) ? Math.round(series.get(d)! * 10) / 10 : null) as (number | null)[],
-          borderColor: COLORS[idx % COLORS.length],
-          backgroundColor: COLORS[idx % COLORS.length] + '20',
-          tension: 0.3,
-          spanGaps: true,
-          pointRadius: 3,
-        };
-      }),
-    };
+    const hasSubGroups = !!SUB_GROUPS[selectedGroup];
+
+    if (selectedSubGroup) {
+      // Level 3: exercises in the selected sub-group
+      const subMuscles = SUB_GROUPS[selectedGroup]?.[selectedSubGroup] ?? MUSCLE_GROUPS[selectedGroup];
+      const exNames = [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => subMuscles.includes(m))
+      );
+      if (exNames.length === 0) return { labels: [], datasets: [] };
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const dates = [...allDates].sort();
+      const seriesMap = new Map(exNames.map(n => [n, exercisePctSeries.get(n)!]));
+      return { labels: dates, datasets: buildChartDatasets(exNames, seriesMap, dates) };
+    } else if (hasSubGroups) {
+      // Level 2: one line per sub-group
+      const active = trainedSubGroups;
+      if (active.length === 0) return { labels: [], datasets: [] };
+      const allDates = new Set<string>();
+      for (const sg of active) for (const d of subGroupPctSeries.get(sg)!.keys()) allDates.add(d);
+      const dates = [...allDates].sort();
+      return { labels: dates, datasets: buildChartDatasets(active, subGroupPctSeries, dates) };
+    } else {
+      // Level 2 flat: exercises directly in group
+      const exNames = [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
+      if (exNames.length === 0) return { labels: [], datasets: [] };
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const dates = [...allDates].sort();
+      const seriesMap = new Map(exNames.map(n => [n, exercisePctSeries.get(n)!]));
+      return { labels: dates, datasets: buildChartDatasets(exNames, seriesMap, dates) };
+    }
   });
 
   let activeChartData = $derived(selectedGroup ? drilldownChartData : overviewChartData);
 
   let chartTitle = $derived(
-    selectedGroup
-      ? `${selectedGroup} — Est. 1RM % Change`
-      : 'Muscle Group Strength Trends (Est. 1RM % Change)'
+    selectedSubGroup
+      ? `${selectedGroup} › ${selectedSubGroup} — Est. 1RM % Change`
+      : selectedGroup
+        ? `${selectedGroup} — Est. 1RM % Change`
+        : 'Muscle Group Strength Trends (Est. 1RM % Change)'
   );
 
   let chartOptions = $derived({
@@ -280,18 +376,32 @@
     },
   });
 
-  // Recommendations filtered to selected group in drill-down mode
+  // Recommendations filtered to selected sub-group / group in drill-down mode
   let filteredRecs = $derived.by(() => {
     if (!selectedGroup) return recommendations;
-    const exNamesInGroup = new Set(
-      [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup)
-    );
-    return recommendations.filter(r => exNamesInGroup.has(r.exercise_name));
+    let exNames: string[];
+    if (selectedSubGroup) {
+      const subMuscles = SUB_GROUPS[selectedGroup]?.[selectedSubGroup] ?? MUSCLE_GROUPS[selectedGroup];
+      exNames = [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => subMuscles.includes(m))
+      );
+    } else {
+      exNames = [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
+    }
+    const exSet = new Set(exNames);
+    return recommendations.filter(r => exSet.has(r.exercise_name));
   });
 
-  // Exercises in selected group (for drill-down cards)
+  // Exercises to show as cards (level 3: sub-group selected, or flat group)
   let drilldownExercises = $derived.by(() => {
-    if (!selectedGroup) return [];
+    if (!selectedGroup) return [] as string[];
+    if (selectedSubGroup) {
+      const subMuscles = SUB_GROUPS[selectedGroup]?.[selectedSubGroup] ?? MUSCLE_GROUPS[selectedGroup];
+      return [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => subMuscles.includes(m))
+      );
+    }
+    if (SUB_GROUPS[selectedGroup]) return [] as string[]; // show sub-group cards instead
     return [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
   });
 </script>
@@ -299,10 +409,18 @@
 <div class="space-y-6 max-w-4xl mx-auto">
   <!-- Header row with back button + time range -->
   <div class="flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3">
-      {#if selectedGroup}
+    <div class="flex items-center gap-3 flex-wrap">
+      {#if selectedSubGroup}
         <button
-          onclick={() => selectedGroup = null}
+          onclick={() => { selectedSubGroup = null; }}
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1"
+        >
+          ← {selectedGroup}
+        </button>
+        <h2 class="text-2xl font-bold">{selectedSubGroup}</h2>
+      {:else if selectedGroup}
+        <button
+          onclick={() => { selectedGroup = null; selectedSubGroup = null; }}
           class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1"
         >
           ← All Muscles
@@ -361,6 +479,30 @@
     </div>
   {/if}
 
+  <!-- Sub-group cards (Back / Shoulders — level 2) -->
+  {#if selectedGroup && !selectedSubGroup && trainedSubGroups.length > 0 && !loading}
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {#each trainedSubGroups as sg, idx}
+        {@const sgSeries = subGroupPctSeries.get(sg)}
+        {@const sgVals = sgSeries ? [...sgSeries.values()] : []}
+        {@const pct = sgVals.length > 0 ? Math.round(sgVals[sgVals.length - 1] * 10) / 10 : 0}
+        <button
+          class="card text-left hover:bg-zinc-700/60 transition-colors"
+          onclick={() => selectedSubGroup = sg}
+        >
+          <div class="flex items-center gap-2 mb-1">
+            <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
+            <p class="text-sm font-medium truncate">{sg}</p>
+          </div>
+          <p class="text-2xl font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
+            {pct > 0 ? '+' : ''}{pct}%
+          </p>
+          <p class="text-xs text-zinc-500 mt-1">Tap to explore →</p>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
   <!-- Drill-down: individual exercise cards -->
   {#if selectedGroup && drilldownExercises.length > 0 && !loading}
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -383,7 +525,7 @@
   <!-- Recommendations -->
   <div class="card">
     <h3 class="text-lg font-semibold mb-4">
-      Progression Recommendations{selectedGroup ? ` — ${selectedGroup}` : ''}
+      Progression Recommendations{selectedSubGroup ? ` — ${selectedSubGroup}` : selectedGroup ? ` — ${selectedGroup}` : ''}
     </h3>
     {#if loading}
       <div class="space-y-2">
