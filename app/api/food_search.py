@@ -201,6 +201,7 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
     settings = get_settings()
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        task_names = ["openfoodfacts", "usda"]
         tasks = [
             client.get(
                 "https://world.openfoodfacts.org/cgi/search.pl",
@@ -214,6 +215,7 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
         # Add CalorieNinjas if API key is configured
         cn_key = settings.calorieninjas_api_key
         if cn_key:
+            task_names.append("calorieninjas")
             tasks.append(
                 client.get(
                     "https://api.calorieninjas.com/v1/nutrition",
@@ -221,11 +223,13 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
                     headers={"X-Api-Key": cn_key},
                 )
             )
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
-    off_resp = responses[0] if len(responses) > 0 else None
-    usda_resp = responses[1] if len(responses) > 1 else None
-    cn_resp = responses[2] if len(responses) > 2 else None
+    responses = {name: response for name, response in zip(task_names, gathered)}
+
+    off_resp = responses.get("openfoodfacts")
+    usda_resp = responses.get("usda")
+    cn_resp = responses.get("calorieninjas")
 
     results: list[dict] = []
 
