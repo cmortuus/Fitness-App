@@ -802,8 +802,8 @@
     </div>
 
   {:else if nextWorkout}
-    <a href="/workout/active?plan={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
-       class="block rounded-2xl overflow-hidden border border-primary-600/30 hover:border-primary-500/50 transition-all group"
+    <div
+       class="rounded-2xl overflow-hidden border border-primary-600/30 transition-all group"
        style="background: linear-gradient(135deg, rgba(37,99,235,0.15), rgba(0,0,0,0));">
       <div class="p-5 flex items-center justify-between gap-4">
         <div class="min-w-0">
@@ -825,9 +825,23 @@
         </div>
         <div class="w-14 h-14 rounded-2xl bg-primary-600/20 border border-primary-600/30
                     flex items-center justify-center text-2xl shrink-0
-                    group-hover:bg-primary-600/40 transition-colors">🏋️</div>
+                    transition-colors">🏋️</div>
       </div>
-    </a>
+      <div class="px-5 pb-5 flex gap-2">
+        <a
+          href="/workout/active?plan={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+          class="btn-primary text-sm flex-1 text-center"
+        >
+          Start Workout
+        </a>
+        <a
+          href="/plans/create?edit={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+          class="btn-secondary text-sm flex-1 text-center"
+        >
+          Edit Upcoming Day
+        </a>
+      </div>
+    </div>
 
   {/if}
 
@@ -898,6 +912,15 @@
             {:else}
               <p class="text-sm text-zinc-500">No sessions matched this plan yet.</p>
             {/if}
+          </div>
+
+          <div class="flex justify-end">
+            <a
+              href="/plans/create?edit={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+              class="text-sm text-primary-400 hover:text-primary-300"
+            >
+              Edit upcoming day
+            </a>
           </div>
         </div>
       {/if}
