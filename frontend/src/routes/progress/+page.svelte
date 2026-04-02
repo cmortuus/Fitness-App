@@ -131,19 +131,6 @@
     return map;
   });
 
-  // exercise display name → is_assisted flag
-  let exerciseNameToIsAssisted = $derived.by(() => {
-    const idToAssisted = new Map<number, boolean>();
-    for (const ex of allExercises) idToAssisted.set(ex.id, ex.is_assisted ?? false);
-    const map = new Map<string, boolean>();
-    for (const p of progressData) {
-      if (p.exercise_id != null) {
-        map.set(p.exercise_name, p.is_assisted === true);
-      }
-    }
-    return map;
-  });
-
   // exercise display name → primary muscles (for sub-group filtering)
   let exerciseNameToMuscles = $derived.by(() => {
     const idToMuscles = new Map<number, string[]>();
@@ -161,8 +148,9 @@
   // Per-exercise % change time series: Map<exerciseName, Map<date, pctChange>>
   // All series start at 0% on the first date.
   // Uses the highest estimated 1RM per date (best set, not first set).
-  // For assisted exercises (dip/pull-up machines), lower weight = more strength,
-  // so we invert the direction: decreasing assistance → positive % change.
+  // For assisted exercises the backend returns estimated_1rm computed from
+  // (bodyweight - assistance), so a decreasing assistance weight correctly
+  // produces an increasing 1RM — no direction inversion needed here.
   let exercisePctSeries = $derived.by(() => {
     const result = new Map<string, Map<string, number>>();
     const names = [...new Set(progressData.map(p => p.exercise_name))];
@@ -172,18 +160,11 @@
       );
       if (points.length === 0) continue;
 
-      const isAssisted = points[0].is_assisted === true;
-
       // Group by date — keep max estimated_1rm per date (best set wins)
-      // For assisted, keep min (lowest assistance weight = strongest set)
       const bestByDate = new Map<string, number>();
       for (const p of points) {
         const prev = bestByDate.get(p.date);
-        if (isAssisted) {
-          bestByDate.set(p.date, prev == null ? p.estimated_1rm! : Math.min(prev, p.estimated_1rm!));
-        } else {
-          bestByDate.set(p.date, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
-        }
+        bestByDate.set(p.date, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
       }
 
       const sortedDates = [...bestByDate.keys()].sort();
@@ -191,10 +172,7 @@
       const series = new Map<string, number>();
       for (const date of sortedDates) {
         const current = bestByDate.get(date)!;
-        // Invert for assisted: less assistance = more progress
-        const pct = isAssisted
-          ? ((baseline - current) / baseline) * 100
-          : ((current - baseline) / baseline) * 100;
+        const pct = ((current - baseline) / baseline) * 100;
         series.set(date, pct);
       }
       result.set(name, series);
@@ -532,22 +510,18 @@
 
   <!-- Drill-down: individual exercise cards -->
   {#if selectedGroup && drilldownExercises.length > 0 && !loading}
-    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
       {#each drilldownExercises as name, idx}
         {@const vals = [...exercisePctSeries.get(name)!.values()]}
         {@const pct = vals.length > 0 ? Math.round(vals[vals.length - 1] * 10) / 10 : 0}
-        {@const assisted = exerciseNameToIsAssisted.get(name) === true}
-        <div class="card">
-          <div class="flex items-center gap-2 mb-1">
-            <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
-            <p class="text-xs text-zinc-400 truncate" title={name}>{name}</p>
+        <div class="card flex items-center gap-3">
+          <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm text-zinc-300 truncate" title={name}>{name}</p>
+            <p class="text-lg font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
+              {pct > 0 ? '+' : ''}{pct}%
+            </p>
           </div>
-          <p class="text-xl font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
-            {pct > 0 ? '+' : ''}{pct}%
-          </p>
-          {#if assisted}
-            <p class="text-xs text-zinc-600 mt-0.5">assistance ↓ = progress</p>
-          {/if}
         </div>
       {/each}
     </div>
@@ -565,33 +539,25 @@
         {/each}
       </div>
     {:else if filteredRecs.length > 0}
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-zinc-800 text-zinc-400">
-              <th class="py-2 px-3">Exercise</th>
-              <th class="py-2 px-3">Current best</th>
-              <th class="py-2 px-3">Recommended</th>
-              <th class="py-2 px-3">Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each filteredRecs as rec}
-              {@const delta = rec.recommended_weight - rec.current_weight}
-              <tr class="border-b border-zinc-800/50 hover:bg-zinc-900">
-                <td class="py-2 px-3 font-medium">{rec.exercise_name}</td>
-                <td class="py-2 px-3 font-mono">{displayWeight(rec.current_weight).toFixed(1)} {unit}</td>
-                <td class="py-2 px-3 font-mono {delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-yellow-400'}">
-                  {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
-                  {#if delta > 0}<span class="text-xs ml-1">↑</span>
-                  {:else if delta < 0}<span class="text-xs ml-1">↓</span>
-                  {:else}<span class="text-xs ml-1">→</span>{/if}
-                </td>
-                <td class="py-2 px-3 text-zinc-400">{rec.reason}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
+      <div class="space-y-2">
+        {#each filteredRecs as rec}
+          {@const delta = rec.recommended_weight - rec.current_weight}
+          <div class="flex items-center gap-3 py-3 border-b border-zinc-800/50 last:border-0">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium truncate" title={rec.exercise_name}>{rec.exercise_name}</p>
+              <p class="text-xs text-zinc-500 mt-0.5 line-clamp-2">{rec.reason}</p>
+            </div>
+            <div class="flex-shrink-0 text-right">
+              <p class="text-xs text-zinc-400">{displayWeight(rec.current_weight).toFixed(1)} {unit}</p>
+              <p class="text-sm font-mono font-bold {delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-yellow-400'}">
+                {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
+                {#if delta > 0}<span class="text-xs">↑</span>
+                {:else if delta < 0}<span class="text-xs">↓</span>
+                {:else}<span class="text-xs">→</span>{/if}
+              </p>
+            </div>
+          </div>
+        {/each}
       </div>
     {:else}
       <p class="text-zinc-400 text-center py-6">

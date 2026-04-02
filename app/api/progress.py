@@ -106,6 +106,16 @@ async def get_progress(
     )
     exercise_map = {e.id: e for e in exercises_result.scalars().all()}
 
+    # ── Fetch user's most recent body weight (needed for assisted 1RM) ───────
+    bw_result = await db.execute(
+        select(BodyWeightEntry)
+        .where(BodyWeightEntry.user_id == user.id)
+        .order_by(desc(BodyWeightEntry.recorded_at))
+        .limit(1)
+    )
+    bw_entry = bw_result.scalar_one_or_none()
+    body_weight_kg: float = bw_entry.weight_kg if bw_entry else 0.0
+
     # ── Group sets by (session_id, exercise_id) ──────────────────────────────
     grouped: dict[tuple[int, int], list[ExerciseSet]] = {}
     for s in all_sets:
@@ -132,7 +142,15 @@ async def get_progress(
             r = s.actual_reps or 0
             max_weight = max(max_weight, w)
             if w > 0 and r > 0:
-                one_rm = w * (1 + r / 30)
+                # For assisted exercises (pull-up/dip machines) the stored weight
+                # is the assistance weight. Effective load = bodyweight - assistance.
+                # This makes 1RM naturally increase as the user gets stronger
+                # (less assistance → higher effective weight → higher 1RM).
+                if exercise.is_assisted and body_weight_kg > 0:
+                    eff_w = max(0.0, body_weight_kg - w)
+                else:
+                    eff_w = w
+                one_rm = eff_w * (1 + r / 30)
                 if estimated_1rm is None or one_rm > estimated_1rm:
                     estimated_1rm = one_rm
 
@@ -195,26 +213,40 @@ async def get_recommendations(
     exercise_map = {e.id: e for e in exercises_result.scalars().all()}
 
     # ── Collect best performance per exercise ─────────────────────────────────
+    # For assisted exercises: "best" means lowest assistance weight (= highest effective load).
+    # We initialise best_weight to infinity so the first real set always wins.
     exercise_performance: dict[int, dict] = {}
     for exercise_set in all_sets:
         ex_id = exercise_set.exercise_id
+        exercise = exercise_map.get(ex_id)
+        is_assisted = exercise.is_assisted if exercise else False
+
         if ex_id not in exercise_performance:
             exercise_performance[ex_id] = {
-                "best_weight": 0.0,
+                # For assisted start at inf so any real weight beats it
+                "best_weight": float("inf") if is_assisted else 0.0,
                 "best_reps": 0,
                 "total_volume": 0.0,
                 "set_count": 0,
+                "is_assisted": is_assisted,
             }
 
         weight = exercise_set.actual_weight_kg or 0.0
         reps = exercise_set.actual_reps or 0
 
-        if weight > exercise_performance[ex_id]["best_weight"]:
-            exercise_performance[ex_id]["best_weight"] = weight
-            exercise_performance[ex_id]["best_reps"] = reps
+        perf = exercise_performance[ex_id]
+        if is_assisted:
+            # Lower assistance = stronger; track the set with least assistance
+            if weight > 0 and weight < perf["best_weight"]:
+                perf["best_weight"] = weight
+                perf["best_reps"] = reps
+        else:
+            if weight > perf["best_weight"]:
+                perf["best_weight"] = weight
+                perf["best_reps"] = reps
 
-        exercise_performance[ex_id]["total_volume"] += weight * reps
-        exercise_performance[ex_id]["set_count"] += 1
+        perf["total_volume"] += weight * reps
+        perf["set_count"] += 1
 
     # ── Build recommendations ─────────────────────────────────────────────────
     recommendations = []
@@ -224,19 +256,39 @@ async def get_recommendations(
             continue
 
         current_weight = perf["best_weight"]
+        is_assisted = perf.get("is_assisted", False)
 
-        if perf["best_reps"] >= 10:
-            recommended_weight = current_weight * 1.05
-            reason = "Achieved 10+ reps — increase weight by 5%"
-        elif perf["best_reps"] >= 8:
-            recommended_weight = current_weight * 1.025
-            reason = "Achieved 8–9 reps — small weight increase"
-        elif perf["best_reps"] >= 5:
-            recommended_weight = current_weight
-            reason = "Focus on adding reps before increasing weight"
+        # Guard against inf (no valid sets found for assisted)
+        if current_weight == float("inf"):
+            continue
+
+        if is_assisted:
+            # Assisted: goal is to REDUCE assistance weight over time
+            if perf["best_reps"] >= 10:
+                recommended_weight = current_weight * 0.95
+                reason = "Achieved 10+ reps — reduce assistance by 5%"
+            elif perf["best_reps"] >= 8:
+                recommended_weight = current_weight * 0.975
+                reason = "Achieved 8–9 reps — small assistance reduction"
+            elif perf["best_reps"] >= 5:
+                recommended_weight = current_weight
+                reason = "Focus on adding reps before reducing assistance"
+            else:
+                recommended_weight = current_weight * 1.05
+                reason = "Below 5 reps — consider more assistance"
         else:
-            recommended_weight = current_weight * 0.95
-            reason = "Below 5 reps — consider deloading"
+            if perf["best_reps"] >= 10:
+                recommended_weight = current_weight * 1.05
+                reason = "Achieved 10+ reps — increase weight by 5%"
+            elif perf["best_reps"] >= 8:
+                recommended_weight = current_weight * 1.025
+                reason = "Achieved 8–9 reps — small weight increase"
+            elif perf["best_reps"] >= 5:
+                recommended_weight = current_weight
+                reason = "Focus on adding reps before increasing weight"
+            else:
+                recommended_weight = current_weight * 0.95
+                reason = "Below 5 reps — consider deloading"
 
         recommendations.append({
             "exercise_id": ex_id,
