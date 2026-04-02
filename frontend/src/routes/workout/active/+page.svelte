@@ -109,6 +109,11 @@
     groupType: 'superset' | 'circuit' | null;
   }
 
+  interface PersistedSessionExerciseStructure {
+    order: number[];
+    groups: Record<string, { groupId: string | null; groupType: 'superset' | 'circuit' | null }>;
+  }
+
   interface ExerciseGroup {
     groupId: string | null;
     groupType: 'superset' | 'circuit' | null;
@@ -1236,8 +1241,8 @@
         };
       });
 
-      // Restore user-defined exercise order if they reordered during this session
-      uiExercises = loadExerciseOrder(uiExercises);
+      // Restore user-defined planning-stage structure if they changed it during this session
+      uiExercises = loadSessionStructure(uiExercises);
 
       await restoreFeedbackState(sess.id);
     } catch (e) {
@@ -1752,20 +1757,58 @@
     return sid ? `hgt_exercise_order_${sid}` : null;
   }
 
-  function saveExerciseOrder() {
-    const key = exerciseOrderKey(sessionId);
-    if (!key || typeof localStorage === 'undefined') return;
-    localStorage.setItem(key, JSON.stringify(uiExercises.map(e => e.exerciseId)));
+  function exerciseStructureKey(sid: number | null) {
+    return sid ? `hgt_session_structure_${sid}` : null;
   }
 
-  function loadExerciseOrder(exercises: UIExercise[]): UIExercise[] {
-    const key = exerciseOrderKey(sessionId);
-    if (!key || typeof localStorage === 'undefined') return exercises;
+  function saveSessionStructure() {
+    const key = exerciseStructureKey(sessionId);
+    if (!key || typeof localStorage === 'undefined') return;
+    const payload: PersistedSessionExerciseStructure = {
+      order: uiExercises.map(e => e.exerciseId),
+      groups: Object.fromEntries(
+        uiExercises.map(e => [
+          String(e.exerciseId),
+          { groupId: e.groupId, groupType: e.groupType },
+        ]),
+      ),
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
+  }
+
+  function loadSessionStructure(exercises: UIExercise[]): UIExercise[] {
+    if (typeof localStorage === 'undefined') return exercises;
+    const structureKey = exerciseStructureKey(sessionId);
+    const legacyOrderKey = exerciseOrderKey(sessionId);
     try {
-      const saved = localStorage.getItem(key);
-      if (!saved) return exercises;
-      const order: number[] = JSON.parse(saved);
-      // Reorder to match saved order; append any new exercises not in saved list
+      const rawStructure = structureKey ? localStorage.getItem(structureKey) : null;
+      if (rawStructure) {
+        const saved: PersistedSessionExerciseStructure = JSON.parse(rawStructure);
+        const order = Array.isArray(saved.order) ? saved.order : [];
+        const groups = saved.groups ?? {};
+        const ordered = order
+          .map(id => exercises.find(e => e.exerciseId === id))
+          .filter((e): e is UIExercise => e != null)
+          .map((exercise) => {
+            const group = groups[String(exercise.exerciseId)];
+            return group
+              ? { ...exercise, groupId: group.groupId ?? null, groupType: group.groupType ?? null }
+              : exercise;
+          });
+        const rest = exercises
+          .filter(e => !order.includes(e.exerciseId))
+          .map((exercise) => {
+            const group = groups[String(exercise.exerciseId)];
+            return group
+              ? { ...exercise, groupId: group.groupId ?? null, groupType: group.groupType ?? null }
+              : exercise;
+          });
+        return [...ordered, ...rest];
+      }
+
+      const savedOrder = legacyOrderKey ? localStorage.getItem(legacyOrderKey) : null;
+      if (!savedOrder) return exercises;
+      const order: number[] = JSON.parse(savedOrder);
       const ordered = order
         .map(id => exercises.find(e => e.exerciseId === id))
         .filter((e): e is UIExercise => e != null);
@@ -1782,7 +1825,7 @@
     const arr = [...uiExercises];
     [arr[idx], arr[target]] = [arr[target], arr[idx]];
     uiExercises = arr;
-    saveExerciseOrder();
+    saveSessionStructure();
   }
 
   async function removeExercise(exUiId: string) {
@@ -1793,6 +1836,7 @@
       await Promise.allSettled(backendIds.map(id => deleteSet(sessionId!, id)));
     }
     uiExercises = uiExercises.filter(e => e.uiId !== exUiId);
+    saveSessionStructure();
 
     // Reset timer if no sets are done anymore
     resetTimerIfNoDoneSets();
@@ -1872,6 +1916,7 @@
       group.forEach(e => e.groupType = t);
     }
     uiExercises = [...uiExercises];
+    saveSessionStructure();
   }
 
   /** Play a short chime using Web Audio API (no audio file needed) */
@@ -2130,6 +2175,7 @@
           groupType: oldEx.groupType,
         };
         uiExercises = [...uiExercises];
+        saveSessionStructure();
       }
       swapTargetUiId = null;
     } else {
@@ -2159,6 +2205,7 @@
         groupId: null,
         groupType: null,
       }];
+      saveSessionStructure();
     }
     showAddModal = false;
     pickingExercise = null;
@@ -2175,6 +2222,8 @@
       // Clean up any saved exercise order for this session
       const orderKey = exerciseOrderKey(sessionId);
       if (orderKey && typeof localStorage !== 'undefined') localStorage.removeItem(orderKey);
+      const structureKey = exerciseStructureKey(sessionId);
+      if (structureKey && typeof localStorage !== 'undefined') localStorage.removeItem(structureKey);
       // Persist any notes the user entered
       const noteKey = `hgt_session_note_${sessionId}`;
       const savedNote = localStorage.getItem(noteKey)?.trim();
@@ -2230,6 +2279,10 @@
     } catch (e) {
       console.error('Failed to delete session:', e);
     }
+    const orderKey = exerciseOrderKey(sessionId);
+    if (orderKey && typeof localStorage !== 'undefined') localStorage.removeItem(orderKey);
+    const structureKey = exerciseStructureKey(sessionId);
+    if (structureKey && typeof localStorage !== 'undefined') localStorage.removeItem(structureKey);
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
