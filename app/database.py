@@ -510,15 +510,23 @@ async def seed_exercises() -> None:
             )
             ex = existing.scalar_one_or_none()
             if ex:
-                # Update flags if they've changed
+                # Update fields that may have changed or been added after initial seed
                 changed = False
                 want_uni = ex_data.get("is_unilateral", False)
                 want_ast = ex_data.get("is_assisted", False)
+                want_primary = ex_data.get("primary_muscles", [])
+                want_secondary = ex_data.get("secondary_muscles", [])
                 if ex.is_unilateral != want_uni:
                     ex.is_unilateral = want_uni
                     changed = True
                 if ex.is_assisted != want_ast:
                     ex.is_assisted = want_ast
+                    changed = True
+                if sorted(ex.primary_muscles or []) != sorted(want_primary):
+                    ex.primary_muscles = want_primary
+                    changed = True
+                if sorted(ex.secondary_muscles or []) != sorted(want_secondary):
+                    ex.secondary_muscles = want_secondary
                     changed = True
                 if changed:
                     updated_count += 1
