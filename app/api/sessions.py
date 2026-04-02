@@ -1036,29 +1036,14 @@ async def create_session_from_plan(
                 "set_type": s.set_type or "standard",
             }
 
-    # ── Cross-meso prefill: week 1 of a brand-new plan ───────────────────────
-    # When there is no prior session for this plan day we have no performance
-    # history to overload from.  Instead, find the most recent completed set
-    # for each exercise from ANY session, then convert via Epley to the new
-    # plan's target reps and RIR target so week 1 starts at the right weight.
-    #
-    # Guard: only fire when the plan has NEVER had any completed session at
-    # all.  If the plan already has sessions on other days (multi-day plans)
-    # those days should still start blank — the cross-meso prefill is only
-    # for the very first week of a genuinely new mesocycle.
-    plan_has_any_history = bool(
-        (await db.execute(
-            select(WorkoutSession.id)
-            .where(
-                WorkoutSession.workout_plan_id == plan_id,
-                WorkoutSession.id.in_(sessions_with_data),
-                WorkoutSession.user_id == user.id,
-            )
-            .limit(1)
-        )).scalar_one_or_none()
-    )
+    # ── Cross-meso prefill: first session of a day with no prior data ────────
+    # When there is no prior session for this plan day (week 1 of any day in
+    # any block) look up the most recent completed set for each exercise from
+    # OTHER plans and convert via Epley to the new plan's target reps + RIR.
+    # Scoping to other plans prevents Day 1 data from bleeding into Day 2
+    # within the same plan while still enabling true multi-block predictions.
     cross_meso_data: dict[int, dict] = {}
-    if not prior_session and not plan_has_any_history and day_exercise_ids:
+    if not prior_session and day_exercise_ids:
         recent_sets_q = await db.execute(
             select(ExerciseSet, WorkoutSession.date.label("sess_date"))
             .join(WorkoutSession, ExerciseSet.workout_session_id == WorkoutSession.id)
@@ -1070,6 +1055,7 @@ async def create_session_from_plan(
                 ExerciseSet.set_type.in_(["standard", None]),
                 WorkoutSession.status == WorkoutStatus.COMPLETED,
                 WorkoutSession.user_id == user.id,
+                WorkoutSession.workout_plan_id != plan_id,
             )
             .order_by(desc(WorkoutSession.date), desc(ExerciseSet.id))
         )
