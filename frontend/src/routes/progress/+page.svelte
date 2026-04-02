@@ -115,19 +115,29 @@
   });
 
   // Per-exercise % change time series: Map<exerciseName, Map<date, pctChange>>
-  // All series start at 0% on the first data point.
+  // All series start at 0% on the first date.
+  // Uses the highest estimated 1RM per date (best set, not first set).
   let exercisePctSeries = $derived.by(() => {
     const result = new Map<string, Map<string, number>>();
     const names = [...new Set(progressData.map(p => p.exercise_name))];
     for (const name of names) {
-      const points = progressData
-        .filter(p => p.exercise_name === name && p.estimated_1rm != null && p.estimated_1rm > 0)
-        .sort((a, b) => a.date.localeCompare(b.date));
-      if (points.length < 1) continue;
-      const baseline = points[0].estimated_1rm!;
-      const series = new Map<string, number>();
+      const points = progressData.filter(
+        p => p.exercise_name === name && p.estimated_1rm != null && p.estimated_1rm > 0
+      );
+      if (points.length === 0) continue;
+
+      // Group by date — keep max estimated_1rm per date (best set wins)
+      const bestByDate = new Map<string, number>();
       for (const p of points) {
-        series.set(p.date, ((p.estimated_1rm! - baseline) / baseline) * 100);
+        const prev = bestByDate.get(p.date) ?? 0;
+        bestByDate.set(p.date, Math.max(prev, p.estimated_1rm!));
+      }
+
+      const sortedDates = [...bestByDate.keys()].sort();
+      const baseline = bestByDate.get(sortedDates[0])!;
+      const series = new Map<string, number>();
+      for (const date of sortedDates) {
+        series.set(date, ((bestByDate.get(date)! - baseline) / baseline) * 100);
       }
       result.set(name, series);
     }
