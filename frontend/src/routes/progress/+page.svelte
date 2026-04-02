@@ -37,6 +37,7 @@
   let error = $state<string | null>(null);
   let selectedGroup = $state<string | null>(null);
   let selectedSubGroup = $state<string | null>(null);
+  let selectedExercise = $state<string | null>(null);
 
   // Muscle group definitions — order determines display order
   const MUSCLE_GROUPS: Record<string, string[]> = {
@@ -178,6 +179,87 @@
       result.set(name, series);
     }
     return result;
+  });
+
+  // Absolute estimated 1RM per exercise per date (for individual exercise history chart)
+  let exerciseAbsolute1RM = $derived.by(() => {
+    const result = new Map<string, Map<string, number>>();
+    for (const name of [...new Set(progressData.map(p => p.exercise_name))]) {
+      const points = progressData.filter(p => p.exercise_name === name && p.estimated_1rm != null && p.estimated_1rm > 0);
+      if (points.length === 0) continue;
+      const byDate = new Map<string, number>();
+      for (const p of points) {
+        const prev = byDate.get(p.date);
+        byDate.set(p.date, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
+      }
+      result.set(name, byDate);
+    }
+    return result;
+  });
+
+  // Chart data for a single selected exercise — shows actual 1RM over time
+  let selectedExerciseChartData = $derived.by(() => {
+    if (!selectedExercise) return { labels: [], datasets: [] };
+    const series = exerciseAbsolute1RM.get(selectedExercise);
+    if (!series) return { labels: [], datasets: [] };
+    const dates = [...series.keys()].sort();
+    return {
+      labels: dates,
+      datasets: [{
+        label: selectedExercise,
+        data: dates.map(d => Math.round(displayWeight(series.get(d)!) * 10) / 10),
+        borderColor: COLORS[0],
+        backgroundColor: COLORS[0] + '20',
+        tension: 0.3,
+        spanGaps: true,
+        pointRadius: 4,
+        fill: true,
+      }],
+    };
+  });
+
+  let selectedExerciseChartOptions = $derived({
+    responsive: true,
+    plugins: {
+      legend: { display: false },
+      title: {
+        display: true,
+        text: selectedExercise ? `${selectedExercise} — Est. 1RM (${unit})` : '',
+        color: '#d1d5db',
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => `${ctx.parsed.y != null ? ctx.parsed.y.toFixed(1) : '–'} ${unit}`,
+        },
+      },
+    },
+    scales: {
+      y: {
+        title: { display: true, text: `Est. 1RM (${unit})`, color: '#9ca3af' },
+        ticks: { color: '#9ca3af', callback: (v: any) => `${v} ${unit}` },
+        grid: { color: '#374151' },
+      },
+      x: {
+        title: { display: true, text: 'Date', color: '#9ca3af' },
+        ticks: { color: '#9ca3af' },
+        grid: { color: '#374151' },
+      },
+    },
+  });
+
+  // Key stats for the selected exercise
+  let selectedExerciseStats = $derived.by(() => {
+    if (!selectedExercise) return null;
+    const series = exerciseAbsolute1RM.get(selectedExercise);
+    if (!series || series.size === 0) return null;
+    const dates = [...series.keys()].sort();
+    const values = dates.map(d => series.get(d)!);
+    const bestKg = Math.max(...values);
+    const latestKg = values[values.length - 1];
+    const firstKg = values[0];
+    const pctChange = firstKg > 0 ? Math.round((latestKg - firstKg) / firstKg * 1000) / 10 : 0;
+    const rec = recommendations.find(r => r.exercise_name === selectedExercise) ?? null;
+    return { bestKg, latestKg, firstKg, pctChange, sessions: dates.length, rec };
   });
 
   // Trained muscle groups with data in the current time range (in MUSCLE_GROUPS order)
@@ -333,14 +415,22 @@
     }
   });
 
-  let activeChartData = $derived(selectedGroup ? drilldownChartData : overviewChartData);
+  let activeChartData = $derived(
+    selectedExercise ? selectedExerciseChartData :
+    selectedGroup    ? drilldownChartData :
+                       overviewChartData
+  );
+
+  let activeChartOptions = $derived(selectedExercise ? selectedExerciseChartOptions : chartOptions);
 
   let chartTitle = $derived(
-    selectedSubGroup
-      ? `${selectedGroup} › ${selectedSubGroup} — Est. 1RM % Change`
-      : selectedGroup
-        ? `${selectedGroup} — Est. 1RM % Change`
-        : 'Muscle Group Strength Trends (Est. 1RM % Change)'
+    selectedExercise
+      ? `${selectedExercise} — Est. 1RM (${unit})`
+      : selectedSubGroup
+        ? `${selectedGroup} › ${selectedSubGroup} — Est. 1RM % Change`
+        : selectedGroup
+          ? `${selectedGroup} — Est. 1RM % Change`
+          : 'Muscle Group Strength Trends (Est. 1RM % Change)'
   );
 
   let chartOptions = $derived({
@@ -381,8 +471,9 @@
     },
   });
 
-  // Recommendations filtered to selected sub-group / group in drill-down mode
+  // Recommendations filtered to selected exercise / sub-group / group
   let filteredRecs = $derived.by(() => {
+    if (selectedExercise) return recommendations.filter(r => r.exercise_name === selectedExercise);
     if (!selectedGroup) return recommendations;
     let exNames: string[];
     if (selectedSubGroup) {
@@ -414,11 +505,19 @@
 <div class="space-y-6 max-w-4xl mx-auto">
   <!-- Header row with back button + time range -->
   <div class="flex items-center justify-between gap-3">
-    <div class="flex items-center gap-3 flex-wrap">
-      {#if selectedSubGroup}
+    <div class="flex items-center gap-3 flex-wrap min-w-0">
+      {#if selectedExercise}
+        <button
+          onclick={() => { selectedExercise = null; }}
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1 shrink-0"
+        >
+          ← {selectedSubGroup ?? selectedGroup}
+        </button>
+        <h2 class="text-xl font-bold truncate">{selectedExercise}</h2>
+      {:else if selectedSubGroup}
         <button
           onclick={() => { selectedSubGroup = null; }}
-          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1"
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1 shrink-0"
         >
           ← {selectedGroup}
         </button>
@@ -426,7 +525,7 @@
       {:else if selectedGroup}
         <button
           onclick={() => { selectedGroup = null; selectedSubGroup = null; }}
-          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1"
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1 shrink-0"
         >
           ← All Muscles
         </button>
@@ -454,7 +553,7 @@
     {:else if error}
       <p class="text-red-400 text-center py-8">{error}</p>
     {:else if activeChartData.datasets.length > 0}
-      <Line data={activeChartData} options={chartOptions} />
+      <Line data={activeChartData} options={activeChartOptions} />
     {:else}
       <p class="text-zinc-400 text-center py-8">
         No data for the selected range. Complete a workout with logged sets to see your progress here.
@@ -509,28 +608,56 @@
   {/if}
 
   <!-- Drill-down: individual exercise cards -->
-  {#if selectedGroup && drilldownExercises.length > 0 && !loading}
+  {#if selectedGroup && drilldownExercises.length > 0 && !loading && !selectedExercise}
     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
       {#each drilldownExercises as name, idx}
         {@const vals = [...exercisePctSeries.get(name)!.values()]}
         {@const pct = vals.length > 0 ? Math.round(vals[vals.length - 1] * 10) / 10 : 0}
-        <div class="card flex items-center gap-3">
+        <button
+          class="card flex items-center gap-3 text-left w-full hover:bg-zinc-700/60 transition-colors"
+          onclick={() => selectedExercise = name}
+        >
           <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
           <div class="min-w-0 flex-1">
             <p class="text-sm text-zinc-300 truncate" title={name}>{name}</p>
             <p class="text-lg font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
               {pct > 0 ? '+' : ''}{pct}%
             </p>
+            <p class="text-xs text-zinc-500 mt-0.5">Tap for history →</p>
           </div>
-        </div>
+        </button>
       {/each}
+    </div>
+  {/if}
+
+  <!-- Exercise detail: key stats when a specific exercise is selected -->
+  {#if selectedExercise && selectedExerciseStats && !loading}
+    {@const s = selectedExerciseStats}
+    <div class="grid grid-cols-3 gap-3">
+      <div class="card text-center">
+        <p class="text-xs text-zinc-500 mb-1">Latest 1RM</p>
+        <p class="text-xl font-bold text-white">{displayWeight(s.latestKg).toFixed(1)}</p>
+        <p class="text-xs text-zinc-500">{unit}</p>
+      </div>
+      <div class="card text-center">
+        <p class="text-xs text-zinc-500 mb-1">Best 1RM</p>
+        <p class="text-xl font-bold text-white">{displayWeight(s.bestKg).toFixed(1)}</p>
+        <p class="text-xs text-zinc-500">{unit}</p>
+      </div>
+      <div class="card text-center">
+        <p class="text-xs text-zinc-500 mb-1">Change</p>
+        <p class="text-xl font-bold {s.pctChange > 0 ? 'text-green-400' : s.pctChange < 0 ? 'text-red-400' : 'text-zinc-400'}">
+          {s.pctChange > 0 ? '+' : ''}{s.pctChange}%
+        </p>
+        <p class="text-xs text-zinc-500">{s.sessions} sessions</p>
+      </div>
     </div>
   {/if}
 
   <!-- Recommendations -->
   <div class="card">
     <h3 class="text-lg font-semibold mb-4">
-      Progression Recommendations{selectedSubGroup ? ` — ${selectedSubGroup}` : selectedGroup ? ` — ${selectedGroup}` : ''}
+      Progression Recommendations{selectedExercise ? ` — ${selectedExercise}` : selectedSubGroup ? ` — ${selectedSubGroup}` : selectedGroup ? ` — ${selectedGroup}` : ''}
     </h3>
     {#if loading}
       <div class="space-y-2">
