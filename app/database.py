@@ -496,6 +496,7 @@ async def seed_exercises() -> None:
             {"name": "band_assisted_pull_up", "display_name": "Band Assisted Pull-Up", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["lats"], "secondary_muscles": ["biceps"]},
             {"name": "band_assisted_chin_up", "display_name": "Band Assisted Chin-Up", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["lats", "biceps"], "secondary_muscles": []},
             {"name": "band_assisted_dip", "display_name": "Band Assisted Dip", "movement_type": "compound", "body_region": "upper", "is_assisted": True, "primary_muscles": ["chest", "triceps"], "secondary_muscles": ["shoulders"]},
+            {"name": "pistol_squat", "display_name": "Pistol Squat", "movement_type": "compound", "body_region": "lower", "is_unilateral": True, "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["core"]},
             {"name": "assisted_pistol_squat", "display_name": "Assisted Pistol Squat (Band / TRX)", "movement_type": "compound", "body_region": "lower", "is_assisted": True, "is_unilateral": True, "primary_muscles": ["quadriceps", "glutes"], "secondary_muscles": ["core"]},
         ]
 
