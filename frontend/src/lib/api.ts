@@ -389,9 +389,16 @@ export async function patchSession(sessionId: number, data: { notes?: string; na
 }
 
 export async function syncSessionToPlan(
-  sessionId: number
+  sessionId: number,
+  data?: {
+    exercises: Array<{
+      exercise_id: number;
+      group_id?: string | null;
+      group_type?: 'superset' | 'circuit' | null;
+    }>;
+  }
 ): Promise<{ updated: number; structural_changes?: number }> {
-  const response = await api.post(`/sessions/${sessionId}/sync-to-plan`);
+  const response = await api.post(`/sessions/${sessionId}/sync-to-plan`, data ?? null);
   return response.data;
 }
 
