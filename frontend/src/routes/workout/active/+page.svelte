@@ -2351,11 +2351,13 @@
   let historyExerciseId = $state<number | null>(null);
   let historyData = $state<ExerciseHistorySession[]>([]);
   let loadingHistory = $state(false);
+  let expandedHistorySessionKeys = $state<Set<string>>(new Set());
 
   async function openHistory(exerciseId: number) {
     historyExerciseId = exerciseId;
     historyData = [];
     loadingHistory = true;
+    expandedHistorySessionKeys = new Set();
     try {
       historyData = await getExerciseHistory(exerciseId, 8);
     } catch { /* silently fail */ }
@@ -2364,6 +2366,40 @@
 
   function fmtHistDate(iso: string) {
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  }
+
+  function historySessionKey(session: ExerciseHistorySession): string {
+    return `${session.date}:${session.session_name ?? session.plan_name ?? 'session'}`;
+  }
+
+  function toggleHistorySession(key: string) {
+    if (expandedHistorySessionKeys.has(key)) expandedHistorySessionKeys.delete(key);
+    else expandedHistorySessionKeys.add(key);
+    expandedHistorySessionKeys = new Set(expandedHistorySessionKeys);
+  }
+
+  function historyBestSet(session: ExerciseHistorySession) {
+    const completedSets = session.sets.filter((set) =>
+      set.actual_weight_kg != null && (set.actual_reps != null || set.reps_left != null || set.reps_right != null)
+    );
+    if (completedSets.length === 0) return null;
+
+    return completedSets.reduce((best, current) => {
+      const bestReps = best.actual_reps ?? Math.min(best.reps_left ?? 0, best.reps_right ?? 0);
+      const currentReps = current.actual_reps ?? Math.min(current.reps_left ?? 0, current.reps_right ?? 0);
+      const bestWeight = best.actual_weight_kg ?? 0;
+      const currentWeight = current.actual_weight_kg ?? 0;
+      if (currentWeight > bestWeight) return current;
+      if (currentWeight === bestWeight && currentReps > bestReps) return current;
+      return best;
+    });
+  }
+
+  function historySetReps(set: ExerciseHistorySession['sets'][number]): string {
+    if (set.actual_reps == null && (set.reps_left != null || set.reps_right != null)) {
+      return `L:${set.reps_left ?? '—'}/R:${set.reps_right ?? '—'}`;
+    }
+    return `${set.actual_reps ?? '—'}`;
   }
 
   // ─── Un-complete a set ────────────────────────────────────────────────────
@@ -3726,44 +3762,60 @@
           <p class="text-zinc-500 text-sm text-center py-10">No history yet for this exercise.</p>
         {:else}
           {#each historyData as session}
-            <div>
-              <div class="flex items-baseline justify-between mb-1.5">
-                <div class="flex items-baseline gap-2">
-                  {#if session.week_number != null && session.plan_name}
-                    <span class="text-sm font-semibold text-primary-400">{session.plan_name} wk {session.week_number}</span>
-                  {:else if session.session_name}
-                    <span class="text-sm font-semibold text-zinc-300">{session.session_name}</span>
-                  {/if}
-                  <span class="text-xs text-zinc-500">{fmtHistDate(session.date)}</span>
-                </div>
-              </div>
-              <div class="bg-zinc-950 rounded-lg overflow-hidden">
-                <div class="grid px-3 py-1.5 border-b border-zinc-800" style="grid-template-columns: 2rem 1fr 1fr">
-                  <span class="text-xs text-zinc-500">#</span>
-                  <span class="text-xs text-zinc-500 text-right">{histEx?.is_assisted ? '−Assist' : `Wt (${unit})`}</span>
-                  <span class="text-xs text-zinc-500 text-right">Reps</span>
-                </div>
-                {#each session.sets as s}
-                  {@const dispW = s.actual_weight_kg != null
-                    ? (histEx?.is_assisted
-                        ? -fromKg(s.actual_weight_kg)   // assist amount stored directly; show as negative
-                        : fromKg(s.actual_weight_kg))
-                    : null}
-                  <div class="grid px-3 py-1.5 border-b border-gray-800 last:border-0" style="grid-template-columns: 2rem 1fr 1fr">
-                    <span class="text-xs text-zinc-500 font-mono">{s.set_number}</span>
-                    <span class="text-sm font-mono text-right {dispW != null ? 'text-white' : 'text-gray-600'}">
-                      {dispW != null ? dispW : '—'}
-                    </span>
-                    <span class="text-sm font-mono text-right {(s.actual_reps != null || s.reps_left != null || s.reps_right != null) ? 'text-white' : 'text-gray-600'}">
-                      {#if s.actual_reps == null && (s.reps_left != null || s.reps_right != null)}
-                        L:{s.reps_left ?? '—'}/R:{s.reps_right ?? '—'}
-                      {:else}
-                        {s.actual_reps ?? '—'}
-                      {/if}
-                    </span>
+            {@const sessionKey = historySessionKey(session)}
+            {@const bestSet = historyBestSet(session)}
+            {@const bestWeight = bestSet?.actual_weight_kg != null
+              ? (histEx?.is_assisted ? -fromKg(bestSet.actual_weight_kg) : fromKg(bestSet.actual_weight_kg))
+              : null}
+            <div class="bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800">
+              <button
+                onclick={() => toggleHistorySession(sessionKey)}
+                class="w-full flex items-center justify-between gap-3 px-3 py-3 text-left hover:bg-zinc-900/60 transition-colors"
+              >
+                <div class="min-w-0">
+                  <div class="flex items-baseline gap-2 flex-wrap">
+                    {#if session.week_number != null && session.plan_name}
+                      <span class="text-sm font-semibold text-primary-400">{session.plan_name} wk {session.week_number}</span>
+                    {:else if session.session_name}
+                      <span class="text-sm font-semibold text-zinc-300">{session.session_name}</span>
+                    {/if}
+                    <span class="text-xs text-zinc-500">{fmtHistDate(session.date)}</span>
                   </div>
-                {/each}
-              </div>
+                  <p class="text-xs text-zinc-500 mt-1">
+                    {session.sets.length} {session.sets.length === 1 ? 'set' : 'sets'}
+                    {#if bestSet && bestWeight != null}
+                      · Top set {bestWeight} {unit} × {historySetReps(bestSet)}
+                    {/if}
+                  </p>
+                </div>
+                <span class="text-xs text-zinc-500 shrink-0">
+                  {expandedHistorySessionKeys.has(sessionKey) ? 'Hide sets' : 'View sets'}
+                </span>
+              </button>
+
+              {#if expandedHistorySessionKeys.has(sessionKey)}
+                <div class="border-t border-zinc-800">
+                  <div class="grid px-3 py-1.5 border-b border-zinc-800" style="grid-template-columns: 2rem 1fr 1fr">
+                    <span class="text-xs text-zinc-500">#</span>
+                    <span class="text-xs text-zinc-500 text-right">{histEx?.is_assisted ? '−Assist' : `Wt (${unit})`}</span>
+                    <span class="text-xs text-zinc-500 text-right">Reps</span>
+                  </div>
+                  {#each session.sets as s}
+                    {@const dispW = s.actual_weight_kg != null
+                      ? (histEx?.is_assisted ? -fromKg(s.actual_weight_kg) : fromKg(s.actual_weight_kg))
+                      : null}
+                    <div class="grid px-3 py-1.5 border-b border-gray-800 last:border-0" style="grid-template-columns: 2rem 1fr 1fr">
+                      <span class="text-xs text-zinc-500 font-mono">{s.set_number}</span>
+                      <span class="text-sm font-mono text-right {dispW != null ? 'text-white' : 'text-gray-600'}">
+                        {dispW != null ? dispW : '—'}
+                      </span>
+                      <span class="text-sm font-mono text-right {(s.actual_reps != null || s.reps_left != null || s.reps_right != null) ? 'text-white' : 'text-gray-600'}">
+                        {historySetReps(s)}
+                      </span>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/each}
         {/if}
