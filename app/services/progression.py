@@ -169,7 +169,11 @@ def compute_overload(
         # is realistic (they can aim for more reps themselves).
         # Rep/double: re-attempt the planned target to encourage reaching it.
         if overload_style == "weight":
-            return round(prior_weight / 2.5) * 2.5, prior_reps
+            # Return the exact prior weight without rounding — rounding to the
+            # nearest 2.5 kg can round *down* when the stored weight came from
+            # an imperial input (e.g. 183.32 kg from 405 lbs → rounds to 182.5
+            # kg → displays as 400 lbs, regressing below what was actually used).
+            return prior_weight, prior_reps
         return prior_weight, planned_reps
 
     # Hit target: apply progression
