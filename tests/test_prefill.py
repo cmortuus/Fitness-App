@@ -1018,3 +1018,147 @@ class TestReorderFatigueAdjustment:
         # No muscle overlap → no adjustment → is_extrapolated must be False
         assert all(not s["is_extrapolated"] for s in w2_p2["sets"]), \
             "Non-overlapping muscles: no fatigue adjustment, is_extrapolated must be False"
+
+
+# ── Weight-first cross-day fallback ──────────────────────────────────────────
+
+class TestWeightFirstCrossDay:
+    """Weight-first style: use the most recent same-plan session for each exercise.
+
+    When the same exercise appears on multiple plan days (e.g. belt squat on
+    Monday and Thursday), the same-day prior for Thursday may be weeks old while
+    the user has progressed further via Monday sessions.  The cross-day fallback
+    ensures the prefill weight never regresses below the user's actual current
+    strength.
+    """
+
+    async def _create_two_day_plan(self, client, ex_id: int, reps: int = 8) -> dict:
+        body = {
+            "name": "Two Day Plan",
+            "block_type": "hypertrophy",
+            "duration_weeks": 4,
+            "number_of_days": 2,
+            "days": [
+                {
+                    "day_number": 1,
+                    "day_name": "Day 1",
+                    "exercises": [{"exercise_id": ex_id, "sets": 3, "reps": reps,
+                                   "starting_weight_kg": 0, "progression_type": "linear"}],
+                },
+                {
+                    "day_number": 2,
+                    "day_name": "Day 2",
+                    "exercises": [{"exercise_id": ex_id, "sets": 3, "reps": reps,
+                                   "starting_weight_kg": 0, "progression_type": "linear"}],
+                },
+            ],
+        }
+        r = await client.post("/api/plans/", json=body)
+        assert r.status_code == 201, r.text
+        return r.json()
+
+    async def test_cross_day_weight_used_when_more_recent(self, client: AsyncClient):
+        """Weight-first: if Day 1 was done MORE RECENTLY than the Day 2 prior,
+        Day 2's prefill should build from Day 1's weight rather than the stale
+        Day 2 prior.
+
+        Scenario:
+          1. Day 2 prior session: 100 kg × 8 (old)
+          2. Day 1 session: 110 kg × 8 (newer, same exercise)
+          3. New Day 2 session (weight-first) → should reference 110 kg, not 100 kg
+        """
+        ex = await create_exercise(client)
+        plan = await self._create_two_day_plan(client, ex["id"], reps=8)
+
+        # Step 1: Day 2 at 100 kg × 8 (becomes the same-day prior for Day 2)
+        d2_prior = await start_session_from_plan(client, plan["id"], day=2,
+                                                  overload_style="weight")
+        for s in d2_prior["sets"]:
+            await log_set(client, d2_prior["id"], s["id"], 100.0, 8)
+
+        # Step 2: Day 1 at 110 kg × 8 (done AFTER Day 2 prior → higher session ID)
+        d1_recent = await start_session_from_plan(client, plan["id"], day=1,
+                                                   overload_style="weight")
+        for s in d1_recent["sets"]:
+            await log_set(client, d1_recent["id"], s["id"], 110.0, 8)
+
+        # Step 3: New Day 2 session with weight-first
+        # The cross-day fallback should use Day 1's 110 kg as the basis.
+        d2_new = await start_session_from_plan(client, plan["id"], day=2,
+                                                overload_style="weight")
+        for s in d2_new["sets"]:
+            # Suggestion must be ABOVE 100 kg (the stale Day 2 prior).
+            # With cross-day data (110 kg × 8, hit target), Epley gives ~113 kg.
+            assert s["planned_weight_kg"] is not None, "Should have weight suggestion"
+            assert s["planned_weight_kg"] > 100.0, (
+                f"Cross-day fallback should produce weight > 100 kg (stale prior); "
+                f"got {s['planned_weight_kg']}"
+            )
+            # Reps should stay at 8 (weight-first keeps reps at prior achieved)
+            assert s["planned_reps"] == 8, \
+                f"Weight-first: reps should be 8, got {s['planned_reps']}"
+
+    async def test_weight_first_miss_shows_actual_reps(self, client: AsyncClient):
+        """Weight-first miss: suggestion shows reps the user actually achieved,
+        not the plan target.
+
+        When prior_reps < planned_reps with weight-first style, the user should
+        see their actual prior reps in the suggestion (so they know what to aim
+        for), not the aspirational plan target they missed.
+        """
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=3, reps=8)
+
+        # Week 1: fatigued sets — set 1 hits target (8), sets 2 and 3 fall short
+        w1 = await start_session_from_plan(client, plan["id"], overload_style="weight")
+        sets_by_num = {s["set_number"]: s for s in w1["sets"]}
+        await log_set(client, w1["id"], sets_by_num[1]["id"], 100.0, 8)  # hit target
+        await log_set(client, w1["id"], sets_by_num[2]["id"], 100.0, 6)  # missed (6 < 8)
+        await log_set(client, w1["id"], sets_by_num[3]["id"], 100.0, 5)  # missed (5 < 8)
+
+        # Week 2 (weight-first): each set should show its own actual prior reps
+        w2 = await start_session_from_plan(client, plan["id"], overload_style="weight")
+        s2_by_num = {s["set_number"]: s for s in w2["sets"]}
+
+        # Set 1 hit target → weight increases, reps stay at 8
+        assert s2_by_num[1]["planned_reps"] == 8, \
+            f"Set 1 hit target: expected 8 reps, got {s2_by_num[1]['planned_reps']}"
+        assert s2_by_num[1]["planned_weight_kg"] > 100.0, \
+            f"Set 1 hit target: weight should increase beyond 100"
+
+        # Set 2 missed (6 < 8): weight-first should suggest 6 reps (actual), not 8 (target)
+        assert s2_by_num[2]["planned_reps"] == 6, \
+            f"Set 2 missed: expected 6 reps (actual prior), got {s2_by_num[2]['planned_reps']}"
+        assert abs(s2_by_num[2]["planned_weight_kg"] - 100.0) < 0.01, \
+            f"Set 2 missed: expected same weight 100, got {s2_by_num[2]['planned_weight_kg']}"
+
+        # Set 3 missed (5 < 8): weight-first should suggest 5 reps (actual), not 8 (target)
+        assert s2_by_num[3]["planned_reps"] == 5, \
+            f"Set 3 missed: expected 5 reps (actual prior), got {s2_by_num[3]['planned_reps']}"
+        assert abs(s2_by_num[3]["planned_weight_kg"] - 100.0) < 0.01, \
+            f"Set 3 missed: expected same weight 100, got {s2_by_num[3]['planned_weight_kg']}"
+
+    async def test_rep_style_miss_still_shows_plan_target(self, client: AsyncClient):
+        """Rep-first miss: suggestion still shows the planned target (not actual reps).
+
+        This is the existing rep-style behavior: when missed, re-attempt the
+        plan target to encourage reaching it.  Only weight-first changes this
+        to show actual reps.
+        """
+        ex = await create_exercise(client)
+        plan = await create_plan(client, ex["id"], sets=3, reps=8)
+
+        w1 = await start_session_from_plan(client, plan["id"])  # default: rep style
+        sets_by_num = {s["set_number"]: s for s in w1["sets"]}
+        await log_set(client, w1["id"], sets_by_num[1]["id"], 100.0, 8)
+        await log_set(client, w1["id"], sets_by_num[2]["id"], 100.0, 6)  # missed
+        await log_set(client, w1["id"], sets_by_num[3]["id"], 100.0, 5)  # missed
+
+        w2 = await start_session_from_plan(client, plan["id"])  # rep style
+        s2_by_num = {s["set_number"]: s for s in w2["sets"]}
+
+        # Rep style: missed sets should re-attempt planned target (8), not show actual reps
+        assert s2_by_num[2]["planned_reps"] == 8, \
+            f"Rep-style miss: expected 8 (plan target), got {s2_by_num[2]['planned_reps']}"
+        assert s2_by_num[3]["planned_reps"] == 8, \
+            f"Rep-style miss: expected 8 (plan target), got {s2_by_num[3]['planned_reps']}"

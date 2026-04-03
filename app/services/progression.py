@@ -163,8 +163,13 @@ def compute_overload(
         weight_for_min = epley_weight_for_reps(prior_weight, prior_reps, MIN_REPS)
         return weight_for_min, MIN_REPS
 
-    # Didn't hit planned reps (but ≥ floor) → retry same weight, re-attempt planned target
+    # Didn't hit planned reps (but ≥ floor) → retry same weight
     if prior_reps < planned_reps:
+        # Weight-first: show the reps the user actually achieved so the suggestion
+        # is realistic (they can aim for more reps themselves).
+        # Rep/double: re-attempt the planned target to encourage reaching it.
+        if overload_style == "weight":
+            return prior_weight, prior_reps
         return prior_weight, planned_reps
 
     # Hit target: apply progression
