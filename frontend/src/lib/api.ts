@@ -183,6 +183,7 @@ export interface RecentExercise extends Exercise {
 export interface Set {
   id: number;
   exercise_id: number;
+  exercise_block_id?: string | null;
   exercise_name: string | null;
   movement_type?: string | null;
   body_region?: string | null;
@@ -239,6 +240,7 @@ export interface WorkoutSessionAuditEntry {
 }
 
 export interface PlannedExercise {
+  block_id?: string | null;
   exercise_id: number;
   sets: number;
   reps: number;
@@ -395,6 +397,7 @@ export async function syncSessionToPlan(
   data?: {
     exercises: Array<{
       exercise_id: number;
+      exercise_block_id?: string | null;
       group_id?: string | null;
       group_type?: 'superset' | 'circuit' | null;
     }>;
@@ -408,6 +411,7 @@ export async function addSet(
   sessionId: number,
   data: {
     exercise_id: number;
+    exercise_block_id?: string | null;
     set_number: number;
     planned_reps?: number;
     planned_weight_kg?: number;

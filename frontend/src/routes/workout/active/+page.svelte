@@ -102,6 +102,7 @@
 
   interface UIExercise {
     uiId: string;
+    blockId: string | null;
     persistKey: string;
     exerciseId: number;
     sets: UISet[];
@@ -122,10 +123,52 @@
     exercises: UIExercise[];
   }
 
-  function makePersistKey(exerciseId: number, sets: { backendId: number | null; setNumber: number }[], fallback: string) {
+  function makeBlockId(): string {
+    return globalThis.crypto?.randomUUID?.() ?? `block-${Date.now()}-${Math.random()}`;
+  }
+
+  function makePersistKey(
+    blockId: string | null,
+    exerciseId: number,
+    sets: { backendId: number | null; setNumber: number }[],
+    fallback: string,
+  ) {
+    if (blockId) return `block-${blockId}`;
     const firstBackendId = sets.find((set) => set.backendId != null)?.backendId;
     if (firstBackendId != null) return `set-${firstBackendId}`;
     return `tmp-${exerciseId}-${fallback}`;
+  }
+
+  function getSessionSetBlockKey(set: Set): string {
+    return set.exercise_block_id ? `block-${set.exercise_block_id}` : `legacy-${set.exercise_id}`;
+  }
+
+  type SessionSetBlock = {
+    key: string;
+    blockId: string | null;
+    exerciseId: number;
+    sets: Set[];
+  };
+
+  function groupSessionSetsByBlock(sets: Set[]): SessionSetBlock[] {
+    const orderedBlocks: SessionSetBlock[] = [];
+    const byKey = new Map<string, SessionSetBlock>();
+    for (const set of [...sets].sort((a, b) => a.id - b.id)) {
+      const key = getSessionSetBlockKey(set);
+      let block = byKey.get(key);
+      if (!block) {
+        block = {
+          key,
+          blockId: set.exercise_block_id ?? null,
+          exerciseId: set.exercise_id,
+          sets: [],
+        };
+        byKey.set(key, block);
+        orderedBlocks.push(block);
+      }
+      block.sets.push(set);
+    }
+    return orderedBlocks;
   }
 
   function computeGroups(exercises: UIExercise[]): ExerciseGroup[] {
@@ -1032,14 +1075,31 @@
       currentSession.set(raw);
 
       if (day) {
+        const sessionBlocks = groupSessionSetsByBlock(raw.sets);
+        const unusedByExercise = new Map<number, SessionSetBlock[]>();
+        for (const block of sessionBlocks) {
+          const existing = unusedByExercise.get(block.exerciseId) ?? [];
+          existing.push(block);
+          unusedByExercise.set(block.exerciseId, existing);
+        }
+        const usedBlockKeys = new Set<string>();
+
         uiExercises = day.exercises.map(pe => {
           const exercise = allExercises.find(e => e.id === pe.exercise_id);
           const isUni = exercise?.is_unilateral ?? false;
+          let matchedBlock =
+            (pe.block_id
+              ? sessionBlocks.find((block) => block.blockId === pe.block_id)
+              : null) ?? null;
+          if (!matchedBlock) {
+            const candidates = unusedByExercise.get(pe.exercise_id) ?? [];
+            matchedBlock = candidates.find((block) => !usedBlockKeys.has(block.key)) ?? null;
+          }
+          if (matchedBlock) usedBlockKeys.add(matchedBlock.key);
+          const blockId = pe.block_id ?? matchedBlock?.blockId ?? makeBlockId();
           const sets: UISet[] = [];
           for (let i = 1; i <= pe.sets; i++) {
-            const bset = raw.sets.find(
-              s => s.exercise_id === pe.exercise_id && s.set_number === i
-            );
+            const bset = matchedBlock?.sets.find((s) => s.set_number === i);
             // Pre-fill with progressive overload suggestions when available (0 = blank)
             // Round suggested weights to nearest increment — user inputs stay unrounded
             const suggestedWeight = bset?.planned_weight_kg != null && bset.planned_weight_kg > 0
@@ -1066,7 +1126,7 @@
             const draftRight = bset?.draft_reps_right ?? null;
 
             sets.push({
-              localId: `${pe.exercise_id}-${i}`,
+              localId: `${blockId}-${i}`,
               backendId: bset?.id ?? null,
               setNumber: i,
               weightLbs: hasDraft ? draftWeight : suggestedWeight,
@@ -1099,7 +1159,8 @@
           }
           return {
             uiId: `${pe.exercise_id}-${Date.now()}-${Math.random()}`,
-            persistKey: makePersistKey(pe.exercise_id, sets, `${Date.now()}-${Math.random()}`),
+            blockId,
+            persistKey: makePersistKey(blockId, pe.exercise_id, sets, `${Date.now()}-${Math.random()}`),
             exerciseId: pe.exercise_id,
             sets,
             isUnilateral: isUni,
@@ -1168,24 +1229,18 @@
         startedAt = null;
       }
 
-      // Group sets by exercise, preserving insertion order
-      const exerciseOrder: number[] = [];
-      const setsByExercise = new Map<number, typeof sess.sets>();
-      for (const s of [...sess.sets].sort((a, b) => a.id - b.id)) {
-        if (!exerciseOrder.includes(s.exercise_id)) {
-          exerciseOrder.push(s.exercise_id);
-          setsByExercise.set(s.exercise_id, []);
-        }
-        setsByExercise.get(s.exercise_id)!.push(s);
-      }
+      const blocks = groupSessionSetsByBlock(sess.sets);
 
       const bwKg = $latestBodyWeight?.weight_kg ?? 0;
 
-      uiExercises = exerciseOrder.map(exerciseId => {
+      uiExercises = blocks.map((block, blockIndex) => {
+        const exerciseId = block.exerciseId;
         const exercise = allExercises.find(e => e.id === exerciseId);
         const isUni = exercise?.is_unilateral ?? false;
         const isAss = exercise?.is_assisted ?? false;
-        const backendSets = setsByExercise.get(exerciseId)!;
+        const backendSets = block.sets;
+        const blockIdentity = block.blockId ?? null;
+        const blockLocalKey = blockIdentity ?? `legacy-${exerciseId}-${blockIndex}`;
 
         const sets: UISet[] = backendSets.map(bset => {
           const isDone = bset.completed_at != null;
@@ -1232,7 +1287,7 @@
           const oneRM = sugW && sugW > 0 && sugR && sugR > 0 ? sugW * (1 + sugR / 30) : null;
 
           return {
-            localId: `${exerciseId}-${bset.set_number}-resume`,
+            localId: `${blockLocalKey}-${bset.set_number}-resume`,
             backendId: bset.id,
             setNumber: bset.set_number,
             weightLbs: weightVal,
@@ -1264,7 +1319,8 @@
 
         return {
           uiId: `${exerciseId}-${Date.now()}-${Math.random()}`,
-          persistKey: makePersistKey(exerciseId, sets, `${Date.now()}-${Math.random()}`),
+          blockId: blockIdentity,
+          persistKey: makePersistKey(blockIdentity, exerciseId, sets, `${Date.now()}-${Math.random()}`),
           exerciseId,
           sets,
           isUnilateral: isUni,
@@ -1447,6 +1503,7 @@
       if (bId === null) {
         const created = await addSet(sessionId, {
           exercise_id: ex.exerciseId,
+          exercise_block_id: ex.blockId ?? undefined,
           set_number: set.setNumber,
           planned_reps: set.reps ?? undefined,
           planned_weight_kg: weightKg,
@@ -1669,7 +1726,7 @@
     if (!ex) return;
     const last = ex.sets[ex.sets.length - 1];
     ex.sets = [...ex.sets, {
-      localId: `${ex.exerciseId}-${ex.sets.length + 1}-${Date.now()}`,
+      localId: `${ex.blockId ?? ex.persistKey}-${ex.sets.length + 1}-${Date.now()}`,
       backendId: null,
       setNumber: ex.sets.length + 1,
       weightLbs: last?.weightLbs ?? null,
@@ -2200,8 +2257,10 @@
             deleteSet(sessionId, s.backendId).catch(() => {});
           }
         }
+        const preservedBlockId = oldEx.blockId ?? makeBlockId();
         uiExercises[idx] = {
           uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+          blockId: preservedBlockId,
           persistKey: oldEx.persistKey,
           exerciseId: pickingExercise.id,
           sets: newSets,
@@ -2232,9 +2291,11 @@
         partialReps: null,
         drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
       }));
+      const blockId = makeBlockId();
       uiExercises = [...uiExercises, {
         uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
-        persistKey: `tmp-${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+        blockId,
+        persistKey: makePersistKey(blockId, pickingExercise.id, sets, `${Date.now()}-${Math.random()}`),
         exerciseId: pickingExercise.id,
         sets,
         isUnilateral: pickingExercise.is_unilateral,
@@ -2277,6 +2338,7 @@
           const data = await syncSessionToPlan(sessionId, {
             exercises: uiExercises.map((exercise) => ({
               exercise_id: exercise.exerciseId,
+              exercise_block_id: exercise.blockId,
               group_id: exercise.groupId,
               group_type: exercise.groupType,
             })),
@@ -2594,6 +2656,7 @@
       if (bId === null) {
         const created = await addSet(sessionId, {
           exercise_id: ex.exerciseId,
+          exercise_block_id: ex.blockId ?? undefined,
           set_number: set.setNumber,
           planned_reps: set.reps ?? undefined,
           planned_weight_kg: set.weightLbs != null ? toKg(set.weightLbs) : undefined,

@@ -26,6 +26,50 @@ class TestSessionLifecycle:
         assert "id" in data
         assert len(data["sets"]) == 3
 
+    async def test_create_session_from_plan_preserves_duplicate_exercise_blocks(self, client: AsyncClient):
+        """Duplicate exercise occurrences should get distinct block IDs in the session."""
+        ex1 = await create_exercise(client, name="lateral_raise", display_name="Lateral Raise")
+        ex2 = await create_exercise(client, name="chest_press", display_name="Chest Press")
+
+        plan_r = await client.post(
+            "/api/plans/",
+            json={
+                "name": "Duplicate Block Plan",
+                "block_type": "hypertrophy",
+                "duration_weeks": 4,
+                "number_of_days": 1,
+                "days": [{
+                    "day_number": 1,
+                    "day_name": "Day 1",
+                    "exercises": [
+                        {"exercise_id": ex1["id"], "sets": 2, "reps": 10, "starting_weight_kg": 0, "progression_type": "linear"},
+                        {"exercise_id": ex2["id"], "sets": 2, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"},
+                        {"exercise_id": ex1["id"], "sets": 2, "reps": 15, "starting_weight_kg": 0, "progression_type": "linear"},
+                    ],
+                }],
+            },
+        )
+        assert plan_r.status_code == 201, plan_r.text
+        plan = plan_r.json()
+        day_exercises = plan["days"][0]["exercises"]
+        lateral_block_ids = [ex["block_id"] for ex in day_exercises if ex["exercise_id"] == ex1["id"]]
+        assert len(lateral_block_ids) == 2
+        assert lateral_block_ids[0] != lateral_block_ids[1]
+
+        session_r = await client.post(
+            f"/api/sessions/from-plan/{plan['id']}",
+            params={"day_number": 1, "overload_style": "rep", "body_weight_kg": 0},
+        )
+        assert session_r.status_code == 201, session_r.text
+        session = session_r.json()
+
+        lateral_session_block_ids = sorted({
+            s["exercise_block_id"]
+            for s in session["sets"]
+            if s["exercise_id"] == ex1["id"]
+        })
+        assert lateral_session_block_ids == sorted(lateral_block_ids)
+
     async def test_create_session_from_plan_respects_exercise_rir_override(self, client: AsyncClient):
         """Exercise RIR override should back off the programmed load for the next session."""
         ex = await create_exercise(client, primary_muscles=["quadriceps"])
