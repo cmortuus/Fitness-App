@@ -118,26 +118,33 @@
     if (add.length === 0 && remove.length === 0) return null;
     return { add, remove };
   });
+
+  function compactOneSidedHeight(height: string): string {
+    const match = height.match(/^([\d.]+)rem$/);
+    if (!match) return height;
+    const scaled = Math.max(0.7, Number(match[1]) * 0.52);
+    return `${scaled.toFixed(2)}rem`;
+  }
 </script>
 
 {#if oneSided}
   <!-- Single-pin vertical view (T-bar row, landmine) -->
-  <div class="flex items-end gap-0.5 justify-center mt-0.5">
+  <div class="flex items-end gap-px justify-center mt-0.5 max-w-full overflow-hidden">
     <!-- Vertical post -->
-    <div style="width: 6px; height: 3.5rem; background: #52525b; border-radius: 1px 1px 0 0;"></div>
+    <div style="width: 4px; height: 1.9rem; background: #52525b; border-radius: 1px 1px 0 0;"></div>
     <!-- Collar -->
-    <div style="width: 10px; height: 8px; background: #71717a; border-radius: 1px; align-self: flex-end; margin-left: -2px; margin-right: 2px;"></div>
+    <div style="width: 6px; height: 6px; background: #71717a; border-radius: 1px; align-self: flex-end; margin-left: -1px; margin-right: 1px;"></div>
     <!-- Plates stacked horizontally from post outward -->
     {#each plates as plate}
       {#each Array(plate.count) as _}
         <div
-          style="width: 6px; height: {plate.height}; background: {plate.color}; border-radius: 1px; align-self: flex-end;"
+          style="width: 3px; height: {compactOneSidedHeight(plate.height)}; background: {plate.color}; border-radius: 1px; align-self: flex-end;"
           title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
         ></div>
       {/each}
     {/each}
     <!-- Pin end cap -->
-    <div style="width: 4px; height: 10px; background: #3f3f46; border-radius: 0 2px 2px 0; align-self: flex-end;"></div>
+    <div style="width: 3px; height: 7px; background: #3f3f46; border-radius: 0 2px 2px 0; align-self: flex-end;"></div>
   </div>
 {:else}
   <!-- Horizontal barbell view -->
