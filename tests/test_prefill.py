@@ -1124,7 +1124,7 @@ class TestWeightFirstCrossDay:
         assert s2_by_num[1]["planned_reps"] == 8, \
             f"Set 1 hit target: expected 8 reps, got {s2_by_num[1]['planned_reps']}"
         assert s2_by_num[1]["planned_weight_kg"] > 100.0, \
-            f"Set 1 hit target: weight should increase beyond 100"
+            "Set 1 hit target: weight should increase beyond 100"
 
         # Set 2 missed (6 < 8): weight-first should suggest 6 reps (actual), not 8 (target)
         assert s2_by_num[2]["planned_reps"] == 6, \
