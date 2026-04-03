@@ -5,7 +5,7 @@ from datetime import date, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from sqlalchemy import desc, or_, select
+from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -1099,6 +1099,85 @@ async def create_session_from_plan(
                 "set_type": s.set_type or "standard",
             }
 
+    # ── Cross-day same-plan lookup for weight-first exercises ────────────────
+    # For weight-first style the user often does the same exercise on multiple
+    # plan days (e.g. belt squat on Monday AND Thursday).  The same-day prior
+    # lookup only finds the last Thursday session, which can be weeks older than
+    # the user's actual current strength (last lifted Monday).  Build per-set
+    # data from the most recent same-plan sessions (any day) so the prefill never
+    # regresses below recent performance.  Only sessions MORE RECENT than the
+    # same-day prior are eligible; when there is no same-day prior at all, any
+    # same-plan session qualifies (fills the gap before cross-meso kicks in).
+    cross_day_set_data: dict[int, dict[int, dict]] = {}
+    if overload_style == "weight" and day_exercise_ids:
+        _cd_conds: list = [
+            WorkoutSession.workout_plan_id == plan_id,
+            WorkoutSession.user_id == user.id,
+            WorkoutSession.id.in_(sessions_with_data),
+        ]
+        if prior_session:
+            # Sessions are "more recent" if they have a later date, OR if they
+            # share the same date but were created with a higher ID (later in the
+            # day).  The ID tiebreaker is critical for tests where all sessions
+            # have today's date, and also handles users who train twice in one day.
+            _cd_conds.append(
+                or_(
+                    WorkoutSession.date > prior_session.date,
+                    and_(
+                        WorkoutSession.date == prior_session.date,
+                        WorkoutSession.id > prior_session.id,
+                    ),
+                )
+            )
+        _cd_sess_q = await db.execute(
+            select(WorkoutSession)
+            .where(*_cd_conds)
+            .order_by(desc(WorkoutSession.date), desc(WorkoutSession.id))
+            .limit(10)
+        )
+        _cd_sessions = _cd_sess_q.scalars().all()
+        if _cd_sessions:
+            _cd_needed: set[int] = set(day_exercise_ids)
+            for _cd_s in _cd_sessions:
+                if not _cd_needed:
+                    break
+                _cd_sets_q = await db.execute(
+                    select(ExerciseSet)
+                    .where(
+                        ExerciseSet.workout_session_id == _cd_s.id,
+                        ExerciseSet.exercise_id.in_(_cd_needed),
+                        ExerciseSet.actual_reps.is_not(None),
+                        ExerciseSet.actual_weight_kg.is_not(None),
+                        ExerciseSet.skipped_at.is_(None),
+                    )
+                    .order_by(ExerciseSet.id)
+                )
+                _cdx: dict[int, int] = {}
+                _cd_found: set[int] = set()
+                for _cs in _cd_sets_q.scalars().all():
+                    _ex_id = _cs.exercise_id
+                    if _ex_id not in cross_day_set_data:
+                        cross_day_set_data[_ex_id] = {}
+                        _cdx[_ex_id] = 0
+                    _cdx[_ex_id] = _cdx.get(_ex_id, 0) + 1
+                    _si = _cdx[_ex_id]
+                    _wt = _cs.actual_weight_kg
+                    _ex_m = exercise_model_map.get(_ex_id)
+                    if _ex_m and _ex_m.is_assisted and body_weight_kg > 0 and _wt > body_weight_kg * 0.5:
+                        _wt = max(0.0, body_weight_kg - _wt)
+                    cross_day_set_data[_ex_id][_si] = {
+                        "weight": _wt,
+                        "reps": _cs.actual_reps,
+                        "planned_reps": _cs.planned_reps,
+                        "reps_left": _cs.reps_left,
+                        "reps_right": _cs.reps_right,
+                        "planned_reps_left": _cs.planned_reps_left,
+                        "planned_reps_right": _cs.planned_reps_right,
+                        "set_type": _cs.set_type or "standard",
+                    }
+                    _cd_found.add(_ex_id)
+                _cd_needed -= _cd_found
+
     # ── Cross-meso prefill: first session of a day with no prior data ────────
     # When there is no prior session for this plan day (week 1 of any day in
     # any block) look up the most recent completed set for each exercise from
@@ -1249,7 +1328,20 @@ async def create_session_from_plan(
 
         Only matches prior sets whose set_type matches current_set_type.
         """
-        ex_sets = prior_set_data.get(exercise_id)
+        # For weight-first: prefer cross-day data only when it represents BETTER
+        # performance than the same-day prior (higher max weight).  If the cross-day
+        # session was a regression (e.g. a bad day at 400 lbs when the same-day
+        # prior is 404 lbs), fall back to the same-day prior so the suggestion
+        # never drops below the user's established baseline for this day.
+        if overload_style == "weight" and cross_day_set_data.get(exercise_id):
+            cd_sets = cross_day_set_data[exercise_id]
+            sd_sets = prior_set_data.get(exercise_id, {})
+            cd_max = max((s["weight"] for s in cd_sets.values() if s.get("weight")), default=0.0)
+            sd_max = max((s["weight"] for s in sd_sets.values() if s.get("weight")), default=0.0)
+            ex_sets = cd_sets if cd_max >= sd_max else (sd_sets or None)
+        else:
+            ex_sets = prior_set_data.get(exercise_id)
+
         if not ex_sets:
             # No same-plan history — try cross-meso Epley prefill
             cross = cross_meso_data.get(exercise_id)
@@ -1279,19 +1371,6 @@ async def create_session_from_plan(
         }
         if not matched_sets:
             return None, None, None, None
-
-        # Weight-first gate: only increase weight when ALL prior sets hit their
-        # individual targets.  If any set fell short, every set retries at the
-        # prior weight so the whole exercise advances together.
-        if overload_style == "weight":
-            any_missed = any(
-                s.get("reps", 0) < (s.get("planned_reps") or target_reps or s.get("reps", 0))
-                for s in matched_sets.values()
-            )
-            if any_missed:
-                # Retry: use this set's own prior weight (fall back to set 1)
-                ref = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
-                return round(ref["weight"] / 2.5) * 2.5, target_reps, None, None
 
         prior_set = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
         target_rir = resolve_rir_override(
