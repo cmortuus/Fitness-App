@@ -21,6 +21,15 @@
 
   const KG_TO_LBS = 2.20462;
 
+  // Returns the ISO Monday date string for the week containing dateStr
+  function weekStart(dateStr: string): string {
+    const d = new Date(dateStr + 'T00:00:00');
+    const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const offset = day === 0 ? -6 : 1 - day; // shift back to Monday
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0, 10);
+  }
+
   function displayWeight(kg: number): number {
     return $settings.weightUnit === 'lbs'
       ? Math.round(kg * KG_TO_LBS * 10) / 10
@@ -146,13 +155,9 @@
     return map;
   });
 
-  // Per-exercise % change time series: Map<exerciseName, Map<date, pctChange>>
-  // All series start at 0% on the first date.
-  // Uses the highest estimated 1RM per date (best set, not first set).
-  // For assisted exercises the backend returns estimated_1rm computed from
-  // (bodyweight - assistance), so a decreasing assistance weight correctly
-  // produces an increasing 1RM — no direction inversion needed here.
-  let exercisePctSeries = $derived.by(() => {
+  // Per-exercise weekly best 1RM: Map<exerciseName, Map<weekStartDate, maxEstimated1RM>>
+  // Uses Monday of each week as the key. One value per week = best set that week.
+  let exerciseWeeklyBest = $derived.by(() => {
     const result = new Map<string, Map<string, number>>();
     const names = [...new Set(progressData.map(p => p.exercise_name))];
     for (const name of names) {
@@ -160,23 +165,52 @@
         p => p.exercise_name === name && p.estimated_1rm != null && p.estimated_1rm > 0
       );
       if (points.length === 0) continue;
-
-      // Group by date — keep max estimated_1rm per date (best set wins)
-      const bestByDate = new Map<string, number>();
+      const byWeek = new Map<string, number>();
       for (const p of points) {
-        const prev = bestByDate.get(p.date);
-        bestByDate.set(p.date, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
+        const wk = weekStart(p.date);
+        const prev = byWeek.get(wk);
+        byWeek.set(wk, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
       }
+      result.set(name, byWeek);
+    }
+    return result;
+  });
 
-      const sortedDates = [...bestByDate.keys()].sort();
-      const baseline = bestByDate.get(sortedDates[0])!;
+  // Per-exercise % change time series: Map<exerciseName, Map<weekStart, pctChange>>
+  // All series start at 0% on the first week.
+  // Uses weekly best 1RM (best set in each week) — eliminates session-to-session noise.
+  // For assisted exercises the backend returns estimated_1rm computed from
+  // (bodyweight - assistance), so a decreasing assistance weight correctly
+  // produces an increasing 1RM — no direction inversion needed here.
+  let exercisePctSeries = $derived.by(() => {
+    const result = new Map<string, Map<string, number>>();
+    for (const [name, byWeek] of exerciseWeeklyBest) {
+      const sortedWeeks = [...byWeek.keys()].sort();
+      const baseline = byWeek.get(sortedWeeks[0])!;
       const series = new Map<string, number>();
-      for (const date of sortedDates) {
-        const current = bestByDate.get(date)!;
+      for (const wk of sortedWeeks) {
+        const current = byWeek.get(wk)!;
         const pct = ((current - baseline) / baseline) * 100;
-        series.set(date, pct);
+        series.set(wk, pct);
       }
       result.set(name, series);
+    }
+    return result;
+  });
+
+  // Week-over-week % change per exercise: last week vs the week before it.
+  // null when there is only one week of data (no prior week to compare).
+  let exerciseWowChange = $derived.by(() => {
+    const result = new Map<string, number | null>();
+    for (const [name, byWeek] of exerciseWeeklyBest) {
+      const sortedWeeks = [...byWeek.keys()].sort();
+      if (sortedWeeks.length < 2) {
+        result.set(name, null);
+        continue;
+      }
+      const last = byWeek.get(sortedWeeks[sortedWeeks.length - 1])!;
+      const prev = byWeek.get(sortedWeeks[sortedWeeks.length - 2])!;
+      result.set(name, prev > 0 ? Math.round(((last - prev) / prev) * 1000) / 10 : null);
     }
     return result;
   });
@@ -294,12 +328,38 @@
     return result;
   });
 
-  // Latest % change per group (for summary cards)
+  // Latest cumulative % change per group (chart endpoint — not used by cards)
   let groupSummary = $derived.by(() => {
     const result = new Map<string, number>();
     for (const [group, series] of groupPctSeries) {
       const vals = [...series.values()];
       if (vals.length > 0) result.set(group, Math.round(vals[vals.length - 1] * 10) / 10);
+    }
+    return result;
+  });
+
+  // Week-over-week % change per muscle group (used by summary cards).
+  // Average of the WoW changes of exercises in that group; null when no prior week.
+  let groupWowSummary = $derived.by(() => {
+    const result = new Map<string, number | null>();
+    for (const group of trainedGroups) {
+      const exNames = [...exerciseWowChange.keys()].filter(n => exerciseNameToGroup.get(n) === group);
+      const vals = exNames.map(n => exerciseWowChange.get(n)).filter((v): v is number => v != null);
+      result.set(group, vals.length > 0 ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10 : null);
+    }
+    return result;
+  });
+
+  // Week-over-week % change per sub-group (for sub-group cards when selectedGroup is Back/Shoulders).
+  let subGroupWowSummary = $derived.by(() => {
+    if (!selectedGroup || !SUB_GROUPS[selectedGroup]) return new Map<string, number | null>();
+    const result = new Map<string, number | null>();
+    for (const [sgName, sgMuscles] of Object.entries(SUB_GROUPS[selectedGroup])) {
+      const exNames = [...exerciseWowChange.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => sgMuscles.includes(m))
+      );
+      const vals = exNames.map(n => exerciseWowChange.get(n)).filter((v): v is number => v != null);
+      result.set(sgName, vals.length > 0 ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10 : null);
     }
     return result;
   });
@@ -456,7 +516,7 @@
     },
     scales: {
       y: {
-        title: { display: true, text: '% Change from Baseline', color: '#9ca3af' },
+        title: { display: true, text: '% Change from First Week', color: '#9ca3af' },
         ticks: {
           color: '#9ca3af',
           callback: (v: any) => (v > 0 ? '+' : '') + v + '%',
@@ -565,7 +625,7 @@
   {#if !selectedGroup && trainedGroups.length > 0 && !loading}
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
       {#each trainedGroups as group, idx}
-        {@const pct = groupSummary.get(group) ?? 0}
+        {@const wow = groupWowSummary.get(group) ?? null}
         <button
           class="card text-left hover:bg-zinc-700/60 transition-colors"
           onclick={() => selectedGroup = group}
@@ -574,10 +634,10 @@
             <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
             <p class="text-sm font-medium truncate">{group}</p>
           </div>
-          <p class="text-2xl font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
-            {pct > 0 ? '+' : ''}{pct}%
+          <p class="text-2xl font-bold {wow != null && wow > 0 ? 'text-green-400' : wow != null && wow < 0 ? 'text-red-400' : 'text-zinc-400'}">
+            {wow != null ? (wow > 0 ? '+' : '') + wow + '%' : '–'}
           </p>
-          <p class="text-xs text-zinc-500 mt-1">Tap to explore →</p>
+          <p class="text-xs text-zinc-500 mt-1">vs last week · Tap to explore →</p>
         </button>
       {/each}
     </div>
@@ -587,9 +647,7 @@
   {#if selectedGroup && !selectedSubGroup && trainedSubGroups.length > 0 && !loading}
     <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
       {#each trainedSubGroups as sg, idx}
-        {@const sgSeries = subGroupPctSeries.get(sg)}
-        {@const sgVals = sgSeries ? [...sgSeries.values()] : []}
-        {@const pct = sgVals.length > 0 ? Math.round(sgVals[sgVals.length - 1] * 10) / 10 : 0}
+        {@const wow = subGroupWowSummary.get(sg) ?? null}
         <button
           class="card text-left hover:bg-zinc-700/60 transition-colors"
           onclick={() => selectedSubGroup = sg}
@@ -598,10 +656,10 @@
             <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
             <p class="text-sm font-medium truncate">{sg}</p>
           </div>
-          <p class="text-2xl font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
-            {pct > 0 ? '+' : ''}{pct}%
+          <p class="text-2xl font-bold {wow != null && wow > 0 ? 'text-green-400' : wow != null && wow < 0 ? 'text-red-400' : 'text-zinc-400'}">
+            {wow != null ? (wow > 0 ? '+' : '') + wow + '%' : '–'}
           </p>
-          <p class="text-xs text-zinc-500 mt-1">Tap to explore →</p>
+          <p class="text-xs text-zinc-500 mt-1">vs last week · Tap to explore →</p>
         </button>
       {/each}
     </div>
@@ -611,8 +669,7 @@
   {#if selectedGroup && drilldownExercises.length > 0 && !loading && !selectedExercise}
     <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
       {#each drilldownExercises as name, idx}
-        {@const vals = [...exercisePctSeries.get(name)!.values()]}
-        {@const pct = vals.length > 0 ? Math.round(vals[vals.length - 1] * 10) / 10 : 0}
+        {@const wow = exerciseWowChange.get(name) ?? null}
         <button
           class="card flex items-center gap-3 text-left w-full hover:bg-zinc-700/60 transition-colors"
           onclick={() => selectedExercise = name}
@@ -620,10 +677,10 @@
           <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
           <div class="min-w-0 flex-1">
             <p class="text-sm text-zinc-300 truncate" title={name}>{name}</p>
-            <p class="text-lg font-bold {pct > 0 ? 'text-green-400' : pct < 0 ? 'text-red-400' : 'text-zinc-400'}">
-              {pct > 0 ? '+' : ''}{pct}%
+            <p class="text-lg font-bold {wow != null && wow > 0 ? 'text-green-400' : wow != null && wow < 0 ? 'text-red-400' : 'text-zinc-400'}">
+              {wow != null ? (wow > 0 ? '+' : '') + wow + '%' : '–'}
             </p>
-            <p class="text-xs text-zinc-500 mt-0.5">Tap for history →</p>
+            <p class="text-xs text-zinc-500 mt-0.5">vs last week · Tap for history →</p>
           </div>
         </button>
       {/each}
