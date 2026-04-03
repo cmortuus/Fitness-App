@@ -1255,6 +1255,60 @@ class TestWeightFirstCrossDay:
                 f"got {s['planned_weight_kg']}"
             )
 
+    async def test_cross_day_unilateral_side_reps_used_when_actual_reps_null(
+        self, client: AsyncClient, db: AsyncSession
+    ):
+        """Cross-day lookup must accept unilateral sets that store performance in
+        reps_left/reps_right even when actual_reps is null (legacy data path).
+
+        Scenario:
+          - Unilateral exercise on both Day 1 and Day 2 of a weight-first plan
+          - Day 1 completed with reps_left/reps_right but actual_reps nulled out
+          - Day 2 has never been done → cross-day should pick up Day 1's side reps
+          - planned_reps_left / planned_reps_right must be populated
+        """
+        ex = await create_exercise(client, name="unilateral_row", display_name="Single-Arm Row",
+                                   is_unilateral=True)
+        plan = await self._create_two_day_plan(client, ex["id"], reps=8)
+
+        # Complete Day 1 with unilateral side reps only (actual_reps left null)
+        d1 = await start_session_from_plan(client, plan["id"], day=1, overload_style="weight")
+        for s in d1["sets"]:
+            r = await client.patch(
+                f"/api/sessions/{d1['id']}/sets/{s['id']}",
+                json={
+                    "actual_weight_kg": 30.0,
+                    "reps_left": 8,
+                    "reps_right": 8,
+                    "completed_at": "2024-01-01T10:00:00",
+                },
+            )
+            assert r.status_code == 200, r.text
+
+        complete = await client.post(f"/api/sessions/{d1['id']}/complete")
+        assert complete.status_code == 200, complete.text
+
+        # Confirm actual_reps is null in DB (simulates legacy / unilateral-only path)
+        from sqlalchemy import select as sa_select
+        rows = await db.execute(
+            sa_select(ExerciseSet).where(ExerciseSet.workout_session_id == d1["id"])
+        )
+        for row in rows.scalars().all():
+            assert row.actual_reps is None, "actual_reps should be null for this test"
+            row.actual_reps = None  # ensure null (already is, but explicit)
+        await db.commit()
+
+        # Start Day 2 for the first time — no same-day prior, cross-day should
+        # pick up Day 1's reps_left=8/reps_right=8 and return per-side suggestions.
+        d2 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
+        first_set = d2["sets"][0]
+        assert first_set["planned_weight_kg"] is not None, \
+            "Cross-day unilateral: planned_weight_kg should be populated from Day 1 data"
+        assert first_set["planned_reps_left"] is not None, \
+            "Cross-day unilateral: planned_reps_left should be populated from Day 1 reps_left"
+        assert first_set["planned_reps_right"] is not None, \
+            "Cross-day unilateral: planned_reps_right should be populated from Day 1 reps_right"
+
     async def test_rep_style_miss_still_shows_plan_target(self, client: AsyncClient):
         """Rep-first miss: suggestion still shows the planned target (not actual reps).
 
