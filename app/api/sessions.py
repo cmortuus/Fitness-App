@@ -1058,6 +1058,13 @@ async def create_session_from_plan(
             .where(ExerciseSet.workout_session_id == prior_session.id)
             .order_by(ExerciseSet.id)
         )
+        # Per-exercise counter so set indices are always 1-based per exercise
+        # regardless of how set_number was stored in the DB.  Old sessions used
+        # a global counter across all exercises (belt_squat=1,2,3 / row=4,5,6 /
+        # pulldown=7,8 …); new sessions use per-exercise numbers starting at 1.
+        # Matching by s.set_number directly would only work for the first
+        # exercise; every subsequent exercise would fall back to set 1's data.
+        _prior_ex_set_idx: dict[int, int] = {}
         for s in prior_sets_result.scalars().all():
             if s.skipped_at is not None:
                 continue  # Skipped sets don't count for progression
@@ -1068,6 +1075,10 @@ async def create_session_from_plan(
             if ex_id not in prior_set_data:
                 prior_exercise_order.append(ex_id)  # first appearance = exercise order
                 prior_set_data[ex_id] = {}
+                _prior_ex_set_idx[ex_id] = 0
+
+            _prior_ex_set_idx[ex_id] += 1
+            set_idx = _prior_ex_set_idx[ex_id]  # 1-based per-exercise index
 
             weight = s.actual_weight_kg
             # Fix legacy data: old code stored net load for assisted exercises
@@ -1077,7 +1088,7 @@ async def create_session_from_plan(
             if ex_m and ex_m.is_assisted and body_weight_kg > 0 and weight > body_weight_kg * 0.5:
                 weight = max(0.0, body_weight_kg - weight)
 
-            prior_set_data[ex_id][s.set_number] = {
+            prior_set_data[ex_id][set_idx] = {
                 "weight": weight,
                 "reps": rep_evidence,
                 "planned_reps": s.planned_reps,
@@ -1268,6 +1279,19 @@ async def create_session_from_plan(
         }
         if not matched_sets:
             return None, None, None, None
+
+        # Weight-first gate: only increase weight when ALL prior sets hit their
+        # individual targets.  If any set fell short, every set retries at the
+        # prior weight so the whole exercise advances together.
+        if overload_style == "weight":
+            any_missed = any(
+                s.get("reps", 0) < (s.get("planned_reps") or target_reps or s.get("reps", 0))
+                for s in matched_sets.values()
+            )
+            if any_missed:
+                # Retry: use this set's own prior weight (fall back to set 1)
+                ref = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
+                return round(ref["weight"] / 2.5) * 2.5, target_reps, None, None
 
         prior_set = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
         target_rir = resolve_rir_override(
