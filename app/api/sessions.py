@@ -1146,7 +1146,13 @@ async def create_session_from_plan(
                     .where(
                         ExerciseSet.workout_session_id == _cd_s.id,
                         ExerciseSet.exercise_id.in_(_cd_needed),
-                        ExerciseSet.actual_reps.is_not(None),
+                        # Accept unilateral sets that store reps in reps_left/right
+                        # even when actual_reps is null (legacy data path).
+                        or_(
+                            ExerciseSet.actual_reps.is_not(None),
+                            ExerciseSet.reps_left.is_not(None),
+                            ExerciseSet.reps_right.is_not(None),
+                        ),
                         ExerciseSet.actual_weight_kg.is_not(None),
                         ExerciseSet.skipped_at.is_(None),
                     )
@@ -1155,6 +1161,9 @@ async def create_session_from_plan(
                 _cdx: dict[int, int] = {}
                 _cd_found: set[int] = set()
                 for _cs in _cd_sets_q.scalars().all():
+                    _rep_ev = _set_rep_evidence(_cs)
+                    if _rep_ev is None:
+                        continue
                     _ex_id = _cs.exercise_id
                     if _ex_id not in cross_day_set_data:
                         cross_day_set_data[_ex_id] = {}
@@ -1167,7 +1176,7 @@ async def create_session_from_plan(
                         _wt = max(0.0, body_weight_kg - _wt)
                     cross_day_set_data[_ex_id][_si] = {
                         "weight": _wt,
-                        "reps": _cs.actual_reps,
+                        "reps": _rep_ev,
                         "planned_reps": _cs.planned_reps,
                         "reps_left": _cs.reps_left,
                         "reps_right": _cs.reps_right,
