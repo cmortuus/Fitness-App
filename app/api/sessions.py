@@ -1552,6 +1552,21 @@ async def create_session_from_plan(
                 suggested_reps = set1_reps
                 planned_left = set1_left
                 planned_right = set1_right
+            elif overload_style == "weight" and set_num > 1 and set1_weight_kg is not None:
+                # Weight-first: all sets use set 1's weight so the bar is loaded
+                # the same across every set.  Independent per-set overload creates
+                # confusing descending weight ladders (e.g. 415/400/400) when later
+                # sets missed their rep target last session — the user just works
+                # the same weight and reps vary naturally with fatigue.
+                # Reps are still computed per-set (show actual prior reps as the
+                # target so the user knows what to expect from each set).
+                _, suggested_reps, planned_left, planned_right = \
+                    _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                weight_kg = set1_weight_kg
+                if suggested_reps is None:
+                    suggested_reps = set1_reps
+                    planned_left = set1_left
+                    planned_right = set1_right
             elif double_weight_up:
                 # Double progression: all sets hit ceiling → weight up, reps reset
                 prior_sets_for_ex = prior_set_data.get(exercise_id, {})

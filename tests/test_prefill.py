@@ -1183,13 +1183,14 @@ class TestWeightFirstCrossDay:
             assert s["planned_reps"] == 8, \
                 f"Weight-first: reps should be 8, got {s['planned_reps']}"
 
-    async def test_weight_first_miss_shows_actual_reps(self, client: AsyncClient):
-        """Weight-first miss: suggestion shows reps the user actually achieved,
-        not the plan target.
+    async def test_weight_first_uniform_weight_per_set_reps(self, client: AsyncClient):
+        """Weight-first: all sets use the same weight (set 1 determines progression),
+        but reps track per-set so the user knows what to expect from each set.
 
-        When prior_reps < planned_reps with weight-first style, the user should
-        see their actual prior reps in the suggestion (so they know what to aim
-        for), not the aspirational plan target they missed.
+        In practice the bar is loaded once — having set 1 at a higher weight and
+        sets 2/3 at a lower weight is impractical and confusing.  Set 1 hitting
+        its target means the weight goes up for the whole exercise; later sets
+        still show their actual prior reps as the rep target.
         """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
@@ -1201,27 +1202,29 @@ class TestWeightFirstCrossDay:
         await log_set(client, w1["id"], sets_by_num[2]["id"], 100.0, 6)  # missed (6 < 8)
         await log_set(client, w1["id"], sets_by_num[3]["id"], 100.0, 5)  # missed (5 < 8)
 
-        # Week 2 (weight-first): each set should show its own actual prior reps
+        # Week 2 (weight-first): uniform weight (set 1's progression), per-set reps
         w2 = await start_session_from_plan(client, plan["id"], overload_style="weight")
         s2_by_num = {s["set_number"]: s for s in w2["sets"]}
 
-        # Set 1 hit target → weight increases, reps stay at 8
+        set1_weight = s2_by_num[1]["planned_weight_kg"]
+
+        # Set 1 hit target → weight increases
+        assert set1_weight > 100.0, \
+            "Set 1 hit target: weight should increase beyond 100"
         assert s2_by_num[1]["planned_reps"] == 8, \
             f"Set 1 hit target: expected 8 reps, got {s2_by_num[1]['planned_reps']}"
-        assert s2_by_num[1]["planned_weight_kg"] > 100.0, \
-            "Set 1 hit target: weight should increase beyond 100"
 
-        # Set 2 missed (6 < 8): weight-first should suggest 6 reps (actual), not 8 (target)
+        # Sets 2 and 3 inherit set 1's weight (uniform bar load for the exercise)
+        assert abs(s2_by_num[2]["planned_weight_kg"] - set1_weight) < 0.01, \
+            f"Set 2: expected same weight as set 1 ({set1_weight}), got {s2_by_num[2]['planned_weight_kg']}"
+        assert abs(s2_by_num[3]["planned_weight_kg"] - set1_weight) < 0.01, \
+            f"Set 3: expected same weight as set 1 ({set1_weight}), got {s2_by_num[3]['planned_weight_kg']}"
+
+        # Reps still track per-set (show what was actually achieved)
         assert s2_by_num[2]["planned_reps"] == 6, \
-            f"Set 2 missed: expected 6 reps (actual prior), got {s2_by_num[2]['planned_reps']}"
-        assert abs(s2_by_num[2]["planned_weight_kg"] - 100.0) < 0.01, \
-            f"Set 2 missed: expected same weight 100, got {s2_by_num[2]['planned_weight_kg']}"
-
-        # Set 3 missed (5 < 8): weight-first should suggest 5 reps (actual), not 8 (target)
+            f"Set 2: expected 6 reps (actual prior), got {s2_by_num[2]['planned_reps']}"
         assert s2_by_num[3]["planned_reps"] == 5, \
-            f"Set 3 missed: expected 5 reps (actual prior), got {s2_by_num[3]['planned_reps']}"
-        assert abs(s2_by_num[3]["planned_weight_kg"] - 100.0) < 0.01, \
-            f"Set 3 missed: expected same weight 100, got {s2_by_num[3]['planned_weight_kg']}"
+            f"Set 3: expected 5 reps (actual prior), got {s2_by_num[3]['planned_reps']}"
 
     async def test_cross_day_regression_falls_back_to_same_day_prior(self, client: AsyncClient):
         """Weight-first: if a more recent cross-day session has a LOWER weight than
