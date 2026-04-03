@@ -157,7 +157,7 @@
                 </a>
               {/if}
               <a
-                href="/plans/create?edit={plan.id}&day={item.day.day_number}"
+                href="/plans/upcoming/day?plan={plan.id}&day={item.day.day_number}"
                 class="btn-secondary text-sm"
               >
                 Edit This Day
