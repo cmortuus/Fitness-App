@@ -269,3 +269,113 @@ class TestExercisesCRUD:
         rows = await db.execute(select(Exercise).where(Exercise.id == customized["id"]))
         stored = rows.scalar_one()
         assert stored.primary_muscles == ["rear_delts"]
+
+    async def test_editing_standard_exercise_twice_reuses_existing_custom(
+        self, client: AsyncClient, db
+    ):
+        """Second PUT on a standard exercise must update the existing custom copy
+        in-place, not create a third exercise (fixes #735)."""
+        base = Exercise(
+            name="overhead_press",
+            display_name="Overhead Press",
+            movement_type="compound",
+            body_region="upper",
+            primary_muscles=["shoulders"],
+            secondary_muscles=["triceps"],
+        )
+        db.add(base)
+        await db.commit()
+        await db.refresh(base)
+
+        def _payload(muscles):
+            return {
+                "display_name": "Overhead Press",
+                "movement_type": "compound",
+                "body_region": "upper",
+                "is_unilateral": False,
+                "is_assisted": False,
+                "description": None,
+                "primary_muscles": muscles,
+                "secondary_muscles": ["triceps"],
+                "apply_mode": "future_only",
+            }
+
+        # First edit: creates a custom copy
+        r1 = await client.put(f"/api/exercises/{base.id}", json=_payload(["shoulders"]))
+        assert r1.status_code == 200, r1.text
+        custom1 = r1.json()
+        assert custom1["id"] != base.id
+        assert custom1["is_custom"] is True
+
+        # Second edit (of the original standard ID): must reuse custom1, not create custom2
+        r2 = await client.put(f"/api/exercises/{base.id}", json=_payload(["mid_back"]))
+        assert r2.status_code == 200, r2.text
+        custom2 = r2.json()
+        assert custom2["id"] == custom1["id"], (
+            f"Expected same custom ID {custom1['id']}, got {custom2['id']} — "
+            "second edit created a duplicate instead of updating in place"
+        )
+        assert custom2["primary_muscles"] == ["mid_back"]
+
+        # Also confirm editing the custom exercise directly still works
+        r3 = await client.put(f"/api/exercises/{custom1['id']}", json=_payload(["rear_delts"]))
+        assert r3.status_code == 200, r3.text
+        assert r3.json()["id"] == custom1["id"]
+        assert r3.json()["primary_muscles"] == ["rear_delts"]
+
+    async def test_editing_user_owned_exercise_updates_in_place_without_retroactive(
+        self, client: AsyncClient, db
+    ):
+        """A user-owned custom exercise must be updated in-place even when
+        apply_mode is 'future_only' — should not spawn a new copy."""
+        base = Exercise(
+            name="incline_press_base",
+            display_name="Incline Press",
+            movement_type="compound",
+            body_region="upper",
+            primary_muscles=["chest"],
+            secondary_muscles=["triceps"],
+        )
+        db.add(base)
+        await db.commit()
+        await db.refresh(base)
+
+        # Create a custom copy via first edit
+        r1 = await client.put(
+            f"/api/exercises/{base.id}",
+            json={
+                "display_name": "Incline Press",
+                "movement_type": "compound",
+                "body_region": "upper",
+                "is_unilateral": False,
+                "is_assisted": False,
+                "description": None,
+                "primary_muscles": ["upper_chest"],
+                "secondary_muscles": ["triceps"],
+                "apply_mode": "retroactive",
+            },
+        )
+        assert r1.status_code == 200, r1.text
+        custom = r1.json()
+
+        # Now edit the custom exercise with future_only — must update in-place
+        r2 = await client.put(
+            f"/api/exercises/{custom['id']}",
+            json={
+                "display_name": "Incline Press",
+                "movement_type": "compound",
+                "body_region": "upper",
+                "is_unilateral": False,
+                "is_assisted": False,
+                "description": None,
+                "primary_muscles": ["mid_chest"],
+                "secondary_muscles": ["triceps"],
+                "apply_mode": "future_only",
+            },
+        )
+        assert r2.status_code == 200, r2.text
+        updated = r2.json()
+        assert updated["id"] == custom["id"], (
+            f"Expected in-place update on {custom['id']}, got new ID {updated['id']}"
+        )
+        assert updated["primary_muscles"] == ["mid_chest"]
