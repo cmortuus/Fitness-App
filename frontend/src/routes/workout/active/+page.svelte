@@ -448,9 +448,9 @@
           suggestion_detail: entry.suggestion_detail ?? undefined,
         };
         if (entry.recovery_rating) {
-          const exercise = allExercises.find(e => e.id === entry.exercise_id);
-          const muscle = exercise?.primary_muscles?.[0];
-          if (muscle) nextRecoveryAskedMuscles.add(muscle);
+          for (const muscle of getRecoveryMuscles(entry.exercise_id)) {
+            nextRecoveryAskedMuscles.add(muscle);
+          }
           dismissedRecoveryExerciseIds.add(entry.exercise_id);
         }
         if (entry.rir != null || entry.pump_rating || entry.suggestion) {
@@ -509,15 +509,35 @@
     localStorage.removeItem(feedbackStorageKey(id));
   }
 
-  function getMuscleGroup(exerciseId: number): string {
+  function getRecoveryMuscles(exerciseId: number): string[] {
     const ex = allExercises.find(e => e.id === exerciseId);
-    return ex?.primary_muscles?.[0] ?? 'other';
+    const muscles = ex?.primary_muscles?.filter(Boolean) ?? [];
+    return muscles.length > 0 ? muscles : ['other'];
+  }
+
+  function formatMuscleLabel(muscle: string): string {
+    return muscle.replace(/_/g, ' ');
+  }
+
+  function getRecoveryPromptMuscles(exerciseId: number): string[] {
+    return getRecoveryMuscles(exerciseId).filter((muscle) => !recoveryAskedMuscles.has(muscle));
+  }
+
+  function getRecoveryPromptLabel(exerciseId: number): string {
+    const muscles = getRecoveryPromptMuscles(exerciseId).map(formatMuscleLabel);
+    if (muscles.length === 0) return 'muscles';
+    if (muscles.length === 1) return muscles[0];
+    if (muscles.length === 2) return `${muscles[0]} and ${muscles[1]}`;
+    return `${muscles.slice(0, -1).join(', ')}, and ${muscles[muscles.length - 1]}`;
+  }
+
+  function getMuscleGroup(exerciseId: number): string {
+    return getRecoveryMuscles(exerciseId)[0] ?? 'other';
   }
 
   function shouldShowRecovery(ex: UIExercise): boolean {
-    const muscle = getMuscleGroup(ex.exerciseId);
     const firstSetDone = ex.sets.length > 0 && (ex.sets[0].done || ex.sets[0].skipped);
-    const notYetAsked = !recoveryAskedMuscles.has(muscle);
+    const notYetAsked = getRecoveryPromptMuscles(ex.exerciseId).length > 0;
     return firstSetDone && notYetAsked && showRecoveryPrompt[ex.uiId] !== false;
   }
 
@@ -528,8 +548,8 @@
   }
 
   async function submitRecovery(ex: UIExercise, rating: 'poor' | 'ok' | 'good' | 'fresh') {
-    const muscle = getMuscleGroup(ex.exerciseId);
-    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    const muscles = getRecoveryPromptMuscles(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, ...muscles]);
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
     feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], recovery_rating: rating } };
     if (sessionId) {
@@ -540,8 +560,8 @@
   }
 
   function dismissRecovery(ex: UIExercise) {
-    const muscle = getMuscleGroup(ex.exerciseId);
-    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    const muscles = getRecoveryPromptMuscles(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, ...muscles]);
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
   }
 
@@ -3545,9 +3565,9 @@
 
           <!-- ── Recovery prompt (after first set of new muscle group) ── -->
           {#if shouldShowRecovery(ex)}
-            {@const muscle = getMuscleGroup(ex.exerciseId)}
+            {@const muscleLabel = getRecoveryPromptLabel(ex.exerciseId)}
             <div class="mx-1 mb-2 px-3 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <p class="text-xs text-blue-300 mb-2">How recovered is your <span class="font-semibold capitalize">{muscle}</span> from last session?</p>
+              <p class="text-xs text-blue-300 mb-2">How recovered is your <span class="font-semibold capitalize">{muscleLabel}</span> from last session?</p>
               <div class="flex gap-2">
                 {#each [['😩', 'poor', 'Poor'], ['😐', 'ok', 'OK'], ['💪', 'good', 'Good'], ['🔥', 'fresh', 'Fresh']] as [emoji, value, label]}
                   <button
