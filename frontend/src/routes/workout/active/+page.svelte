@@ -1307,7 +1307,9 @@
   // ─── Epley bi-directional helpers ────────────────────────────────────────
   function epleyReps(oneRM: number, weight: number): number {
     if (weight <= 0) return 0;
-    return roundReps((oneRM / weight - 1) * 30);
+    // Round to nearest integer (not nearest 5) so small weight changes produce
+    // smooth, proportional rep adjustments rather than large 5-rep jumps.
+    return Math.max(1, Math.round((oneRM / weight - 1) * 30));
   }
   function epleyWeight(oneRM: number, reps: number): number {
     if (reps <= 0) return 0;
