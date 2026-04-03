@@ -1371,6 +1371,15 @@
     if (reps <= 0) return 0;
     return roundWeight(oneRM / (1 + reps / 30));
   }
+  // Returns true if currentWeight is close enough to initWeight to show a rep
+  // recommendation. Bounds: ±20% (compound) or ±15% (isolation), floor ±5 lbs.
+  function withinWeightBounds(currentWeight: number | null, initWeight: number | null, isCompound: boolean): boolean {
+    if (currentWeight == null || currentWeight <= 0) return false;
+    if (initWeight == null || initWeight <= 0) return true;
+    const pct = isCompound ? 0.20 : 0.15;
+    const bound = Math.max(initWeight * pct, 5);
+    return Math.abs(currentWeight - initWeight) <= bound;
+  }
 
   // Sync myo_rep_match sets: copy weight/reps from set 1 to all match sets
   function syncMyoMatchSets(ex: typeof uiExercises[0]) {
@@ -3143,8 +3152,7 @@
                               set.weightLbs = val;
                               if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                                 const r = epleyReps(set.oneRM, val);
-                                set.repsLeft = r;
-                                set.repsRight = r;
+                                if (r >= 4) { set.repsLeft = r; set.repsRight = r; }
                               }
                               const idx = ex.sets.indexOf(set);
                               for (let i = idx + 1; i < ex.sets.length; i++) {
@@ -3153,8 +3161,7 @@
                                   s.weightLbs = val;
                                   if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                     const r = epleyReps(s.oneRM, val);
-                                    s.repsLeft = r;
-                                    s.repsRight = r;
+                                    if (r >= 4) { s.repsLeft = r; s.repsRight = r; }
                                   }
                                 } else { break; }
                               }
@@ -3173,7 +3180,7 @@
                             {#if set.isExtrapolated && !set.done}
                               <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
                             {/if}
-                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                               {#if estReps < 5}
                                 <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -3326,7 +3333,8 @@
                           set.weightLbs = val;
                           // Epley: always update rep suggestion for this set
                           if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
-                            set.reps = epleyReps(set.oneRM, val);
+                            const newReps = epleyReps(set.oneRM, val);
+                            if (newReps >= 4) set.reps = newReps;
                           }
                           // Auto-distribute to pegs for Prime machines
                           if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
@@ -3343,7 +3351,8 @@
                                 s.pegWeights = distributeToPegs(val / 2);
                               }
                               if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
-                                s.reps = epleyReps(s.oneRM, val);
+                                const newReps = epleyReps(s.oneRM, val);
+                                if (newReps >= 4) s.reps = newReps;
                               }
                             } else { break; }
                           }
@@ -3361,7 +3370,7 @@
                       {#if set.isExtrapolated && !set.done}
                         <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
                       {/if}
-                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                         {#if estReps < 5}
                           <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
