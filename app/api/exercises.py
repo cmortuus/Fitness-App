@@ -251,35 +251,52 @@ async def update_exercise(
         )
 
     retroactive = exercise_data.apply_mode == "retroactive"
-    if source_exercise.user_id == user.id and retroactive:
+    # The canonical source ID — exercises forked from a standard exercise share
+    # the same root, so we key lookups off it to avoid treating cousins as new.
+    canonical_source_id = source_exercise.source_exercise_id or source_exercise.id
+
+    if source_exercise.user_id == user.id:
+        # User already owns this exercise — always update it in-place regardless
+        # of apply_mode (retroactive only controls session remapping below).
         target_exercise = source_exercise
     else:
-        target_exercise = Exercise(
-            name=await _generate_unique_name(db, user.id, exercise_data.display_name),
-            display_name=exercise_data.display_name,
-            user_id=user.id,
-            source_exercise_id=source_exercise.source_exercise_id or source_exercise.id,
-            movement_type=exercise_data.movement_type.value,
-            body_region=exercise_data.body_region.value,
-            equipment_type=source_exercise.equipment_type or "other",
-            is_unilateral=exercise_data.is_unilateral,
-            is_assisted=exercise_data.is_assisted,
-            description=exercise_data.description,
-            primary_muscles=exercise_data.primary_muscles,
-            secondary_muscles=exercise_data.secondary_muscles,
+        # Standard exercise: reuse the user's existing custom copy if one exists
+        # rather than spinning up a fresh duplicate on every edit (fixes #735).
+        existing_result = await db.execute(
+            select(Exercise).where(
+                Exercise.source_exercise_id == canonical_source_id,
+                Exercise.user_id == user.id,
+            ).limit(1)
         )
-        db.add(target_exercise)
-        await db.flush()
+        target_exercise = existing_result.scalar_one_or_none()
+        if target_exercise is None:
+            # First time customising this standard exercise — create a new copy.
+            target_exercise = Exercise(
+                name=await _generate_unique_name(db, user.id, exercise_data.display_name),
+                display_name=exercise_data.display_name,
+                user_id=user.id,
+                source_exercise_id=canonical_source_id,
+                movement_type=exercise_data.movement_type.value,
+                body_region=exercise_data.body_region.value,
+                equipment_type=source_exercise.equipment_type or "other",
+                is_unilateral=exercise_data.is_unilateral,
+                is_assisted=exercise_data.is_assisted,
+                description=exercise_data.description,
+                primary_muscles=exercise_data.primary_muscles,
+                secondary_muscles=exercise_data.secondary_muscles,
+            )
+            db.add(target_exercise)
+            await db.flush()
 
-    if target_exercise is source_exercise:
-        target_exercise.display_name = exercise_data.display_name
-        target_exercise.movement_type = exercise_data.movement_type.value
-        target_exercise.body_region = exercise_data.body_region.value
-        target_exercise.is_unilateral = exercise_data.is_unilateral
-        target_exercise.is_assisted = exercise_data.is_assisted
-        target_exercise.description = exercise_data.description
-        target_exercise.primary_muscles = exercise_data.primary_muscles
-        target_exercise.secondary_muscles = exercise_data.secondary_muscles
+    # Apply attribute updates to the target (whether in-place or newly created).
+    target_exercise.display_name = exercise_data.display_name
+    target_exercise.movement_type = exercise_data.movement_type.value
+    target_exercise.body_region = exercise_data.body_region.value
+    target_exercise.is_unilateral = exercise_data.is_unilateral
+    target_exercise.is_assisted = exercise_data.is_assisted
+    target_exercise.description = exercise_data.description
+    target_exercise.primary_muscles = exercise_data.primary_muscles
+    target_exercise.secondary_muscles = exercise_data.secondary_muscles
 
     if target_exercise.id != source_exercise.id:
         await _replace_exercise_in_plans(
