@@ -169,7 +169,7 @@ def compute_overload(
         # is realistic (they can aim for more reps themselves).
         # Rep/double: re-attempt the planned target to encourage reaching it.
         if overload_style == "weight":
-            return prior_weight, prior_reps
+            return round(prior_weight / 2.5) * 2.5, prior_reps
         return prior_weight, planned_reps
 
     # Hit target: apply progression
