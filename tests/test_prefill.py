@@ -1138,6 +1138,41 @@ class TestWeightFirstCrossDay:
         assert abs(s2_by_num[3]["planned_weight_kg"] - 100.0) < 0.01, \
             f"Set 3 missed: expected same weight 100, got {s2_by_num[3]['planned_weight_kg']}"
 
+    async def test_cross_day_regression_falls_back_to_same_day_prior(self, client: AsyncClient):
+        """Weight-first: if a more recent cross-day session has a LOWER weight than
+        the same-day prior, the same-day prior is used (no regression).
+
+        Scenario:
+          1. Day 2 prior: 110 kg × 8 (the established baseline)
+          2. Day 1 session (newer): 90 kg × 8 (bad day / different exercise loading)
+          3. New Day 2 → must NOT use Day 1's 90 kg; must use Day 2's 110 kg baseline
+        """
+        ex = await create_exercise(client)
+        plan = await self._create_two_day_plan(client, ex["id"], reps=8)
+
+        # Step 1: Day 2 at 110 kg × 8
+        d2_prior = await start_session_from_plan(client, plan["id"], day=2,
+                                                  overload_style="weight")
+        for s in d2_prior["sets"]:
+            await log_set(client, d2_prior["id"], s["id"], 110.0, 8)
+
+        # Step 2: Day 1 at 90 kg × 8 (lower weight, done AFTER Day 2 prior)
+        d1_low = await start_session_from_plan(client, plan["id"], day=1,
+                                               overload_style="weight")
+        for s in d1_low["sets"]:
+            await log_set(client, d1_low["id"], s["id"], 90.0, 8)
+
+        # Step 3: New Day 2 with weight-first
+        # Day 1's 90 kg is a regression relative to Day 2's 110 kg baseline → ignore
+        d2_new = await start_session_from_plan(client, plan["id"], day=2,
+                                               overload_style="weight")
+        for s in d2_new["sets"]:
+            assert s["planned_weight_kg"] is not None, "Should have weight suggestion"
+            assert s["planned_weight_kg"] >= 110.0, (
+                f"Should NOT regress below Day 2 baseline of 110 kg; "
+                f"got {s['planned_weight_kg']}"
+            )
+
     async def test_rep_style_miss_still_shows_plan_target(self, client: AsyncClient):
         """Rep-first miss: suggestion still shows the planned target (not actual reps).
 

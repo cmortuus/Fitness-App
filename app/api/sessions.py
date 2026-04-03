@@ -1303,11 +1303,17 @@ async def create_session_from_plan(
 
         Only matches prior sets whose set_type matches current_set_type.
         """
-        # For weight-first: prefer more recent cross-day data over same-day prior.
-        # If the user has done this exercise more recently on a different plan day,
-        # that data better reflects current strength than the stale same-day prior.
+        # For weight-first: prefer cross-day data only when it represents BETTER
+        # performance than the same-day prior (higher max weight).  If the cross-day
+        # session was a regression (e.g. a bad day at 400 lbs when the same-day
+        # prior is 404 lbs), fall back to the same-day prior so the suggestion
+        # never drops below the user's established baseline for this day.
         if overload_style == "weight" and cross_day_set_data.get(exercise_id):
-            ex_sets = cross_day_set_data[exercise_id]
+            cd_sets = cross_day_set_data[exercise_id]
+            sd_sets = prior_set_data.get(exercise_id, {})
+            cd_max = max((s["weight"] for s in cd_sets.values() if s.get("weight")), default=0.0)
+            sd_max = max((s["weight"] for s in sd_sets.values() if s.get("weight")), default=0.0)
+            ex_sets = cd_sets if cd_max >= sd_max else (sd_sets or None)
         else:
             ex_sets = prior_set_data.get(exercise_id)
 
