@@ -3,6 +3,7 @@
 import json
 from datetime import date, datetime
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from sqlalchemy import and_, desc, or_, select
@@ -53,6 +54,7 @@ def serialize_set(exercise_set: ExerciseSet) -> dict:
     return {
         "id": exercise_set.id,
         "exercise_id": exercise_set.exercise_id,
+        "exercise_block_id": exercise_set.exercise_block_id,
         "exercise_name": (
             exercise_set.exercise.display_name
             if "exercise" in exercise_set.__dict__ and exercise_set.__dict__["exercise"] is not None
@@ -136,6 +138,11 @@ def _set_total_reps(exercise_set: ExerciseSet) -> int:
     if exercise_set.actual_reps is not None:
         return exercise_set.actual_reps
     return (exercise_set.reps_left or 0) + (exercise_set.reps_right or 0)
+
+
+def _exercise_block_key(exercise_set: ExerciseSet) -> str:
+    """Return the best available stable key for an exercise block occurrence."""
+    return exercise_set.exercise_block_id or f"legacy-{exercise_set.exercise_id}"
 
 
 def _set_total_volume_kg(exercise_set: ExerciseSet) -> float:
@@ -493,25 +500,28 @@ async def sync_session_to_plan(
     if not all_sets:
         return {"updated": 0, "structural_changes": 0}
 
-    # Build session exercise list: ordered by first appearance, with set counts and types
-    seen_order: list[int] = []
-    session_exercises: dict[int, dict] = {}
+    # Build session exercise blocks: ordered by first appearance, with set counts and types.
+    seen_order: list[str] = []
+    session_exercises: dict[str, dict] = {}
     for s in all_sets:
         eid = s.exercise_id
-        if eid not in session_exercises:
-            seen_order.append(eid)
-            session_exercises[eid] = {
+        block_id = _exercise_block_key(s)
+        if block_id not in session_exercises:
+            seen_order.append(block_id)
+            session_exercises[block_id] = {
+                "exercise_id": eid,
+                "exercise_block_id": s.exercise_block_id or block_id,
                 "set_count": 0,
                 "set_type": s.set_type or "standard",
                 "max_weight": 0.0,
                 "reps_counts": {},
             }
-        session_exercises[eid]["set_count"] += 1
+        session_exercises[block_id]["set_count"] += 1
         if s.actual_weight_kg is not None:
-            if s.actual_weight_kg > session_exercises[eid]["max_weight"]:
-                session_exercises[eid]["max_weight"] = s.actual_weight_kg
+            if s.actual_weight_kg > session_exercises[block_id]["max_weight"]:
+                session_exercises[block_id]["max_weight"] = s.actual_weight_kg
         if s.actual_reps is not None:
-            rc = session_exercises[eid]["reps_counts"]
+            rc = session_exercises[block_id]["reps_counts"]
             rc[s.actual_reps] = rc.get(s.actual_reps, 0) + 1
 
     # Load the linked plan
@@ -533,42 +543,69 @@ async def sync_session_to_plan(
     if target_day is None:
         return {"updated": 0, "structural_changes": 0}
 
-    # Build map of existing plan exercises for this day
-    plan_exercise_map: dict[int, dict] = {}
+    # Build maps of existing plan exercise blocks for this day.
+    plan_exercise_map: dict[str, dict] = {}
+    unmatched_plan_by_exercise: dict[int, list[dict]] = {}
     for ex in target_day.get("exercises", []):
-        plan_exercise_map[ex.get("exercise_id")] = ex
+        if not ex.get("block_id"):
+            ex["block_id"] = str(uuid4())
+        plan_exercise_map[ex["block_id"]] = ex
+        unmatched_plan_by_exercise.setdefault(ex.get("exercise_id"), []).append(ex)
 
-    plan_exercise_ids = set(plan_exercise_map.keys())
-    session_exercise_ids = set(seen_order)
+    plan_exercise_ids = [ex.get("exercise_id") for ex in target_day.get("exercises", [])]
+    session_exercise_ids = [session_exercises[block_id]["exercise_id"] for block_id in seen_order]
+    session_block_ids_by_exercise: dict[int, list[str]] = {}
+    for block_id in seen_order:
+        eid = session_exercises[block_id]["exercise_id"]
+        session_block_ids_by_exercise.setdefault(eid, []).append(block_id)
 
-    structure_by_exercise_id: dict[int, dict] = {}
-    requested_order: list[int] = []
+    structure_by_block_id: dict[str, dict] = {}
+    requested_order: list[str] = []
     if sync_data and sync_data.exercises:
         for item in sync_data.exercises:
-            if item.exercise_id not in structure_by_exercise_id:
-                requested_order.append(item.exercise_id)
-            structure_by_exercise_id[item.exercise_id] = item.model_dump()
+            if item.exercise_block_id:
+                block_id = item.exercise_block_id
+            else:
+                candidates = session_block_ids_by_exercise.get(item.exercise_id, [])
+                block_id = candidates[0] if len(candidates) == 1 else f"legacy-{item.exercise_id}"
+            if block_id not in structure_by_block_id:
+                requested_order.append(block_id)
+            structure_by_block_id[block_id] = item.model_dump()
         ordered_from_client = [
-            eid for eid in requested_order
-            if eid in session_exercise_ids
+            block_id for block_id in requested_order
+            if block_id in session_exercises
         ]
         seen_set = set(ordered_from_client)
-        seen_order = ordered_from_client + [eid for eid in seen_order if eid not in seen_set]
+        seen_order = ordered_from_client + [block_id for block_id in seen_order if block_id not in seen_set]
 
     # Rebuild the day's exercise list in session order
     new_exercises = []
     updated_count = 0
     structural_changes = 0
 
-    for eid in seen_order:
-        sdata = session_exercises[eid]
+    matched_existing_block_ids: set[str] = set()
+    for block_id in seen_order:
+        sdata = session_exercises[block_id]
+        eid = sdata["exercise_id"]
         most_common_reps = None
         if sdata["reps_counts"]:
             most_common_reps = max(sdata["reps_counts"], key=lambda r: sdata["reps_counts"][r])
 
-        if eid in plan_exercise_map:
+        existing = None
+        if block_id in plan_exercise_map:
+            existing = plan_exercise_map[block_id]
+        else:
+            for candidate in unmatched_plan_by_exercise.get(eid, []):
+                candidate_block_id = candidate.get("block_id")
+                if candidate_block_id not in matched_existing_block_ids:
+                    existing = candidate
+                    break
+
+        if existing:
             # Existing exercise — update weight/reps and structural fields
-            ex = dict(plan_exercise_map[eid])
+            ex = dict(existing)
+            ex["block_id"] = ex.get("block_id") or sdata["exercise_block_id"] or str(uuid4())
+            matched_existing_block_ids.add(ex["block_id"])
             if sdata["max_weight"] > 0:
                 ex["starting_weight_kg"] = sdata["max_weight"]
                 updated_count += 1
@@ -582,7 +619,7 @@ async def sync_session_to_plan(
             if ex.get("set_type", "standard") != sdata["set_type"]:
                 ex["set_type"] = sdata["set_type"]
                 structural_changes += 1
-            structure = structure_by_exercise_id.get(eid)
+            structure = structure_by_block_id.get(block_id)
             if structure:
                 next_group_id = structure.get("group_id")
                 next_group_type = structure.get("group_type")
@@ -595,8 +632,9 @@ async def sync_session_to_plan(
             new_exercises.append(ex)
         else:
             # New exercise added during session
-            structure = structure_by_exercise_id.get(eid, {})
+            structure = structure_by_block_id.get(block_id, {})
             new_exercises.append({
+                "block_id": sdata["exercise_block_id"] or str(uuid4()),
                 "exercise_id": eid,
                 "sets": sdata["set_count"],
                 "reps": most_common_reps or 8,
@@ -611,12 +649,12 @@ async def sync_session_to_plan(
             structural_changes += 1
 
     # Count removed exercises
-    removed = plan_exercise_ids - session_exercise_ids
-    structural_changes += len(removed)
+    removed = max(0, len(plan_exercise_ids) - len(session_exercise_ids))
+    structural_changes += removed
 
     # Check if order changed (comparing exercise IDs in order)
-    old_order = [ex.get("exercise_id") for ex in target_day.get("exercises", [])]
-    new_order = [ex.get("exercise_id") for ex in new_exercises]
+    old_order = [ex.get("block_id") or f"legacy-{ex.get('exercise_id')}" for ex in target_day.get("exercises", [])]
+    new_order = [ex.get("block_id") or f"legacy-{ex.get('exercise_id')}" for ex in new_exercises]
     if old_order != new_order:
         structural_changes = max(structural_changes, 1)  # ensure at least 1 if reordered
 
@@ -646,9 +684,25 @@ async def add_set(
             detail=f"Workout session {session_id} not found",
         )
 
+    exercise_block_id = set_data.exercise_block_id
+    if exercise_block_id is None:
+        existing_block_result = await db.execute(
+            select(ExerciseSet.exercise_block_id)
+            .where(
+                ExerciseSet.workout_session_id == session_id,
+                ExerciseSet.exercise_id == set_data.exercise_id,
+            )
+            .order_by(ExerciseSet.id)
+        )
+        existing_block_ids = [row[0] for row in existing_block_result.all() if row[0]]
+        distinct_existing_block_ids = list(dict.fromkeys(existing_block_ids))
+        if len(distinct_existing_block_ids) == 1:
+            exercise_block_id = distinct_existing_block_ids[0]
+
     exercise_set = ExerciseSet(
         workout_session_id=session_id,
         exercise_id=set_data.exercise_id,
+        exercise_block_id=exercise_block_id,
         set_number=set_data.set_number,
         planned_reps=set_data.planned_reps,
         planned_weight_kg=set_data.planned_weight_kg,
@@ -930,6 +984,9 @@ async def create_session_from_plan(
 
     day_name = day.get("day_name", f"Day {day_number}")
     day_exercises = day.get("exercises", [])
+    for exercise in day_exercises:
+        if not exercise.get("block_id"):
+            exercise["block_id"] = str(uuid4())
 
     # Batch-fetch all exercise models needed by this day in one query
     day_exercise_ids = [
@@ -1453,6 +1510,7 @@ async def create_session_from_plan(
     # Create sets for each exercise
     for exercise_data in day_exercises:
         exercise_id = exercise_data.get("exercise_id")
+        exercise_block_id = exercise_data.get("block_id") or str(uuid4())
         sets = exercise_data.get("sets", 3)
         reps = exercise_data.get("reps", 8)
 
@@ -1548,6 +1606,7 @@ async def create_session_from_plan(
             exercise_set = ExerciseSet(
                 workout_session_id=workout_session.id,
                 exercise_id=exercise_id,
+                exercise_block_id=exercise_block_id,
                 set_number=set_num,
                 planned_reps=suggested_reps,
                 planned_reps_left=planned_left,

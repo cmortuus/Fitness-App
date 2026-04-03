@@ -297,3 +297,81 @@ class TestSyncStructural:
         days = plan_after.json()["days"]
         assert days[0]["exercises"][0]["starting_weight_kg"] == 0
         assert days[1]["exercises"][0]["starting_weight_kg"] == 55.0
+
+    async def test_sync_preserves_duplicate_exercise_blocks_by_block_id(self, client: AsyncClient):
+        """Duplicate exercise occurrences should sync independently instead of collapsing together."""
+        ex1 = await create_exercise(client, name="lateral_raise", display_name="Lateral Raise")
+        ex2 = await create_exercise(client, name="chest_press", display_name="Chest Press")
+        plan = await _create_plan_with_exercises(client, [
+            {"exercise_id": ex1["id"], "sets": 2, "reps": 10, "starting_weight_kg": 0, "progression_type": "linear"},
+            {"exercise_id": ex2["id"], "sets": 2, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"},
+            {"exercise_id": ex1["id"], "sets": 2, "reps": 15, "starting_weight_kg": 0, "progression_type": "linear"},
+        ])
+        day_exercises = plan["days"][0]["exercises"]
+        first_raise = day_exercises[0]
+        chest_press = day_exercises[1]
+        second_raise = day_exercises[2]
+
+        sess = await start_session_from_plan(client, plan["id"])
+        sets_by_block: dict[str, list[dict]] = {}
+        for session_set in sess["sets"]:
+            sets_by_block.setdefault(session_set["exercise_block_id"], []).append(session_set)
+
+        assert first_raise["block_id"] in sets_by_block
+        assert second_raise["block_id"] in sets_by_block
+        assert first_raise["block_id"] != second_raise["block_id"]
+
+        for session_set in sets_by_block[first_raise["block_id"]]:
+            await client.patch(
+                f"/api/sessions/{sess['id']}/sets/{session_set['id']}",
+                json={"actual_weight_kg": 20.0, "actual_reps": 10},
+            )
+        for session_set in sets_by_block[chest_press["block_id"]]:
+            await client.patch(
+                f"/api/sessions/{sess['id']}/sets/{session_set['id']}",
+                json={"actual_weight_kg": 70.0, "actual_reps": 8},
+            )
+        for session_set in sets_by_block[second_raise["block_id"]]:
+            await client.patch(
+                f"/api/sessions/{sess['id']}/sets/{session_set['id']}",
+                json={"actual_weight_kg": 12.5, "actual_reps": 15},
+            )
+
+        await _complete_session(client, sess["id"])
+        sync_r = await client.post(
+            f"/api/sessions/{sess['id']}/sync-to-plan",
+            json={
+                "exercises": [
+                    {
+                        "exercise_id": second_raise["exercise_id"],
+                        "exercise_block_id": second_raise["block_id"],
+                    },
+                    {
+                        "exercise_id": chest_press["exercise_id"],
+                        "exercise_block_id": chest_press["block_id"],
+                    },
+                    {
+                        "exercise_id": first_raise["exercise_id"],
+                        "exercise_block_id": first_raise["block_id"],
+                    },
+                ]
+            },
+        )
+        assert sync_r.status_code == 200, sync_r.text
+        assert sync_r.json()["structural_changes"] >= 1
+
+        exercises = await _get_plan_exercises(client, plan["id"])
+        assert [ex["block_id"] for ex in exercises] == [
+            second_raise["block_id"],
+            chest_press["block_id"],
+            first_raise["block_id"],
+        ]
+        assert exercises[0]["exercise_id"] == ex1["id"]
+        assert exercises[0]["starting_weight_kg"] == 12.5
+        assert exercises[0]["reps"] == 15
+        assert exercises[1]["exercise_id"] == ex2["id"]
+        assert exercises[1]["starting_weight_kg"] == 70.0
+        assert exercises[1]["reps"] == 8
+        assert exercises[2]["exercise_id"] == ex1["id"]
+        assert exercises[2]["starting_weight_kg"] == 20.0
+        assert exercises[2]["reps"] == 10

@@ -121,6 +121,7 @@ class ExerciseUpdate(BaseModel):
 # Set schemas
 class SetCreate(BaseModel):
     exercise_id: int
+    exercise_block_id: str | None = None
     set_number: int
     planned_reps: int | None = None
     planned_weight_kg: float | None = None
@@ -149,6 +150,7 @@ class SetUpdate(BaseModel):
 class SetResponse(BaseModel):
     id: int
     exercise_id: int
+    exercise_block_id: str | None = None
     exercise_name: str | None = None
     movement_type: str | None = None
     body_region: str | None = None
@@ -223,6 +225,7 @@ class WorkoutSessionAuditResponse(BaseModel):
 
 # Workout plan schemas
 class PlannedExercise(BaseModel):
+    block_id: str | None = None
     exercise_id: int
     sets: int
     reps: int = 8  # bottom of rep range for double progression
@@ -273,6 +276,7 @@ class WorkoutPlanCreate(BaseModel):
 
 
 class SyncPlanExercise(BaseModel):
+    exercise_block_id: str | None = None
     exercise_id: int
     group_id: str | None = None
     group_type: Literal["superset", "circuit"] | None = None

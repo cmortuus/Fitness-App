@@ -40,6 +40,7 @@ class ExerciseSet(Base):
     exercise_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("exercises.id"), nullable=False
     )
+    exercise_block_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     set_number: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Planned values

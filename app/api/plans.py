@@ -2,6 +2,7 @@
 
 import json
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
@@ -24,6 +25,17 @@ def _exercise_scope(user_id: int):
     return or_(Exercise.user_id.is_(None), Exercise.user_id == user_id)
 
 
+def _ensure_planned_block_ids(planned_data: dict) -> dict:
+    """Ensure each planned exercise occurrence has a stable block_id."""
+    if not isinstance(planned_data, dict):
+        return planned_data
+    for day in planned_data.get("days", []):
+        for exercise in day.get("exercises", []):
+            if not exercise.get("block_id"):
+                exercise["block_id"] = str(uuid4())
+    return planned_data
+
+
 def serialize_plan(plan: WorkoutPlan) -> dict:
     """Serialize a WorkoutPlan to a dictionary."""
     try:
@@ -44,6 +56,8 @@ def serialize_plan(plan: WorkoutPlan) -> dict:
         # New format
         days = planned_data.get("days", [])
         number_of_days = planned_data.get("number_of_days") or len(days)
+    planned_data = _ensure_planned_block_ids(planned_data)
+    days = planned_data.get("days", days)
     rir_overrides = normalize_rir_overrides(planned_data.get("rir_overrides"))
 
     return {
@@ -383,6 +397,7 @@ async def create_plan(
         "days": [d.model_dump() for d in plan_data.days],
         "rir_overrides": normalize_rir_overrides(plan_data.rir_overrides.model_dump()),
     }
+    planned_data = _ensure_planned_block_ids(planned_data)
     planned_exercises_json = json.dumps(planned_data)
 
     # Validate exercise IDs (skip for drafts — allow empty/incomplete plans)
@@ -566,6 +581,7 @@ async def update_plan_rir_overrides(
         }
 
     planned_data["rir_overrides"] = normalize_rir_overrides(overrides.model_dump())
+    planned_data = _ensure_planned_block_ids(planned_data)
     plan.planned_exercises = json.dumps(planned_data)
     await db.flush()
     await db.refresh(plan)
@@ -622,6 +638,7 @@ async def update_plan(
             planned_data["days"] = plan_data.days
         if plan_data.number_of_days is not None:
             planned_data["number_of_days"] = plan_data.number_of_days
+        planned_data = _ensure_planned_block_ids(planned_data)
 
         all_exercise_ids = {
             ex.get("exercise_id")
