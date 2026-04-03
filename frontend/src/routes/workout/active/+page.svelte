@@ -3152,7 +3152,7 @@
                               set.weightLbs = val;
                               if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                                 const r = epleyReps(set.oneRM, val);
-                                if (r >= 4) { set.repsLeft = r; set.repsRight = r; }
+                                if (r >= 4 && r <= 30) { set.repsLeft = r; set.repsRight = r; }
                               }
                               const idx = ex.sets.indexOf(set);
                               for (let i = idx + 1; i < ex.sets.length; i++) {
@@ -3161,7 +3161,7 @@
                                   s.weightLbs = val;
                                   if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                     const r = epleyReps(s.oneRM, val);
-                                    if (r >= 4) { s.repsLeft = r; s.repsRight = r; }
+                                    if (r >= 4 && r <= 30) { s.repsLeft = r; s.repsRight = r; }
                                   }
                                 } else { break; }
                               }
@@ -3326,7 +3326,7 @@
                           // Epley: always update rep suggestion for this set
                           if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                             const newReps = epleyReps(set.oneRM, val);
-                            if (newReps >= 4) set.reps = newReps;
+                            if (newReps >= 4 && newReps <= 30) set.reps = newReps;
                           }
                           // Auto-distribute to pegs for Prime machines
                           if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
@@ -3344,7 +3344,7 @@
                               }
                               if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                 const newReps = epleyReps(s.oneRM, val);
-                                if (newReps >= 4) s.reps = newReps;
+                                if (newReps >= 4 && newReps <= 30) s.reps = newReps;
                               }
                             } else { break; }
                           }
