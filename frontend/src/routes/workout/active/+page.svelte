@@ -1120,7 +1120,7 @@
 
             // Restore draft values if the user was mid-workout (cross-device sync)
             const hasDraft = bset?.draft_weight_kg != null || bset?.draft_reps != null;
-            const draftWeight = bset?.draft_weight_kg != null ? fromKg(bset.draft_weight_kg) : null;
+            const draftWeight = bset?.draft_weight_kg != null ? roundWeight(fromKg(bset.draft_weight_kg)) : null;
             const draftReps = bset?.draft_reps ?? null;
             const draftLeft = bset?.draft_reps_left ?? null;
             const draftRight = bset?.draft_reps_right ?? null;
@@ -1253,7 +1253,7 @@
             }
           } else if (bset.draft_weight_kg != null) {
             // Incomplete with draft: user was mid-edit before navigating away
-            weightVal = fromKg(bset.draft_weight_kg);
+            weightVal = roundWeight(fromKg(bset.draft_weight_kg));
           } else if (bset.planned_weight_kg != null && bset.planned_weight_kg > 0) {
             // Incomplete: use planned/suggested weight (rounded to nearest increment)
             weightVal = roundWeight(fromKg(bset.planned_weight_kg));

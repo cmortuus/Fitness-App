@@ -984,9 +984,19 @@ async def create_session_from_plan(
 
     day_name = day.get("day_name", f"Day {day_number}")
     day_exercises = day.get("exercises", [])
+    any_new_block_ids = False
     for exercise in day_exercises:
         if not exercise.get("block_id"):
             exercise["block_id"] = str(uuid4())
+            any_new_block_ids = True
+
+    if any_new_block_ids:
+        # Persist generated block_ids back to the plan so that subsequent
+        # GET /plans/{id} calls return the same stable UUIDs.  Without this,
+        # _ensure_planned_block_ids() would create *different* UUIDs on every
+        # read, causing the frontend to fail to match session sets to plan
+        # exercises by block_id (triggering incorrect week-1 drop-off logic).
+        plan.planned_exercises = json.dumps(planned_data)
 
     # Batch-fetch all exercise models needed by this day in one query
     day_exercise_ids = [
