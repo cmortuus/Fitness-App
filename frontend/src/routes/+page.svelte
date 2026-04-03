@@ -835,7 +835,7 @@
           Start Workout
         </a>
         <a
-          href="/plans/create?edit={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+          href="/plans/upcoming"
           class="btn-secondary text-sm flex-1 text-center"
         >
           Edit Upcoming Day
@@ -916,7 +916,7 @@
 
           <div class="flex justify-end">
             <a
-              href="/plans/create?edit={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+              href="/plans/upcoming"
               class="text-sm text-primary-400 hover:text-primary-300"
             >
               Edit upcoming day
