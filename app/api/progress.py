@@ -141,11 +141,12 @@ async def get_progress(
             w = s.actual_weight_kg or 0.0
             r = s.actual_reps or 0
             max_weight = max(max_weight, w)
-            if w > 0 and r > 0:
-                # For assisted exercises (pull-up/dip machines) the stored weight
-                # is the assistance weight. Effective load = bodyweight - assistance.
-                # This makes 1RM naturally increase as the user gets stronger
-                # (less assistance → higher effective weight → higher 1RM).
+            # For assisted exercises the stored weight is the assistance amount.
+            # Effective load = bodyweight - assistance. When assistance = 0
+            # (pure bodyweight, e.g. unassisted pistol squat logged with 0 weight)
+            # we still want to compute e1RM using bodyweight as the load.
+            is_bw_only = exercise.is_assisted and w == 0
+            if (w > 0 or is_bw_only) and r > 0:
                 if exercise.is_assisted and body_weight_kg > 0:
                     eff_w = max(0.0, body_weight_kg - w)
                 else:
