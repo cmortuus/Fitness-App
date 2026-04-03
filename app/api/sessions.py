@@ -1337,19 +1337,20 @@ async def create_session_from_plan(
 
         Only matches prior sets whose set_type matches current_set_type.
         """
-        # For weight-first: prefer cross-day data only when it represents BETTER
-        # performance than the same-day prior (higher max weight).  If the cross-day
-        # session was a regression (e.g. a bad day at 400 lbs when the same-day
-        # prior is 404 lbs), fall back to the same-day prior so the suggestion
-        # never drops below the user's established baseline for this day.
-        if overload_style == "weight" and cross_day_set_data.get(exercise_id):
-            cd_sets = cross_day_set_data[exercise_id]
-            sd_sets = prior_set_data.get(exercise_id, {})
-            cd_max = max((s["weight"] for s in cd_sets.values() if s.get("weight")), default=0.0)
-            sd_max = max((s["weight"] for s in sd_sets.values() if s.get("weight")), default=0.0)
-            ex_sets = cd_sets if cd_max >= sd_max else (sd_sets or None)
+        # Same-day prior always wins (#800: week-to-week consistency).
+        # The previous instance of the same plan day is the most valid baseline
+        # because fatigue context, exercise order, and recovery pattern are
+        # aligned.  Cross-day data from a different day (e.g. a Monday session
+        # while preparing Thursday's prefill) is used ONLY as a fallback when
+        # this exercise has no same-day history at all (first week, or an
+        # exercise newly added to the plan day).
+        sd_sets = prior_set_data.get(exercise_id)
+        if sd_sets:
+            ex_sets = sd_sets
+        elif overload_style == "weight":
+            ex_sets = cross_day_set_data.get(exercise_id)
         else:
-            ex_sets = prior_set_data.get(exercise_id)
+            ex_sets = prior_set_data.get(exercise_id)  # None for non-weight style
 
         if not ex_sets:
             # No same-plan history — try cross-meso Epley prefill

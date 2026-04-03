@@ -1139,44 +1139,47 @@ class TestWeightFirstCrossDay:
         assert r.status_code == 201, r.text
         return r.json()
 
-    async def test_cross_day_weight_used_when_more_recent(self, client: AsyncClient):
-        """Weight-first: if Day 1 was done MORE RECENTLY than the Day 2 prior,
-        Day 2's prefill should build from Day 1's weight rather than the stale
-        Day 2 prior.
+    async def test_same_day_prior_wins_over_more_recent_cross_day(self, client: AsyncClient):
+        """Weight-first: same-day prior is ALWAYS used even when a more recent
+        cross-day session has a higher weight (#800 — week-to-week consistency).
 
         Scenario:
-          1. Day 2 prior session: 100 kg × 8 (old)
-          2. Day 1 session: 110 kg × 8 (newer, same exercise)
-          3. New Day 2 session (weight-first) → should reference 110 kg, not 100 kg
+          1. Day 2 prior session: 100 kg × 8
+          2. Day 1 session: 110 kg × 8 (done AFTER Day 2, higher weight)
+          3. New Day 2 session → must use Day 2's 100 kg as basis, NOT Day 1's 110 kg
+             because same-day context (fatigue order, rest pattern) is what matters.
         """
         ex = await create_exercise(client)
         plan = await self._create_two_day_plan(client, ex["id"], reps=8)
 
-        # Step 1: Day 2 at 100 kg × 8 (becomes the same-day prior for Day 2)
+        # Step 1: Day 2 at 100 kg × 8 (the same-day prior for the next Day 2)
         d2_prior = await start_session_from_plan(client, plan["id"], day=2,
                                                   overload_style="weight")
         for s in d2_prior["sets"]:
             await log_set(client, d2_prior["id"], s["id"], 100.0, 8)
 
-        # Step 2: Day 1 at 110 kg × 8 (done AFTER Day 2 prior → higher session ID)
+        # Step 2: Day 1 at 110 kg × 8 (done AFTER Day 2 prior — higher weight)
         d1_recent = await start_session_from_plan(client, plan["id"], day=1,
                                                    overload_style="weight")
         for s in d1_recent["sets"]:
             await log_set(client, d1_recent["id"], s["id"], 110.0, 8)
 
-        # Step 3: New Day 2 session with weight-first
-        # The cross-day fallback should use Day 1's 110 kg as the basis.
+        # Step 3: New Day 2 session — same-day prior (100 kg) must win.
+        # Epley overload from 100 kg × 8 hitting target 8 → ~108 kg.
         d2_new = await start_session_from_plan(client, plan["id"], day=2,
                                                 overload_style="weight")
         for s in d2_new["sets"]:
-            # Suggestion must be ABOVE 100 kg (the stale Day 2 prior).
-            # With cross-day data (110 kg × 8, hit target), Epley gives ~113 kg.
             assert s["planned_weight_kg"] is not None, "Should have weight suggestion"
-            assert s["planned_weight_kg"] > 100.0, (
-                f"Cross-day fallback should produce weight > 100 kg (stale prior); "
+            # Must be based on same-day prior (100 kg), NOT cross-day (110 kg).
+            assert s["planned_weight_kg"] < 110.0, (
+                f"Cross-day (110 kg) must not override same-day prior (100 kg); "
                 f"got {s['planned_weight_kg']}"
             )
-            # Reps should stay at 8 (weight-first keeps reps at prior achieved)
+            # Weight should be above 100 (overloaded from same-day prior hit)
+            assert s["planned_weight_kg"] > 100.0, (
+                f"Should increase from same-day 100 kg baseline; "
+                f"got {s['planned_weight_kg']}"
+            )
             assert s["planned_reps"] == 8, \
                 f"Weight-first: reps should be 8, got {s['planned_reps']}"
 
@@ -1333,3 +1336,27 @@ class TestWeightFirstCrossDay:
             f"Rep-style miss: expected 8 (plan target), got {s2_by_num[2]['planned_reps']}"
         assert s2_by_num[3]["planned_reps"] == 8, \
             f"Rep-style miss: expected 8 (plan target), got {s2_by_num[3]['planned_reps']}"
+
+    async def test_cross_day_still_used_when_no_same_day_history(self, client: AsyncClient):
+        """Weight-first: cross-day data is still the fallback when an exercise
+        has never been done on this specific plan day (#800).
+
+        Scenario:
+          - Exercise on Day 1 at 100 kg × 8 (same-plan, different day)
+          - Day 2 has never been done (no same-day prior for Day 2)
+          - New Day 2 → should fall back to Day 1's cross-day data
+        """
+        ex = await create_exercise(client)
+        plan = await self._create_two_day_plan(client, ex["id"], reps=8)
+
+        # Only do Day 1 — Day 2 has no prior session at all
+        d1 = await start_session_from_plan(client, plan["id"], day=1, overload_style="weight")
+        for s in d1["sets"]:
+            await log_set(client, d1["id"], s["id"], 100.0, 8)
+
+        # Day 2 first session — no same-day prior, must fall back to Day 1 cross-day
+        d2 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
+        for s in d2["sets"]:
+            assert s["planned_weight_kg"] is not None, \
+                "Should have weight suggestion from cross-day fallback when no same-day history"
+            assert s["planned_weight_kg"] > 0, "Weight must be positive"
