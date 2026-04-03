@@ -3205,14 +3205,6 @@
                             const r = v === '' ? null : parseInt(v);
                             if (side === 'left') set.repsLeft = r;
                             else set.repsRight = r;
-                            if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                              const newW = epleyWeight(set.oneRM, r);
-                              set.weightLbs = newW;
-                              const idx = ex.sets.indexOf(set);
-                              for (let i = idx + 1; i < ex.sets.length; i++) {
-                                if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
-                              }
-                            }
                             uiExercises = [...uiExercises];
                           }}
                           disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min="0"
@@ -3394,14 +3386,6 @@
                           const v = (e.target as HTMLInputElement).value;
                           const r = v === '' ? null : parseInt(v);
                           set.reps = r;
-                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                            const newW = epleyWeight(set.oneRM, r);
-                            set.weightLbs = newW;
-                            const idx = ex.sets.indexOf(set);
-                            for (let i = idx + 1; i < ex.sets.length; i++) {
-                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
-                            }
-                          }
                           uiExercises = [...uiExercises];
                         }}
                         disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
