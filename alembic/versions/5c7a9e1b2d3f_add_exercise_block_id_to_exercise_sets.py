@@ -12,14 +12,17 @@ import sqlalchemy as sa
 
 
 revision: str = "5c7a9e1b2d3f"
-down_revision: str | None = "2b4c6d8e0f1a"
+down_revision: str | None = "g1h2i3j4k5l6"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    with op.batch_alter_table("exercise_sets", schema=None) as batch_op:
-        batch_op.add_column(sa.Column("exercise_block_id", sa.String(length=36), nullable=True))
+    # Use IF NOT EXISTS so the migration is safe to run even if the column
+    # was added manually during an emergency hotfix.
+    op.execute(
+        "ALTER TABLE exercise_sets ADD COLUMN IF NOT EXISTS exercise_block_id VARCHAR(36)"
+    )
 
 
 def downgrade() -> None:
