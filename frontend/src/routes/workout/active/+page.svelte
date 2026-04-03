@@ -5,7 +5,7 @@
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getNextWorkout, getRecentExercises, getSession, getSessions,
-    createSessionFromPlan, createSession, startSession,
+    createSessionFromPlan, createSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote, getPersonalRecords,
     saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
@@ -930,17 +930,36 @@
     });
     window.addEventListener('beforeunload', () => {
       if (sessionId) {
-        saveDrafts();
-        saveFeedbackDraftState();
+        const anyDone = uiExercises.some(ex => ex.sets.some(s => s.done));
+        if (!anyDone) {
+          // No sets completed — silently delete the empty planned session
+          const token = localStorage.getItem('hgt_access_token');
+          fetch(`/api/sessions/${sessionId}`, {
+            method: 'DELETE',
+            keepalive: true,
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+        } else {
+          saveDrafts();
+          saveFeedbackDraftState();
+        }
       }
     });
   }
 
-  // Save drafts before navigating away — session will auto-resume when you come back
+  // Auto-cancel empty sessions on navigation; save drafts for in-progress ones
   beforeNavigate(() => {
     if (sessionId) {
-      saveDrafts();
-      saveFeedbackDraftState();
+      const anyDone = uiExercises.some(ex => ex.sets.some(s => s.done));
+      if (!anyDone) {
+        // No sets completed — delete the empty planned session silently
+        deleteSession(sessionId).catch(() => {});
+        sessionId = null;
+        currentSession.set(null);
+      } else {
+        saveDrafts();
+        saveFeedbackDraftState();
+      }
     }
   });
 
@@ -1007,11 +1026,10 @@
         }
         throw e;
       }
-      const sess = await startSession(raw.id);
-      sessionId = sess.id;
-      workoutName = sess.name ?? 'Workout';
+      sessionId = raw.id;
+      workoutName = raw.name ?? 'Workout';
       hasLinkedPlan = true;
-      currentSession.set(sess);
+      currentSession.set(raw);
 
       if (day) {
         uiExercises = day.exercises.map(pe => {
@@ -1019,7 +1037,7 @@
           const isUni = exercise?.is_unilateral ?? false;
           const sets: UISet[] = [];
           for (let i = 1; i <= pe.sets; i++) {
-            const bset = sess.sets.find(
+            const bset = raw.sets.find(
               s => s.exercise_id === pe.exercise_id && s.set_number === i
             );
             // Pre-fill with progressive overload suggestions when available (0 = blank)
@@ -1122,10 +1140,9 @@
         }
         throw e;
       }
-      const sess = await startSession(raw.id);
-      sessionId = sess.id;
-      workoutName = sess.name ?? 'Workout';
-      currentSession.set(sess);
+      sessionId = raw.id;
+      workoutName = raw.name ?? 'Workout';
+      currentSession.set(raw);
 
       // Clock starts on first set completion, not here (#524)
     } catch (e) {
