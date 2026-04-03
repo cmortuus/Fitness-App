@@ -118,26 +118,33 @@
     if (add.length === 0 && remove.length === 0) return null;
     return { add, remove };
   });
+
+  function compactOneSidedWidth(height: string): string {
+    const match = height.match(/^([\d.]+)rem$/);
+    if (!match) return '1.6rem';
+    const scaled = Math.max(1.2, Number(match[1]) * 0.62);
+    return `${scaled.toFixed(2)}rem`;
+  }
 </script>
 
 {#if oneSided}
-  <!-- Single-pin vertical view (T-bar row, landmine) -->
-  <div class="flex items-end gap-0.5 justify-center mt-0.5">
-    <!-- Vertical post -->
-    <div style="width: 6px; height: 3.5rem; background: #52525b; border-radius: 1px 1px 0 0;"></div>
-    <!-- Collar -->
-    <div style="width: 10px; height: 8px; background: #71717a; border-radius: 1px; align-self: flex-end; margin-left: -2px; margin-right: 2px;"></div>
-    <!-- Plates stacked horizontally from post outward -->
-    {#each plates as plate}
-      {#each Array(plate.count) as _}
-        <div
-          style="width: 6px; height: {plate.height}; background: {plate.color}; border-radius: 1px; align-self: flex-end;"
-          title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
-        ></div>
-      {/each}
-    {/each}
-    <!-- Pin end cap -->
-    <div style="width: 4px; height: 10px; background: #3f3f46; border-radius: 0 2px 2px 0; align-self: flex-end;"></div>
+  <!-- Upright single-pin view (T-bar row, landmine) -->
+  <div class="flex flex-col items-center mt-0.5 max-w-full overflow-hidden">
+    <div class="relative flex flex-col-reverse items-center justify-start min-h-[2.7rem]">
+      <div style="width: 4px; height: 2.3rem; background: #52525b; border-radius: 2px;"></div>
+      <div class="absolute bottom-[3px] left-1/2 -translate-x-1/2 flex flex-col-reverse items-center gap-px">
+        {#each plates as plate}
+          {#each Array(plate.count) as _}
+            <div
+              style="width: {compactOneSidedWidth(plate.height)}; height: 3px; background: {plate.color}; border-radius: 999px;"
+              title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
+            ></div>
+          {/each}
+        {/each}
+      </div>
+      <div class="absolute bottom-0" style="width: 1.05rem; height: 4px; background: #71717a; border-radius: 999px;"></div>
+      <div class="absolute top-0" style="width: 8px; height: 6px; background: #3f3f46; border-radius: 999px;"></div>
+    </div>
   </div>
 {:else}
   <!-- Horizontal barbell view -->
