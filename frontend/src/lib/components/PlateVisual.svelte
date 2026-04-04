@@ -121,29 +121,29 @@
 
   function compactOneSidedWidth(height: string): string {
     const match = height.match(/^([\d.]+)rem$/);
-    if (!match) return '1.6rem';
-    const scaled = Math.max(1.2, Number(match[1]) * 0.62);
+    if (!match) return '1.1rem';
+    const scaled = Math.max(0.8, Number(match[1]) * 0.45);
     return `${scaled.toFixed(2)}rem`;
   }
 </script>
 
 {#if oneSided}
-  <!-- Upright single-pin view (T-bar row, landmine) -->
+  <!-- Upright single-pin view (T-bar row, landmine) — scaled to fit container -->
   <div class="flex flex-col items-center mt-0.5 max-w-full overflow-hidden">
-    <div class="relative flex flex-col-reverse items-center justify-start min-h-[2.7rem]">
-      <div style="width: 4px; height: 2.3rem; background: #52525b; border-radius: 2px;"></div>
-      <div class="absolute bottom-[3px] left-1/2 -translate-x-1/2 flex flex-col-reverse items-center gap-px">
+    <div class="relative flex flex-col-reverse items-center justify-start min-h-[1.9rem]">
+      <div style="width: 3px; height: 1.6rem; background: #52525b; border-radius: 2px;"></div>
+      <div class="absolute bottom-[2px] left-1/2 -translate-x-1/2 flex flex-col-reverse items-center gap-px">
         {#each plates as plate}
           {#each Array(plate.count) as _}
             <div
-              style="width: {compactOneSidedWidth(plate.height)}; height: 3px; background: {plate.color}; border-radius: 999px;"
+              style="width: {compactOneSidedWidth(plate.height)}; height: 2px; background: {plate.color}; border-radius: 999px;"
               title="{plate.weight} {isLbs ? 'lbs' : 'kg'}"
             ></div>
           {/each}
         {/each}
       </div>
-      <div class="absolute bottom-0" style="width: 1.05rem; height: 4px; background: #71717a; border-radius: 999px;"></div>
-      <div class="absolute top-0" style="width: 8px; height: 6px; background: #3f3f46; border-radius: 999px;"></div>
+      <div class="absolute bottom-0" style="width: 0.75rem; height: 3px; background: #71717a; border-radius: 999px;"></div>
+      <div class="absolute top-0" style="width: 6px; height: 4px; background: #3f3f46; border-radius: 999px;"></div>
     </div>
   </div>
 {:else}
