@@ -1267,53 +1267,111 @@ class TestWeightFirstCrossDay:
         """Cross-day lookup must accept unilateral sets that store performance in
         reps_left/reps_right even when actual_reps is null (legacy data path).
 
-        Scenario:
+        Scenario (updated for no-prior = week-1 rule):
           - Unilateral exercise on both Day 1 and Day 2 of a weight-first plan
-          - Day 1 completed with reps_left/reps_right but actual_reps nulled out
-          - Day 2 has never been done → cross-day should pick up Day 1's side reps
+          - Week 1: do both Day 2 (prior) and Day 1
+          - Week 2: Day 1 done with reps_left/reps_right (actual_reps nulled out)
+          - New Day 2 → cross-day picks up more-recent Day 1's side reps
           - planned_reps_left / planned_reps_right must be populated
         """
         ex = await create_exercise(client, name="unilateral_row", display_name="Single-Arm Row",
                                    is_unilateral=True)
         plan = await self._create_two_day_plan(client, ex["id"], reps=8)
 
-        # Complete Day 1 with unilateral side reps only (actual_reps left null)
-        d1 = await start_session_from_plan(client, plan["id"], day=1, overload_style="weight")
-        for s in d1["sets"]:
+        # Week 1: complete Day 2 so there IS a same-day prior for the next Day 2
+        d2_w1 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
+        for s in d2_w1["sets"]:
             r = await client.patch(
-                f"/api/sessions/{d1['id']}/sets/{s['id']}",
-                json={
-                    "actual_weight_kg": 30.0,
-                    "reps_left": 8,
-                    "reps_right": 8,
-                    "completed_at": "2024-01-01T10:00:00",
-                },
+                f"/api/sessions/{d2_w1['id']}/sets/{s['id']}",
+                json={"actual_weight_kg": 30.0, "reps_left": 8, "reps_right": 8,
+                      "completed_at": "2024-01-01T09:00:00"},
             )
             assert r.status_code == 200, r.text
+        await client.post(f"/api/sessions/{d2_w1['id']}/complete")
 
-        complete = await client.post(f"/api/sessions/{d1['id']}/complete")
-        assert complete.status_code == 200, complete.text
+        # Week 2: complete Day 1 with unilateral side reps (actual_reps null) — more recent
+        d1_w2 = await start_session_from_plan(client, plan["id"], day=1, overload_style="weight")
+        for s in d1_w2["sets"]:
+            r = await client.patch(
+                f"/api/sessions/{d1_w2['id']}/sets/{s['id']}",
+                json={"actual_weight_kg": 32.5, "reps_left": 8, "reps_right": 8,
+                      "completed_at": "2024-01-08T10:00:00"},
+            )
+            assert r.status_code == 200, r.text
+        await client.post(f"/api/sessions/{d1_w2['id']}/complete")
 
-        # Confirm actual_reps is null in DB (simulates legacy / unilateral-only path)
+        # Null actual_reps to simulate legacy / unilateral-only data path
         from sqlalchemy import select as sa_select
         rows = await db.execute(
-            sa_select(ExerciseSet).where(ExerciseSet.workout_session_id == d1["id"])
+            sa_select(ExerciseSet).where(ExerciseSet.workout_session_id == d1_w2["id"])
         )
         for row in rows.scalars().all():
-            assert row.actual_reps is None, "actual_reps should be null for this test"
-            row.actual_reps = None  # ensure null (already is, but explicit)
+            row.actual_reps = None
         await db.commit()
 
-        # Start Day 2 for the first time — no same-day prior, cross-day should
-        # pick up Day 1's reps_left=8/reps_right=8 and return per-side suggestions.
-        d2 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
-        first_set = d2["sets"][0]
+        # New Day 2 — same-day prior exists (d2_w1), cross-day picks up Day 1's
+        # more-recent reps_left=8/reps_right=8 and returns per-side suggestions.
+        d2_w2 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
+        first_set = d2_w2["sets"][0]
         assert first_set["planned_weight_kg"] is not None, \
             "Cross-day unilateral: planned_weight_kg should be populated from Day 1 data"
         assert first_set["planned_reps_left"] is not None, \
             "Cross-day unilateral: planned_reps_left should be populated from Day 1 reps_left"
         assert first_set["planned_reps_right"] is not None, \
             "Cross-day unilateral: planned_reps_right should be populated from Day 1 reps_right"
+
+    async def test_cross_day_unilateral_both_sides_prefilled(self, client: AsyncClient):
+        """Cross-day prefill for a unilateral exercise must populate BOTH sides.
+
+        Scenario (#820 — cross-day doubles sets):
+          - Unilateral exercise on Day 1 and Day 2, weight-first plan, 2 sets each
+          - Week 1: complete Day 2 (establishes same-day prior)
+          - Week 2: complete Day 1 at 30 kg, left=8, right=7 (right side weaker)
+          - New Day 2 → cross-day from Day 1 week 2 should fill BOTH left and right
+          - planned_reps_left ≥ 8, planned_reps_right ≥ 7
+          - Set count must remain 2 (not doubled to 4)
+        """
+        ex = await create_exercise(client, name="single_arm_cable_row",
+                                   display_name="Single-Arm Cable Row",
+                                   is_unilateral=True)
+        plan = await self._create_two_day_plan(client, ex["id"], reps=8)
+
+        # Week 1: establish Day 2 same-day prior at baseline
+        d2_w1 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
+        for s in d2_w1["sets"]:
+            await client.patch(
+                f"/api/sessions/{d2_w1['id']}/sets/{s['id']}",
+                json={"actual_weight_kg": 27.5, "reps_left": 8, "reps_right": 8,
+                      "completed_at": "2024-01-01T09:00:00"},
+            )
+        await client.post(f"/api/sessions/{d2_w1['id']}/complete")
+
+        # Week 2: Day 1 with asymmetric side reps (right side slightly weaker)
+        d1_w2 = await start_session_from_plan(client, plan["id"], day=1, overload_style="weight")
+        for s in d1_w2["sets"]:
+            await client.patch(
+                f"/api/sessions/{d1_w2['id']}/sets/{s['id']}",
+                json={"actual_weight_kg": 30.0, "reps_left": 8, "reps_right": 7,
+                      "completed_at": "2024-01-08T10:00:00"},
+            )
+        await client.post(f"/api/sessions/{d1_w2['id']}/complete")
+
+        # New Day 2 — must get cross-day data from Day 1 week 2 (more recent).
+        d2_w2 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
+        assert len(d2_w2["sets"]) == 3, \
+            f"Set count must not double: expected 3 (per plan), got {len(d2_w2['sets'])}"
+
+        first_set = d2_w2["sets"][0]
+        assert first_set["planned_weight_kg"] is not None, \
+            "Cross-day: planned_weight_kg should come from Day 1 week 2"
+        assert first_set["planned_reps_left"] is not None, \
+            "Cross-day: left arm should be prefilled (#820 fix)"
+        assert first_set["planned_reps_right"] is not None, \
+            "Cross-day: right arm should be prefilled (#820 fix)"
+        assert first_set["planned_reps_left"] >= 8, \
+            f"Left arm should progress ≥8, got {first_set['planned_reps_left']}"
+        assert first_set["planned_reps_right"] >= 7, \
+            f"Right arm should progress ≥7, got {first_set['planned_reps_right']}"
 
     async def test_rep_style_miss_still_shows_plan_target(self, client: AsyncClient):
         """Rep-first miss: suggestion still shows the planned target (not actual reps).

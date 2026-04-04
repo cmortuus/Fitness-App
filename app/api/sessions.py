@@ -1232,18 +1232,23 @@ async def create_session_from_plan(
                     )
                     .order_by(ExerciseSet.id)
                 )
-                _cdx: dict[int, int] = {}
+                # Track per-(exercise, set_type) counter so left and right arm
+                # sets get independent 1-based indices rather than a shared
+                # global counter.  This prevents right-arm sets from having
+                # non-sequential keys after left-arm sets fill indices 1-N.
+                _cdx: dict[tuple, int] = {}
                 _cd_found: set[int] = set()
                 for _cs in _cd_sets_q.scalars().all():
                     _rep_ev = _set_rep_evidence(_cs)
                     if _rep_ev is None:
                         continue
                     _ex_id = _cs.exercise_id
+                    _cd_stype = _cs.set_type or "standard"
                     if _ex_id not in cross_day_set_data:
                         cross_day_set_data[_ex_id] = {}
-                        _cdx[_ex_id] = 0
-                    _cdx[_ex_id] = _cdx.get(_ex_id, 0) + 1
-                    _si = _cdx[_ex_id]
+                    _cd_type_key = (_ex_id, _cd_stype)
+                    _cdx[_cd_type_key] = _cdx.get(_cd_type_key, 0) + 1
+                    _si = _cdx[_cd_type_key]
                     _wt = _cs.actual_weight_kg
                     _ex_m = exercise_model_map.get(_ex_id)
                     if _ex_m and _ex_m.is_assisted and body_weight_kg > 0 and _wt > body_weight_kg * 0.5:
@@ -1448,13 +1453,22 @@ async def create_session_from_plan(
                 weight_kg = round(epley_weight_for_reps(prior_w, prior_r, effective_reps) / 2.5) * 2.5
             return weight_kg, tr, None, None
 
-        # Filter prior sets to only those matching the current set_type
-        matched_sets = {
+        # Filter prior sets to only those matching the current set_type, then
+        # re-index to 1-based within that type.  Cross-day data stores sets
+        # with a global per-exercise counter (left sets at 1-N, right sets at
+        # N+1-2N), so after type-filtering the keys may be non-sequential.
+        # Re-indexing ensures matched_sets.get(set_num=1) always hits the first
+        # set of that type, regardless of global index position.
+        matched_raw = {
             k: v for k, v in ex_sets.items()
             if v.get("set_type", "standard") == current_set_type
         }
-        if not matched_sets:
+        if not matched_raw:
             return None, None, None, None
+        matched_sets = {
+            i + 1: matched_raw[k]
+            for i, k in enumerate(sorted(matched_raw.keys()))
+        }
 
         prior_set = matched_sets.get(set_num) or matched_sets.get(1) or matched_sets[min(matched_sets.keys())]
         target_rir = resolve_rir_override(
