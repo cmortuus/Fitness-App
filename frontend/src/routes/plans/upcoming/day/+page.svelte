@@ -368,6 +368,24 @@
                 class="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-white"
               />
             </label>
+
+            <label class="space-y-1">
+              <span class="text-xs uppercase tracking-wide text-zinc-500">Max Weight Cap (kg)</span>
+              <input
+                type="number"
+                min="0"
+                step="2.5"
+                placeholder="No cap"
+                value={exercise.max_weight_kg ?? ''}
+                oninput={(event) => {
+                  const raw = (event.target as HTMLInputElement).value;
+                  const value = raw === '' ? null : Number.parseFloat(raw);
+                  updateExercise(index, (current) => ({ ...current, max_weight_kg: value && value > 0 ? value : null }));
+                }}
+                class="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-white"
+              />
+              <span class="text-xs text-zinc-600">Overload will never suggest above this weight.</span>
+            </label>
           </div>
 
           <div class="px-5 pb-5 space-y-3">
