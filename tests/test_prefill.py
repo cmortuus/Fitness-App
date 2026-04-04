@@ -1340,14 +1340,15 @@ class TestWeightFirstCrossDay:
         assert s2_by_num[3]["planned_reps"] == 8, \
             f"Rep-style miss: expected 8 (plan target), got {s2_by_num[3]['planned_reps']}"
 
-    async def test_cross_day_still_used_when_no_same_day_history(self, client: AsyncClient):
-        """Weight-first: cross-day data is still the fallback when an exercise
-        has never been done on this specific plan day (#800).
+    async def test_no_cross_day_when_no_same_day_history(self, client: AsyncClient):
+        """Weight-first: no cross-day fallback when the equivalent day has never
+        been done. Treat it as week 1 (no prefill) — safer than guessing from
+        a different day's data.
 
         Scenario:
           - Exercise on Day 1 at 100 kg × 8 (same-plan, different day)
           - Day 2 has never been done (no same-day prior for Day 2)
-          - New Day 2 → should fall back to Day 1's cross-day data
+          - New Day 2 → week 1 behavior, no prefill from Day 1
         """
         ex = await create_exercise(client)
         plan = await self._create_two_day_plan(client, ex["id"], reps=8)
@@ -1357,9 +1358,8 @@ class TestWeightFirstCrossDay:
         for s in d1["sets"]:
             await log_set(client, d1["id"], s["id"], 100.0, 8)
 
-        # Day 2 first session — no same-day prior, must fall back to Day 1 cross-day
+        # Day 2 first session — no same-day prior → week 1, no cross-day prefill
         d2 = await start_session_from_plan(client, plan["id"], day=2, overload_style="weight")
         for s in d2["sets"]:
-            assert s["planned_weight_kg"] is not None, \
-                "Should have weight suggestion from cross-day fallback when no same-day history"
-            assert s["planned_weight_kg"] > 0, "Weight must be positive"
+            assert s["planned_weight_kg"] is None, \
+                "No same-day history → week 1 behavior, planned_weight_kg should be null"
