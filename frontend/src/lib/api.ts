@@ -336,7 +336,7 @@ export interface ProgressionRecommendation {
 // API Functions
 
 // Sessions
-export async function getSessions(params?: { limit?: number; offset?: number }): Promise<WorkoutSession[]> {
+export async function getSessions(params?: { limit?: number; offset?: number; status_filter?: string }): Promise<WorkoutSession[]> {
   const response = await api.get('/sessions/', { params });
   return response.data;
 }
