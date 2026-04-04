@@ -940,6 +940,12 @@ async def delete_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workout session {session_id} not found",
         )
+    # Delete exercise_feedback entries first (FK references this session)
+    feedback_result = await db.execute(
+        select(ExerciseFeedback).where(ExerciseFeedback.session_id == session_id)
+    )
+    for f in feedback_result.scalars().all():
+        await db.delete(f)
     await db.delete(workout_session)
     await db.flush()
 
@@ -1073,8 +1079,13 @@ async def create_session_from_plan(
             existing_planned = await _get_session_with_sets(db, existing_planned.id, user_id=user.id)
             return serialize_session(existing_planned)
         else:
-            # Stale session — delete its sets then the session itself so we fall
-            # through and regenerate with up-to-date overload suggestions.
+            # Stale session — delete feedback, sets, then the session itself so
+            # we fall through and regenerate with up-to-date overload suggestions.
+            stale_feedback = await db.execute(
+                select(ExerciseFeedback).where(ExerciseFeedback.session_id == existing_planned.id)
+            )
+            for f in stale_feedback.scalars().all():
+                await db.delete(f)
             for s in existing_sets:
                 await db.delete(s)
             await db.delete(existing_planned)
