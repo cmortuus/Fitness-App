@@ -204,7 +204,44 @@
     return { planned, completed };
   })());
 
-  let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
+  // ── Recent Workouts pagination ─────────────────────────────────────────
+  const PAGE_SIZE_OPTIONS = [5, 10, 20];
+  let recentPage     = $state(0);
+  let recentPageSize = $state(
+    parseInt(typeof localStorage !== 'undefined' ? (localStorage.getItem('recent_page_size') ?? '5') : '5') || 5
+  );
+  let recentSessionsList = $state<WorkoutSession[]>([]);
+  let recentHasMore      = $state(false);
+  let recentLoading      = $state(false);
+
+  async function loadRecentSessions() {
+    recentLoading = true;
+    try {
+      const sessions = await getSessions({
+        limit: recentPageSize + 1,   // fetch one extra to detect whether there's a next page
+        offset: recentPage * recentPageSize,
+        status_filter: 'completed',
+      });
+      recentHasMore = sessions.length > recentPageSize;
+      recentSessionsList = sessions.slice(0, recentPageSize);
+    } catch (e) {
+      console.error('Failed to load recent sessions:', e);
+    } finally {
+      recentLoading = false;
+    }
+  }
+
+  $effect(() => {
+    // Re-run whenever page or page size changes (after mount)
+    recentPage; recentPageSize;
+    loadRecentSessions();
+  });
+
+  function setRecentPageSize(n: number) {
+    recentPageSize = n;
+    recentPage = 0;
+    if (typeof localStorage !== 'undefined') localStorage.setItem('recent_page_size', String(n));
+  }
   let quickChartCards = $derived.by(() => {
     const grouped = new Map<string, ProgressMetric[]>();
     for (const metric of progressMetrics) {
@@ -1200,10 +1237,10 @@
           <p class="text-[10px] text-zinc-500">{volUnit()} this wk</p>
         </div>
       </div>
-      <!-- Last 5 workouts compact list -->
-      {#if recentSessions.length > 0}
+      <!-- Last 3 workouts compact list -->
+      {#if recentSessionsList.length > 0}
         <div class="space-y-1">
-          {#each recentSessions.slice(0, 3) as s}
+          {#each recentSessionsList.slice(0, 3) as s}
             {@const historyHref = workoutHistoryHref(s.name)}
             {#if historyHref}
               <a href={historyHref}
@@ -1225,16 +1262,31 @@
 
   {:else if widget.id === 'recentSessions'}
   <!-- ── Recent sessions ─────────────────────────────────────────────── -->
-  {#if recentSessions.length > 0}
-    <div class="card">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-zinc-200">Recent Workouts</h3>
+  <div class="card">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-semibold text-zinc-200">Recent Workouts</h3>
+      <div class="flex items-center gap-2">
+        <!-- Page size selector -->
+        <select
+          value={recentPageSize}
+          onchange={(e) => setRecentPageSize(parseInt((e.target as HTMLSelectElement).value))}
+          class="text-xs bg-zinc-800 border border-zinc-700 text-zinc-400 rounded px-1.5 py-0.5 focus:outline-none focus:border-primary-500"
+        >
+          {#each PAGE_SIZE_OPTIONS as n}
+            <option value={n}>{n} / page</option>
+          {/each}
+        </select>
         <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">
-          View Progress →
+          Progress →
         </a>
       </div>
+    </div>
+
+    {#if recentLoading}
+      <div class="text-xs text-zinc-500 text-center py-4">Loading…</div>
+    {:else if recentSessionsList.length > 0}
       <div class="space-y-1">
-        {#each recentSessions as s}
+        {#each recentSessionsList as s}
           {@const historyHref = workoutHistoryHref(s.name)}
           {#if historyHref}
             <a href={historyHref}
@@ -1262,8 +1314,31 @@
           {/if}
         {/each}
       </div>
-    </div>
-  {/if}
+
+      <!-- Prev / Next navigation -->
+      {#if recentPage > 0 || recentHasMore}
+        <div class="flex items-center justify-between mt-3 pt-2 border-t border-zinc-800/60">
+          <button
+            onclick={() => { recentPage = Math.max(0, recentPage - 1); }}
+            disabled={recentPage === 0}
+            class="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            ← Prev
+          </button>
+          <span class="text-xs text-zinc-500">Page {recentPage + 1}</span>
+          <button
+            onclick={() => { recentPage += 1; }}
+            disabled={!recentHasMore}
+            class="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      {/if}
+    {:else}
+      <p class="text-xs text-zinc-500 text-center py-4">No workouts yet</p>
+    {/if}
+  </div>
 
   {/if}
   </div>
