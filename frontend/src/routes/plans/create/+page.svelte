@@ -98,6 +98,7 @@
   let configRepsMax = $state(getDefaultDoubleProgressionRange().max);
   let configSetType = $state('standard');
   let configDrops = $state<number | null>(null);
+  let configMaxWeightKg = $state<number | null>(null);
 
   // Drag and drop state
   let draggedExercise = $state<{ dayNum: number; index: number; exercise: PlannedExercise } | null>(null);
@@ -313,6 +314,7 @@
     configRepsMax = defaultRange.max;
     configSetType = 'standard';
     configDrops = null;
+    configMaxWeightKg = null;
   }
 
   function addExerciseToDay() {
@@ -332,6 +334,7 @@
       notes: null,
       set_type: configSetType,
       drops: configSetType === 'drop_set' ? configDrops : null,
+      max_weight_kg: configMaxWeightKg,
       _uiId: nextExUiId(),
     };
 
@@ -1118,6 +1121,23 @@
               <input type="number" bind:value={configDrops} min="1" max="5" placeholder="On-the-fly" class="input !py-1 text-sm w-20" />
             </div>
           {/if}
+
+          <div>
+            <label class="text-xs text-zinc-500">Max Weight Cap (kg)</label>
+            <input
+              type="number"
+              min="0"
+              step="2.5"
+              placeholder="No cap"
+              value={configMaxWeightKg ?? ''}
+              oninput={(event) => {
+                const raw = (event.target as HTMLInputElement).value;
+                configMaxWeightKg = raw === '' ? null : (Number.parseFloat(raw) || null);
+              }}
+              class="input !py-1 text-sm w-28"
+            />
+            <p class="text-xs text-zinc-600 mt-0.5">Overload will never suggest above this weight.</p>
+          </div>
 
           <div class="flex justify-between gap-3">
             <button

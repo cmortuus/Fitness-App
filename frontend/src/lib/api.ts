@@ -253,6 +253,7 @@ export interface PlannedExercise {
   drops?: number | null;
   group_id?: string | null;
   group_type?: 'superset' | 'circuit' | null;
+  max_weight_kg?: number | null;
 }
 
 export interface PlanRirOverrides {

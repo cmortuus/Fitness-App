@@ -1556,6 +1556,7 @@ async def create_session_from_plan(
         exercise_block_id = exercise_data.get("block_id") or str(uuid4())
         sets = exercise_data.get("sets", 3)
         reps = exercise_data.get("reps", 8)
+        plan_max_weight_kg: float | None = exercise_data.get("max_weight_kg") or None
 
         ex_model = exercise_model_map.get(exercise_id) if exercise_id else None
 
@@ -1665,6 +1666,10 @@ async def create_session_from_plan(
                     factor = max(0.70, min(1.30, 1.0 - delta * FATIGUE_PER_SIMILAR_SET))
                     weight_kg = round(weight_kg * factor / 2.5) * 2.5
                     is_extrapolated = True
+
+            # Apply per-exercise weight cap from plan config (#806)
+            if plan_max_weight_kg and weight_kg is not None and weight_kg > plan_max_weight_kg:
+                weight_kg = plan_max_weight_kg
 
             # Save set 1's values for myo_rep_match copying
             if set_num == 1:
