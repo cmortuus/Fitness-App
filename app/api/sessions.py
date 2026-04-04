@@ -1,7 +1,7 @@
 """Workout session API endpoints."""
 
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Annotated
 from uuid import uuid4
 
@@ -1176,11 +1176,18 @@ async def create_session_from_plan(
     # same-day prior are eligible; when there is no same-day prior at all, any
     # same-plan session qualifies (fills the gap before cross-meso kicks in).
     cross_day_set_data: dict[int, dict[int, dict]] = {}
-    if overload_style == "weight" and day_exercise_ids:
+    # Cross-day lookup only runs when there IS a valid same-day prior session.
+    # If the equivalent day was skipped (no prior) treat this as week 1 — safer
+    # than guessing from a different day's data.
+    # Sessions from the current training week (Mon–Sun) are also excluded: using
+    # same-week data mixes intra-week fatigue into the overload signal.
+    _this_week_start = date.today() - timedelta(days=date.today().weekday())
+    if overload_style == "weight" and day_exercise_ids and prior_session:
         _cd_conds: list = [
             WorkoutSession.workout_plan_id == plan_id,
             WorkoutSession.user_id == user.id,
             WorkoutSession.id.in_(sessions_with_data),
+            WorkoutSession.date < _this_week_start,  # exclude current training week
         ]
         if prior_session:
             # Sessions are "more recent" if they have a later date, OR if they
@@ -1563,20 +1570,32 @@ async def create_session_from_plan(
                 planned_left = set1_left
                 planned_right = set1_right
             elif overload_style == "weight" and set_num > 1 and set1_weight_kg is not None:
-                # Weight-first: all sets use set 1's weight so the bar is loaded
-                # the same across every set.  Independent per-set overload creates
-                # confusing descending weight ladders (e.g. 415/400/400) when later
-                # sets missed their rep target last session — the user just works
-                # the same weight and reps vary naturally with fatigue.
-                # Reps are still computed per-set (show actual prior reps as the
-                # target so the user knows what to expect from each set).
-                _, suggested_reps, planned_left, planned_right = \
-                    _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
-                weight_kg = set1_weight_kg
-                if suggested_reps is None:
-                    suggested_reps = set1_reps
-                    planned_left = set1_left
-                    planned_right = set1_right
+                # Weight-first: all sets normally use set 1's weight (one bar load).
+                # Exception: if the prior session used progressive loading (different
+                # weights across sets, e.g. 405/455/495 on leg press), each set
+                # overloads independently so the progression pattern is preserved.
+                prior_weights = {
+                    sn: sd.get("weight")
+                    for sn, sd in prior_sets.items()
+                    if sd.get("weight") is not None
+                }
+                is_progressive = len(prior_weights) > 1 and any(
+                    abs(w - list(prior_weights.values())[0]) > 2.5
+                    for w in list(prior_weights.values())[1:]
+                )
+                if is_progressive:
+                    # Per-set independent overload — preserve progressive weight pattern
+                    weight_kg, suggested_reps, planned_left, planned_right = \
+                        _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                else:
+                    # Uniform weight — all sets use set 1's weight, reps per-set
+                    _, suggested_reps, planned_left, planned_right = \
+                        _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                    weight_kg = set1_weight_kg
+                    if suggested_reps is None:
+                        suggested_reps = set1_reps
+                        planned_left = set1_left
+                        planned_right = set1_right
             elif double_weight_up:
                 # Double progression: all sets hit ceiling → weight up, reps reset
                 prior_sets_for_ex = prior_set_data.get(exercise_id, {})
