@@ -1459,9 +1459,9 @@ async def create_session_from_plan(
             if is_assisted and body_weight_kg > 0:
                 prior_net = max(0.0, body_weight_kg - prior_w)
                 net = epley_weight_for_reps(prior_net, prior_r, effective_reps)
-                weight_kg = max(0.0, round((body_weight_kg - net) / 2.5) * 2.5)
+                weight_kg = max(0.0, round(body_weight_kg - net, 2))
             else:
-                weight_kg = round(epley_weight_for_reps(prior_w, prior_r, effective_reps) / 2.5) * 2.5
+                weight_kg = epley_weight_for_reps(prior_w, prior_r, effective_reps)
             return weight_kg, tr, None, None
 
         # Filter prior sets to only those matching the current set_type, then
@@ -1629,7 +1629,7 @@ async def create_session_from_plan(
                     (s["weight"] for s in prior_sets_for_ex.values()), None
                 )
                 if prior_weight and prior_weight > 0:
-                    weight_kg = round((prior_weight + 2.5) / 2.5) * 2.5
+                    weight_kg = round(prior_weight + 2.5, 2)
                 else:
                     weight_kg = None
                 suggested_reps = reps  # reset to bottom of range
@@ -1664,7 +1664,7 @@ async def create_session_from_plan(
                     # Positive delta → more pre-fatigue → lower e1RM estimate.
                     # Clamp factor to [0.70, 1.30] to avoid absurd extrapolations.
                     factor = max(0.70, min(1.30, 1.0 - delta * FATIGUE_PER_SIMILAR_SET))
-                    weight_kg = round(weight_kg * factor / 2.5) * 2.5
+                    weight_kg = round(weight_kg * factor, 2)
                     is_extrapolated = True
 
             # Apply per-exercise weight cap from plan config (#806)
