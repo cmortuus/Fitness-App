@@ -1383,21 +1383,14 @@ async def create_session_from_plan(
 
         # Determine the effective planned target for the prior session's set.
         # Use the prior set's planned_reps (which includes overload progression).
-        # When prior_planned is None (first session — no target existed) AND
-        # the user's actual reps are close to the plan template (within 1 rep),
-        # treat actual reps as the baseline.  This prevents natural per-set
-        # fatigue drop-off (e.g. 8,7 across sets) from being treated as a
-        # "miss" that stalls progression on later sets.  If actual reps are
-        # well below the template (2+ reps short), it's a genuine miss.
+        # When prior_planned is None (first session — no target existed), the
+        # user's actual reps ARE the per-set baseline.  The plan template is
+        # only a week-1 estimate; once we have real data, each set progresses
+        # from its own actual performance.
         if prior_planned is not None and prior_planned > 0:
             planned = prior_planned
-        elif prior_planned is None and target_reps and target_reps > 0:
-            if prior_reps >= target_reps - 1:
-                # Within 1 rep of template — normal fatigue, use actual as baseline
-                planned = prior_reps
-            else:
-                # Well below template — genuine miss, retry at template target
-                planned = target_reps
+        elif prior_planned is None:
+            planned = prior_reps
         elif target_reps and target_reps > 0:
             planned = target_reps
         else:
