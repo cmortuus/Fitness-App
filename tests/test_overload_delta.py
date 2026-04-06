@@ -41,7 +41,7 @@ class TestOverloadDelta:
         # Week 3: overloaded from week 2
         w3 = await start_session_from_plan(client, plan["id"], overload_style=style)
         w3_by = {s["set_number"]: s for s in w3["sets"]}
-        print(f"  Week 3 suggestions:")
+        print("  Week 3 suggestions:")
         for sn in [1, 2, 3]:
             w3r = w3_by[sn]["planned_reps"]
             actual_prev = w2_actuals[sn]
@@ -169,7 +169,7 @@ class TestOverloadDelta:
             # Week 3
             w3 = await start_session_from_plan(client, plan["id"], overload_style=style)
             w3_by = {s["set_number"]: s for s in w3["sets"]}
-            print(f"  Week 3:")
+            print("  Week 3:")
             for sn in [1, 2, 3]:
                 reps = w3_by[sn]["planned_reps"]
                 delta = (reps - w2_actuals[sn]) if reps else None
@@ -282,7 +282,7 @@ class TestOverloadDelta:
         # Week 2
         w2 = await start_session_from_plan(client, plan["id"], overload_style="weight")
         w2_by = {s["set_number"]: s for s in w2["sets"]}
-        print(f"\nWeek 2 suggestions:")
+        print("\nWeek 2 suggestions:")
         for sn in [1, 2, 3]:
             print(f"  Set {sn}: reps={w2_by[sn]['planned_reps']}, weight={w2_by[sn]['planned_weight_kg']}")
 
@@ -296,7 +296,7 @@ class TestOverloadDelta:
         # Week 3
         w3 = await start_session_from_plan(client, plan["id"], overload_style="weight")
         w3_by = {s["set_number"]: s for s in w3["sets"]}
-        print(f"Week 3 suggestions:")
+        print("Week 3 suggestions:")
         for sn in [1, 2, 3]:
             reps = w3_by[sn]["planned_reps"]
             delta_from_actual = (reps - actuals_w2[sn]) if reps else None
@@ -368,7 +368,7 @@ class TestOverloadDelta:
         w2 = await start_session_from_plan(client, plan["id"], overload_style="weight")
         w2_by = {s["set_number"]: s for s in w2["sets"]}
 
-        print(f"\nWeek 2 (from 188.24 x 7,6,5):")
+        print("\nWeek 2 (from 188.24 x 7,6,5):")
         for sn in [1, 2, 3]:
             w = w2_by[sn]["planned_weight_kg"]
             r = w2_by[sn]["planned_reps"]
@@ -410,7 +410,7 @@ class TestOverloadDelta:
         w2 = await start_session_from_plan(client, plan["id"], overload_style="weight")
         w2_by = {s["set_number"]: s for s in w2["sets"]}
 
-        print(f"\nWeek 2 (all missed, from 100 x 6,5,4):")
+        print("\nWeek 2 (all missed, from 100 x 6,5,4):")
         for sn in [1, 2, 3]:
             w = w2_by[sn]["planned_weight_kg"]
             r = w2_by[sn]["planned_reps"]
