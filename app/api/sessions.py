@@ -1637,7 +1637,12 @@ async def create_session_from_plan(
                     (s["weight"] for s in standard_prior_sets.values() if s.get("weight")), None
                 )
                 if prior_weight and prior_weight > 0:
-                    weight_kg = round(prior_weight + 2.5, 2)
+                    # Bump by one minimum plate step.  The user already
+                    # accumulated reps (e.g. 8→12) so a small weight jump
+                    # + rep reset is appropriate.  Epley across the full
+                    # rep range would overshoot (e.g. +13% for 12→8).
+                    MIN_WEIGHT_STEP_KG = 1.25  # ≈ 2.75 lbs
+                    weight_kg = round(prior_weight + MIN_WEIGHT_STEP_KG, 2)
                 else:
                     weight_kg = None
                 suggested_reps = reps  # reset to bottom of range
