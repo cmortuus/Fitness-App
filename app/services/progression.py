@@ -38,7 +38,9 @@ def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> fl
     """Estimate the weight needed to achieve *target_reps* given that
     *weight* was lifted for *done_reps*, using the Epley 1RM formula.
 
-    Result is rounded to the nearest 2.5 kg (~5 lb plate increment).
+    Returns the raw calculated value rounded to 2 decimal places (kg).
+    Display-layer rounding (nearest 0.5 lbs / 0.25 kg) is handled by the
+    frontend so users see a precise suggestion they can adjust as needed.
     """
     # Guard: Epley is invalid for non-positive reps or dangerous target values
     if done_reps <= 0:
@@ -47,7 +49,7 @@ def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> fl
         target_reps = 1
     one_rm = weight * (1 + done_reps / 30)
     new_w = one_rm / (1 + target_reps / 30)
-    return round(new_w / 2.5) * 2.5
+    return round(new_w, 2)
 
 
 def adjust_load_for_target_rir(
@@ -78,7 +80,7 @@ def adjust_load_for_target_rir(
         if prior_net <= 0:
             return prior_weight
         easier_net = epley_weight_for_reps(prior_net, prior_reps, target_reps + target_rir)
-        return max(0.0, round((body_weight_kg - easier_net) / 2.5) * 2.5)
+        return max(0.0, round(body_weight_kg - easier_net, 2))
 
     return epley_weight_for_reps(prior_weight, prior_reps, target_reps + target_rir)
 
@@ -134,7 +136,7 @@ def compute_overload(
             # then convert back to assist amount.
             prior_net = body_weight_kg - prior_weight
             new_net = epley_weight_for_reps(prior_net, prior_reps + 1, prior_reps)
-            new_assist = max(0.0, round((body_weight_kg - new_net) / 2.5) * 2.5)
+            new_assist = max(0.0, round(body_weight_kg - new_net, 2))
             return new_assist, prior_reps
 
         # Rep-style (default): add a rep; reduce assist at bracket boundary
@@ -143,7 +145,7 @@ def compute_overload(
             return prior_weight, projected          # same assist, more reps
         else:
             # Bracket boundary — reduce assist by 2.5 kg (≈5 lbs) and hold reps
-            new_assist = max(0.0, round((prior_weight - 2.5) / 2.5) * 2.5)
+            new_assist = max(0.0, round(prior_weight - 2.5, 2))
             return new_assist, prior_reps
 
     # ── Pure bodyweight ────────────────────────────────────────────────────
@@ -193,7 +195,7 @@ def compute_overload(
             new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
             # Ensure at least one minimum increment (2.5 kg) when crossing a bracket
             if new_weight <= prior_weight:
-                new_weight = round((prior_weight + 2.5) / 2.5) * 2.5
+                new_weight = round(prior_weight + 2.5, 2)
             # Reset reps to bottom of current bracket (e.g., 14→10 for bracket 2)
             reset_reps = _bracket_floor(rep_bracket(prior_reps))
             return new_weight, reset_reps

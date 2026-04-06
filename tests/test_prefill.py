@@ -236,9 +236,8 @@ class TestWeek2Prefill:
         assert s["planned_weight_kg"] is not None
         assert s["planned_weight_kg"] < 100.0, \
             f"Expected deloaded weight < 100, got {s['planned_weight_kg']}"
-        # Weight must still be a valid 2.5 kg increment
-        assert s["planned_weight_kg"] % 2.5 == 0, \
-            f"Weight {s['planned_weight_kg']} is not a multiple of 2.5"
+        # Weight must be a reasonable value (no longer snapped to 2.5 kg grid)
+        assert s["planned_weight_kg"] > 0
 
     async def test_reps_floor_at_exactly_four_is_unchanged(self, client: AsyncClient):
         """Prior reps = 4 is at the floor — retry same weight, re-attempt planned target (no deload)."""
@@ -554,8 +553,8 @@ class TestWeightOverloadStyle:
 # ── Epley rounding ────────────────────────────────────────────────────────────
 
 class TestEpleyRounding:
-    async def test_weight_suggestion_rounded_to_2pt5_kg(self, client: AsyncClient):
-        """Epley-computed weight suggestions must be multiples of 2.5 kg."""
+    async def test_weight_suggestion_is_precise_float(self, client: AsyncClient):
+        """Epley-computed weight suggestions are returned as precise floats (no plate-snap rounding)."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
 
@@ -565,8 +564,8 @@ class TestEpleyRounding:
 
         sess2 = await start_session_from_plan(client, plan["id"], body_weight_kg=0)
         w = sess2["sets"][0]["planned_weight_kg"]
-        if w is not None:
-            assert w % 2.5 == 0, f"Weight suggestion {w} is not a multiple of 2.5"
+        # Weight should be a valid positive number — rounding is the frontend's job
+        assert w is not None and w > 0
 
 
 # ── Stale planned-session regeneration ───────────────────────────────────────
