@@ -1190,14 +1190,13 @@ class TestWeightFirstCrossDay:
             assert s["planned_reps"] == 8, \
                 f"Weight-first: reps should be 8, got {s['planned_reps']}"
 
-    async def test_weight_first_uniform_weight_per_set_reps(self, client: AsyncClient):
-        """Weight-first: all sets use the same weight (set 1 determines progression),
-        but reps track per-set so the user knows what to expect from each set.
+    async def test_weight_first_per_set_independent_progression(self, client: AsyncClient):
+        """Weight-first: each set progresses independently via Epley from its own
+        prior performance.  No weight inheritance between sets.
 
-        In practice the bar is loaded once — having set 1 at a higher weight and
-        sets 2/3 at a lower weight is impractical and confusing.  Set 1 hitting
-        its target means the weight goes up for the whole exercise; later sets
-        still show their actual prior reps as the rep target.
+        Set 1 hits target → weight bumps, reps reset.
+        Sets 2/3 missed → same weight, +1 rep from actual.
+        Each set's est-1RM advances by exactly one step.
         """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
@@ -1209,29 +1208,27 @@ class TestWeightFirstCrossDay:
         await log_set(client, w1["id"], sets_by_num[2]["id"], 100.0, 6)  # missed (6 < 8)
         await log_set(client, w1["id"], sets_by_num[3]["id"], 100.0, 5)  # missed (5 < 8)
 
-        # Week 2 (weight-first): uniform weight (set 1's progression), per-set reps
+        # Week 2 (weight-first): each set progresses independently
         w2 = await start_session_from_plan(client, plan["id"], overload_style="weight")
         s2_by_num = {s["set_number"]: s for s in w2["sets"]}
 
-        set1_weight = s2_by_num[1]["planned_weight_kg"]
-
-        # Set 1 hit target → weight increases
-        assert set1_weight > 100.0, \
+        # Set 1 hit target → weight bumps, reps reset to plan target (8)
+        assert s2_by_num[1]["planned_weight_kg"] > 100.0, \
             "Set 1 hit target: weight should increase beyond 100"
         assert s2_by_num[1]["planned_reps"] == 8, \
-            f"Set 1 hit target: expected 8 reps, got {s2_by_num[1]['planned_reps']}"
+            f"Set 1 hit target: expected 8 reps (reset), got {s2_by_num[1]['planned_reps']}"
 
-        # Sets 2 and 3 inherit set 1's weight (uniform bar load for the exercise)
-        assert abs(s2_by_num[2]["planned_weight_kg"] - set1_weight) < 0.01, \
-            f"Set 2: expected same weight as set 1 ({set1_weight}), got {s2_by_num[2]['planned_weight_kg']}"
-        assert abs(s2_by_num[3]["planned_weight_kg"] - set1_weight) < 0.01, \
-            f"Set 3: expected same weight as set 1 ({set1_weight}), got {s2_by_num[3]['planned_weight_kg']}"
-
-        # Reps progress per-set from first-session baselines
+        # Set 2 missed (6 < 8) → same weight, +1 rep from actual
+        assert s2_by_num[2]["planned_weight_kg"] == 100.0, \
+            f"Set 2 missed: weight should stay at 100, got {s2_by_num[2]['planned_weight_kg']}"
         assert s2_by_num[2]["planned_reps"] == 7, \
-            f"Set 2: expected 7 (progress from baseline 6), got {s2_by_num[2]['planned_reps']}"
+            f"Set 2 missed: expected 7 (+1 from actual 6), got {s2_by_num[2]['planned_reps']}"
+
+        # Set 3 missed (5 < 8) → same weight, +1 rep from actual
+        assert s2_by_num[3]["planned_weight_kg"] == 100.0, \
+            f"Set 3 missed: weight should stay at 100, got {s2_by_num[3]['planned_weight_kg']}"
         assert s2_by_num[3]["planned_reps"] == 6, \
-            f"Set 3: expected 6 (progress from baseline 5), got {s2_by_num[3]['planned_reps']}"
+            f"Set 3 missed: expected 6 (+1 from actual 5), got {s2_by_num[3]['planned_reps']}"
 
     async def test_cross_day_regression_falls_back_to_same_day_prior(self, client: AsyncClient):
         """Weight-first: if a more recent cross-day session has a LOWER weight than
