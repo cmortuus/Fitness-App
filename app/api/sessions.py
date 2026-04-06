@@ -1401,6 +1401,7 @@ async def create_session_from_plan(
             # as bodyweight for non-assisted exercises with no weight tracked.
             is_bodyweight=(not is_assisted) and (prior_weight is None or prior_weight <= 0),
             body_weight_kg=body_weight_kg,
+            plan_target_reps=target_reps if target_reps and target_reps > 0 else 0,
         )
         if target_rir is not None and target_rir > 0:
             suggested_weight = adjust_load_for_target_rir(

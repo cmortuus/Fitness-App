@@ -35,12 +35,12 @@
     return Math.round(v * 100) / 100;  // 2 decimal places only
   }
 
-  // Round weight to the nearest 0.5 lbs / 0.25 kg — precise enough for users
+  // Round weight to the nearest 2.5 lbs / 0.5 kg — matches standard plate increments
   // to see the ideal target and adjust to their available weights themselves.
   function roundWeight(w: number): number {
     return $settings.weightUnit === 'lbs'
-      ? Math.round(w * 2) / 2
-      : Math.round(w * 4) / 4;
+      ? Math.round(w / 2.5) * 2.5
+      : Math.round(w * 2) / 2;  // nearest 0.5 kg
   }
 
   // Round reps to nearest 5 (so suggestions are always 5, 10, 15, 20…)
