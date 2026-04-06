@@ -1375,6 +1375,7 @@ async def create_session_from_plan(
         target_reps: int,
         ex_model,
         target_rir: int | None = None,
+        ex_rep_range_top: int = 0,
     ) -> tuple[float | None, int | None]:
         """Compute overload for one side (or a bilateral set) given prior values."""
         if prior_reps is None or prior_reps <= 0:
@@ -1402,6 +1403,7 @@ async def create_session_from_plan(
             is_bodyweight=(not is_assisted) and (prior_weight is None or prior_weight <= 0),
             body_weight_kg=body_weight_kg,
             plan_target_reps=target_reps if target_reps and target_reps > 0 else 0,
+            rep_range_top=ex_rep_range_top,
         )
         if target_rir is not None and target_rir > 0:
             suggested_weight = adjust_load_for_target_rir(
@@ -1503,17 +1505,17 @@ async def create_session_from_plan(
             weight_kg, _ = _overload_for_side(
                 prior_weight, ref_reps,
                 prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
-                target_reps, ex_model, target_rir,
+                target_reps, ex_model, target_rir, ex_rep_range_top=rep_range_top,
             )
             _, new_reps_left = _overload_for_side(
                 prior_weight, left_reps,
                 prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
-                target_reps, ex_model,
+                target_reps, ex_model, ex_rep_range_top=rep_range_top,
             )
             _, new_reps_right = _overload_for_side(
                 prior_weight, right_reps,
                 prior_set.get("planned_reps_right") or prior_set.get("planned_reps"),
-                target_reps, ex_model,
+                target_reps, ex_model, ex_rep_range_top=rep_range_top,
             )
             # planned_reps = weaker side (conservative display)
             if new_reps_left is not None and new_reps_right is not None:
@@ -1526,6 +1528,7 @@ async def create_session_from_plan(
         weight_kg, planned_reps = _overload_for_side(
             prior_set["weight"], prior_set["reps"],
             prior_set.get("planned_reps"), target_reps, ex_model, target_rir,
+            ex_rep_range_top=rep_range_top,
         )
         return weight_kg, planned_reps, None, None
 
