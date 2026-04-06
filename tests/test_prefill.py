@@ -202,19 +202,23 @@ class TestWeek2Prefill:
             assert s["planned_reps"] == 9, \
                 f"set {s['set_number']}: expected 9 reps (8+1), got {s['planned_reps']}"
 
-    async def test_no_progression_if_reps_below_target(self, client: AsyncClient):
-        """If prior reps < planned reps (but >= 4 floor), retry same weight, re-attempt planned target."""
+    async def test_first_session_baseline_below_template(self, client: AsyncClient):
+        """First session actual reps establish per-set baseline even if below template.
+
+        Plan says 8 reps but user only manages 6 — that's the real baseline.
+        Next week should progress from 6 (→7), not retry at 8.
+        """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
 
         sess1 = await start_session_from_plan(client, plan["id"])
         for s in sess1["sets"]:
-            await log_set(client, sess1["id"], s["id"], 100.0, 6)  # missed target, but ≥ 4
+            await log_set(client, sess1["id"], s["id"], 100.0, 6)
 
         sess2 = await start_session_from_plan(client, plan["id"])
         for s in sess2["sets"]:
-            assert s["planned_reps"] == 8, \
-                f"set {s['set_number']}: expected 8 reps (re-attempt target), got {s['planned_reps']}"
+            assert s["planned_reps"] == 7, \
+                f"set {s['set_number']}: expected 7 reps (progress from baseline 6), got {s['planned_reps']}"
             assert abs(s["planned_weight_kg"] - 100.0) < 0.01, \
                 f"set {s['set_number']}: expected same weight 100, got {s['planned_weight_kg']}"
 
@@ -239,8 +243,8 @@ class TestWeek2Prefill:
         # Weight must be a reasonable value (no longer snapped to 2.5 kg grid)
         assert s["planned_weight_kg"] > 0
 
-    async def test_reps_floor_at_exactly_four_is_unchanged(self, client: AsyncClient):
-        """Prior reps = 4 is at the floor — retry same weight, re-attempt planned target (no deload)."""
+    async def test_reps_floor_at_exactly_four_progresses(self, client: AsyncClient):
+        """Prior reps = 4 is at the floor — baseline is 4, progress to 5."""
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=1, reps=8)
 
@@ -249,8 +253,8 @@ class TestWeek2Prefill:
 
         sess2 = await start_session_from_plan(client, plan["id"])
         s = sess2["sets"][0]
-        # 4 is at the floor, not below it — retry at planned target, don't deload
-        assert s["planned_reps"] == 8, f"Expected 8 (re-attempt target), got {s['planned_reps']}"
+        # 4 is at the floor — first session establishes baseline, progress from 4→5
+        assert s["planned_reps"] == 5, f"Expected 5 (progress from baseline 4), got {s['planned_reps']}"
         assert abs(s["planned_weight_kg"] - 100.0) < 0.01, \
             f"Expected same weight 100 at floor, got {s['planned_weight_kg']}"
 
@@ -261,10 +265,11 @@ class TestPerSetIndependence:
     async def test_each_set_progresses_from_its_own_prior_set(self, client: AsyncClient):
         """Each set in week 2 is progressed from the matching set in week 1.
 
+        First session establishes per-set baselines from actual reps.
         e.g. week 1: 100×8 / 100×7 / 100×6
-             week 2: set 1 hit target (8) → progress to 9 reps
-                     set 2 missed target (7 < 8) → re-attempt at 100×8
-                     set 3 missed target (6 < 8) → re-attempt at 100×8
+             week 2: set 1 baseline 8 → 9
+                     set 2 baseline 7 → 8
+                     set 3 baseline 6 → 7
         """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
@@ -276,20 +281,23 @@ class TestPerSetIndependence:
         await log_set(client, sess1["id"], sets_by_num[2]["id"], 100.0, 7)
         await log_set(client, sess1["id"], sets_by_num[3]["id"], 100.0, 6)
 
-        # Week 2: each set progresses from its own prior-session set
+        # Week 2: each set progresses from its own first-session baseline
         sess2 = await start_session_from_plan(client, plan["id"])
         s2_by_num = {s["set_number"]: s for s in sess2["sets"]}
 
-        # Set 1: hit target (8 reps) → progress to 9 reps at same weight
-        assert s2_by_num[1]["planned_reps"] == 9,        f"Set 1: expected 9, got {s2_by_num[1]['planned_reps']}"
+        # Set 1: baseline 8 → progress to 9
+        assert s2_by_num[1]["planned_reps"] == 9, \
+            f"Set 1: expected 9, got {s2_by_num[1]['planned_reps']}"
         assert s2_by_num[1]["planned_weight_kg"] == 100.0, "Set 1: expected 100.0 kg"
 
-        # Set 2: missed target (7 < 8) → retry at same weight, re-attempt planned target
-        assert s2_by_num[2]["planned_reps"] == 8,        f"Set 2: expected 8, got {s2_by_num[2]['planned_reps']}"
+        # Set 2: baseline 7 → progress to 8
+        assert s2_by_num[2]["planned_reps"] == 8, \
+            f"Set 2: expected 8, got {s2_by_num[2]['planned_reps']}"
         assert s2_by_num[2]["planned_weight_kg"] == 100.0, "Set 2: expected 100.0 kg"
 
-        # Set 3: missed target (6 < 8) → retry at same weight, re-attempt planned target
-        assert s2_by_num[3]["planned_reps"] == 8,        f"Set 3: expected 8, got {s2_by_num[3]['planned_reps']}"
+        # Set 3: baseline 6 → progress to 7
+        assert s2_by_num[3]["planned_reps"] == 7, \
+            f"Set 3: expected 7, got {s2_by_num[3]['planned_reps']}"
         assert s2_by_num[3]["planned_weight_kg"] == 100.0, "Set 3: expected 100.0 kg"
 
     async def test_extra_set_falls_back_gracefully(self, client: AsyncClient):
@@ -1219,11 +1227,11 @@ class TestWeightFirstCrossDay:
         assert abs(s2_by_num[3]["planned_weight_kg"] - set1_weight) < 0.01, \
             f"Set 3: expected same weight as set 1 ({set1_weight}), got {s2_by_num[3]['planned_weight_kg']}"
 
-        # Reps still track per-set (show what was actually achieved)
-        assert s2_by_num[2]["planned_reps"] == 6, \
-            f"Set 2: expected 6 reps (actual prior), got {s2_by_num[2]['planned_reps']}"
-        assert s2_by_num[3]["planned_reps"] == 5, \
-            f"Set 3: expected 5 reps (actual prior), got {s2_by_num[3]['planned_reps']}"
+        # Reps progress per-set from first-session baselines
+        assert s2_by_num[2]["planned_reps"] == 7, \
+            f"Set 2: expected 7 (progress from baseline 6), got {s2_by_num[2]['planned_reps']}"
+        assert s2_by_num[3]["planned_reps"] == 6, \
+            f"Set 3: expected 6 (progress from baseline 5), got {s2_by_num[3]['planned_reps']}"
 
     async def test_cross_day_regression_falls_back_to_same_day_prior(self, client: AsyncClient):
         """Weight-first: if a more recent cross-day session has a LOWER weight than
@@ -1372,12 +1380,11 @@ class TestWeightFirstCrossDay:
         assert first_set["planned_reps_right"] >= 7, \
             f"Right arm should progress ≥7, got {first_set['planned_reps_right']}"
 
-    async def test_rep_style_miss_still_shows_plan_target(self, client: AsyncClient):
-        """Rep-first miss: suggestion still shows the planned target (not actual reps).
+    async def test_rep_style_first_session_baselines(self, client: AsyncClient):
+        """Rep-first: first session establishes per-set baselines, all sets progress.
 
-        This is the existing rep-style behavior: when missed, re-attempt the
-        plan target to encourage reaching it.  Only weight-first changes this
-        to show actual reps.
+        Even if sets fell short of the plan template, the first session's actual
+        reps are the baseline — each set progresses independently from there.
         """
         ex = await create_exercise(client)
         plan = await create_plan(client, ex["id"], sets=3, reps=8)
@@ -1385,17 +1392,19 @@ class TestWeightFirstCrossDay:
         w1 = await start_session_from_plan(client, plan["id"])  # default: rep style
         sets_by_num = {s["set_number"]: s for s in w1["sets"]}
         await log_set(client, w1["id"], sets_by_num[1]["id"], 100.0, 8)
-        await log_set(client, w1["id"], sets_by_num[2]["id"], 100.0, 6)  # missed
-        await log_set(client, w1["id"], sets_by_num[3]["id"], 100.0, 5)  # missed
+        await log_set(client, w1["id"], sets_by_num[2]["id"], 100.0, 6)
+        await log_set(client, w1["id"], sets_by_num[3]["id"], 100.0, 5)
 
         w2 = await start_session_from_plan(client, plan["id"])  # rep style
         s2_by_num = {s["set_number"]: s for s in w2["sets"]}
 
-        # Rep style: missed sets should re-attempt planned target (8), not show actual reps
-        assert s2_by_num[2]["planned_reps"] == 8, \
-            f"Rep-style miss: expected 8 (plan target), got {s2_by_num[2]['planned_reps']}"
-        assert s2_by_num[3]["planned_reps"] == 8, \
-            f"Rep-style miss: expected 8 (plan target), got {s2_by_num[3]['planned_reps']}"
+        # All sets progress from their first-session baselines
+        assert s2_by_num[1]["planned_reps"] == 9, \
+            f"Set 1: expected 9 (baseline 8 + 1), got {s2_by_num[1]['planned_reps']}"
+        assert s2_by_num[2]["planned_reps"] == 7, \
+            f"Set 2: expected 7 (baseline 6 + 1), got {s2_by_num[2]['planned_reps']}"
+        assert s2_by_num[3]["planned_reps"] == 6, \
+            f"Set 3: expected 6 (baseline 5 + 1), got {s2_by_num[3]['planned_reps']}"
 
     async def test_no_cross_day_when_no_same_day_history(self, client: AsyncClient):
         """Weight-first: no cross-day fallback when the equivalent day has never
