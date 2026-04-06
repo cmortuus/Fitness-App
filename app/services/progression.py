@@ -94,6 +94,7 @@ def compute_overload(
     is_assisted: bool = False,
     is_bodyweight: bool = False,
     body_weight_kg: float = 0.0,
+    plan_target_reps: int = 0,
 ) -> tuple[float | None, int | None]:
     """Return ``(suggested_weight_kg, suggested_reps)`` for the next session.
 
@@ -112,6 +113,11 @@ def compute_overload(
         is_bodyweight:  True for pure bodyweight moves (weight == 0 / not tracked).
         body_weight_kg: User body weight, used for Epley on net load when
                         overload_style="weight" and is_assisted=True.
+        plan_target_reps: The original plan template rep count.  Used by
+                        weight-first to decide whether to add a rep or bump
+                        weight: reps accumulate until Epley says the weight
+                        increase would be ≥ MIN_WEIGHT_STEP_KG, then the
+                        weight jumps and reps reset to plan_target_reps.
 
     Returns:
         A ``(weight, reps)`` tuple.  Either component may be ``None`` when
@@ -180,8 +186,19 @@ def compute_overload(
 
     # Hit target: apply progression
     if overload_style == "weight":
-        new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-        return new_weight, prior_reps
+        # Weight-first accumulates reps until a meaningful weight bump is
+        # achievable, then jumps weight and resets reps to the plan target.
+        # This avoids sub-plate increments (e.g. +0.9 lbs) that the user
+        # can't actually load.
+        MIN_WEIGHT_STEP_KG = 1.25  # ≈ 2.75 lbs — smallest standard plate
+        reset_reps = plan_target_reps if plan_target_reps > 0 else planned_reps
+        new_weight = epley_weight_for_reps(
+            prior_weight, prior_reps + 1, reset_reps,
+        )
+        if new_weight - prior_weight >= MIN_WEIGHT_STEP_KG:
+            return new_weight, reset_reps
+        # Not enough for a real plate bump — add a rep instead
+        return prior_weight, prior_reps + 1
     elif overload_style == "double":
         # Double progression: add 1 rep per set. Weight increase is handled
         # at the caller level when ALL sets hit rep_range_top.
