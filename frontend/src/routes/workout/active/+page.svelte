@@ -9,8 +9,9 @@
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote, getPersonalRecords,
     saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
+    updatePlan,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, PlannedDay, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution, PersonalRecord } from '$lib/api';
+  import type { Exercise, WorkoutPlan, PlannedDay, PlannedExercise, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution, PersonalRecord } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
@@ -34,11 +35,12 @@
     return Math.round(v * 100) / 100;  // 2 decimal places only
   }
 
-  // Round weight to the nearest 5 lbs / 2.5 kg increment
+  // Round weight to the nearest 0.5 lbs / 0.25 kg — precise enough for users
+  // to see the ideal target and adjust to their available weights themselves.
   function roundWeight(w: number): number {
     return $settings.weightUnit === 'lbs'
-      ? Math.round(w / 5) * 5
-      : Math.round(w / 2.5) * 2.5;
+      ? Math.round(w * 2) / 2
+      : Math.round(w * 4) / 4;
   }
 
   // Round reps to nearest 5 (so suggestions are always 5, 10, 15, 20…)
@@ -209,6 +211,8 @@
   let finishing = $state(false);
   let syncToPlan = $state(true);
   let hasLinkedPlan = $state(false);
+  let activePlan = $state<WorkoutPlan | null>(null);
+  let activePlanDayNumber = $state<number | null>(null);
   let syncCount = $state<number | null>(null);
   let syncStructural = $state<number | null>(null);
   let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
@@ -1039,6 +1043,8 @@
     try {
       const bodyWtKg = $latestBodyWeight?.weight_kg ?? 0;
       const plan = await getPlan(planId);
+      activePlan = plan;
+      activePlanDayNumber = dayNumber;
       const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
       if (!day) throw new Error(`Plan ${planId} has no day ${dayNumber}`);
       let raw;
@@ -1242,6 +1248,12 @@
       workoutName = sess.name ?? 'Workout';
       hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
+      if (sess.workout_plan_id) {
+        try {
+          activePlan = await getPlan(sess.workout_plan_id);
+          activePlanDayNumber = sess.plan_day_number ?? null;
+        } catch { /* non-critical */ }
+      }
 
       if (sess.started_at) {
         startedAt = parseUtcMs(sess.started_at);
@@ -1947,6 +1959,41 @@
     [arr[idx], arr[target]] = [arr[target], arr[idx]];
     uiExercises = arr;
     saveSessionStructure();
+    persistReorderToPlan();
+  }
+
+  async function persistReorderToPlan() {
+    if (!activePlan || !activePlanDayNumber) return;
+    const day = activePlan.days.find(d => d.day_number === activePlanDayNumber);
+    if (!day) return;
+    const byBlockId = new Map<string, PlannedExercise>(
+      day.exercises.filter(e => e.block_id).map(e => [e.block_id!, e])
+    );
+    const newOrder = uiExercises
+      .map(ue => (ue.blockId ? byBlockId.get(ue.blockId) : undefined))
+      .filter((e): e is PlannedExercise => e != null);
+    // Append any plan exercises not represented in uiExercises
+    const included = new Set(newOrder.map(e => e.block_id));
+    const missing = day.exercises.filter(e => !included.has(e.block_id ?? ''));
+    const reordered = [...newOrder, ...missing];
+    const updatedDays = activePlan.days.map(d =>
+      d.day_number === activePlanDayNumber ? { ...d, exercises: reordered } : d
+    );
+    try {
+      const updated = await updatePlan(activePlan.id, {
+        name: activePlan.name,
+        description: activePlan.description ?? undefined,
+        block_type: activePlan.block_type,
+        duration_weeks: activePlan.duration_weeks,
+        number_of_days: activePlan.number_of_days,
+        days: updatedDays,
+        auto_progression: activePlan.auto_progression,
+        is_draft: activePlan.is_draft,
+      });
+      activePlan = updated;
+    } catch (err) {
+      console.error('Failed to persist exercise reorder to plan:', err);
+    }
   }
 
   async function removeExercise(exUiId: string) {

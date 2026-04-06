@@ -59,6 +59,7 @@
     const [moved] = exercises.splice(index, 1);
     exercises.splice(targetIndex, 0, moved);
     dayDraft = { ...dayDraft, exercises };
+    saveDay();
   }
 
   function removeExercise(index: number) {
