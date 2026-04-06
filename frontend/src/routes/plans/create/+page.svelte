@@ -513,7 +513,7 @@
     if (typeof localStorage === 'undefined') return;
     const draft = {
       name: newPlanName, description: newPlanDescription, blockType, durationWeeks,
-      numberOfDays, days, currentStep, savedAt: Date.now(),
+      numberOfDays, days, currentStep, createMode, savedAt: Date.now(),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   }
@@ -540,6 +540,7 @@
       numberOfDays = draft.numberOfDays || 3;
       days = ensureUiIds(draft.days || []);
       currentStep = draft.currentStep || 1;
+      createMode = draft.createMode || (currentStep > 1 ? 'scratch' : 'choose');
       return true;
     } catch { return false; }
   }
