@@ -540,13 +540,13 @@
   }
 
   function shouldShowRecovery(ex: UIExercise): boolean {
-    const firstSetDone = ex.sets.length > 0 && (ex.sets[0].done || ex.sets[0].skipped);
+    const firstSetDone = ex.sets.length > 0 && ex.sets[0].done;
     const notYetAsked = getRecoveryPromptMuscles(ex.exerciseId).length > 0;
     return firstSetDone && notYetAsked && showRecoveryPrompt[ex.uiId] !== false;
   }
 
   function shouldShowEffort(ex: UIExercise): boolean {
-    const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped);
+    const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped) && ex.sets.some(s => s.done);
     const alreadySubmitted = effortSubmitted.has(ex.exerciseId);
     return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
   }
