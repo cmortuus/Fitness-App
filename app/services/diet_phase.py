@@ -176,7 +176,7 @@ def weekly_adjustment(
     Returns {status, actual_rate_pct, suggestion, cal_adjustment}.
     """
     if current_avg is None or previous_avg is None or previous_avg <= 0:
-        return {"status": "no_data", "actual_rate_pct": None, "suggestion": "Log more weigh-ins for tracking.", "cal_adjustment": 0}
+        return {"status": "no_data", "actual_rate_pct": None, "suggestion": None, "cal_adjustment": 0}
 
     # Actual weekly rate of change (% of body weight)
     change_kg = previous_avg - current_avg  # positive = weight loss

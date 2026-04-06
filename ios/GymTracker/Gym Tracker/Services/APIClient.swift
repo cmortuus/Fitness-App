@@ -10,6 +10,13 @@ final class APIClient: Sendable {
         }
         return "https://lethal.dev/api"
     }()
+    private let branchCookiePreference: String? = {
+        guard let value = Bundle.main.object(forInfoDictionaryKey: "API_BRANCH_PREFERENCE") as? String else {
+            return nil
+        }
+        let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized.isEmpty ? nil : normalized
+    }()
     private let session: URLSession
     private let decoder: JSONDecoder
     private let encoder: JSONEncoder
@@ -18,14 +25,15 @@ final class APIClient: Sendable {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 8
         config.timeoutIntervalForResource = 15
-        // Route to the dev container via nginx cookie
-        let cookie = HTTPCookie(properties: [
-            .domain: "lethal.dev",
-            .path: "/",
-            .name: "gymtracker_branch",
-            .value: "dev",
-        ])!
-        config.httpCookieStorage?.setCookie(cookie)
+        if let branchCookiePreference {
+            let cookie = HTTPCookie(properties: [
+                .domain: "lethal.dev",
+                .path: "/",
+                .name: "gymtracker_branch",
+                .value: branchCookiePreference,
+            ])!
+            config.httpCookieStorage?.setCookie(cookie)
+        }
         session = URLSession(configuration: config)
 
         decoder = JSONDecoder()

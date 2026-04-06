@@ -5,12 +5,18 @@ import HealthKit
 /// Handles body weight sync, workout logging, and authorization.
 final class HealthKitManager: @unchecked Sendable {
     static let shared = HealthKitManager()
+    private let workoutBrandNames = ["GymTracker", "Onyx Intake", "Onyx Expenditure"]
+    private let backendSessionIdMetadataKey = "BackendSessionID"
 
     private let store = HKHealthStore()
 
     // Protected by MainActor access pattern — only mutated from async functions
     // called from .task modifiers which run on MainActor
     private(set) var isAuthorized = false
+    private(set) var isBodyWeightAuthorized = false
+    private(set) var isWorkoutAuthorized = false
+    private(set) var isEnergyAuthorized = false
+    var canWriteWorkouts: Bool { isWorkoutAuthorized && isEnergyAuthorized }
 
     // MARK: - Types we read/write
 
@@ -31,13 +37,37 @@ final class HealthKitManager: @unchecked Sendable {
 
     var isAvailable: Bool { HKHealthStore.isHealthDataAvailable() }
 
+    private func refreshAuthorizationState() {
+        guard isAvailable else {
+            isAuthorized = false
+            isBodyWeightAuthorized = false
+            isWorkoutAuthorized = false
+            isEnergyAuthorized = false
+            return
+        }
+
+        let bodyWeightStatus = store.authorizationStatus(
+            for: HKObjectType.quantityType(forIdentifier: .bodyMass)!
+        )
+        let workoutStatus = store.authorizationStatus(
+            for: HKObjectType.workoutType()
+        )
+        let energyStatus = store.authorizationStatus(
+            for: HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+        )
+
+        isBodyWeightAuthorized = (bodyWeightStatus == .sharingAuthorized)
+        isWorkoutAuthorized = (workoutStatus == .sharingAuthorized)
+        isEnergyAuthorized = (energyStatus == .sharingAuthorized)
+        isAuthorized = isBodyWeightAuthorized || canWriteWorkouts
+    }
+
     func requestAuthorization() async -> Bool {
         guard isAvailable else { return false }
         do {
             try await store.requestAuthorization(toShare: typesToWrite, read: typesToRead)
-            let status = store.authorizationStatus(
-                for: HKObjectType.quantityType(forIdentifier: .bodyMass)!)
-            isAuthorized = (status == .sharingAuthorized)
+            refreshAuthorizationState()
+            print("[HealthKit] Authorization refreshed. bodyWeight=\(isBodyWeightAuthorized) workout=\(isWorkoutAuthorized) energy=\(isEnergyAuthorized)")
             return isAuthorized
         } catch {
             print("[HealthKit] Auth error: \(error)")
@@ -46,10 +76,7 @@ final class HealthKitManager: @unchecked Sendable {
     }
 
     func checkAuthorization() {
-        guard isAvailable else { return }
-        let status = store.authorizationStatus(
-            for: HKObjectType.quantityType(forIdentifier: .bodyMass)!)
-        isAuthorized = (status == .sharingAuthorized)
+        refreshAuthorizationState()
     }
 
     // MARK: - Auto Sync
@@ -58,7 +85,7 @@ final class HealthKitManager: @unchecked Sendable {
     /// from HealthKit and syncs to backend if it's newer than what we have cached.
     func syncBodyWeightOnLaunch() async {
         checkAuthorization()
-        guard isAuthorized else { return }
+        guard isBodyWeightAuthorized else { return }
 
         guard let hkWeight = await readLatestBodyWeight() else { return }
 
@@ -128,7 +155,7 @@ final class HealthKitManager: @unchecked Sendable {
 
     /// Write a body weight sample to HealthKit
     func writeBodyWeight(kg: Double, date: Date = Date()) async {
-        guard isAuthorized else { return }
+        guard isBodyWeightAuthorized else { return }
         let type = HKObjectType.quantityType(forIdentifier: .bodyMass)!
         let quantity = HKQuantity(unit: .gramUnit(with: .kilo), doubleValue: kg)
         let sample = HKQuantitySample(type: type, quantity: quantity, start: date, end: date)
@@ -215,35 +242,42 @@ final class HealthKitManager: @unchecked Sendable {
     /// Formula: kcal = MET × bodyWeightKg × durationHours
     /// Write a workout from API session data to HealthKit
     func writeWorkoutFromAPI(
+        sessionId: Int? = nil,
         name: String,
         startDate: Date,
         endDate: Date,
         totalCalories: Double,
         totalSets: Int,
         totalVolume: Double
-    ) async {
-        guard isAuthorized else { return }
+    ) async -> Bool {
+        guard canWriteWorkouts else {
+            print("[HealthKit] Refusing workout sync for session \(sessionId.map(String.init) ?? "?") because workout authorization is incomplete. workout=\(isWorkoutAuthorized) energy=\(isEnergyAuthorized)")
+            return false
+        }
+
+        if let existingWorkout = await findExistingWorkout(
+            sessionId: sessionId,
+            name: name,
+            startDate: startDate,
+            endDate: endDate
+        ) {
+            print("[HealthKit] Skipping duplicate workout sync for session \(sessionId.map(String.init) ?? "?") because matching workout \(existingWorkout.uuid) already exists")
+            return true
+        }
 
         let calorieQuantity = HKQuantity(unit: .kilocalorie(), doubleValue: totalCalories)
 
-        let workout = HKWorkout(
-            activityType: .traditionalStrengthTraining,
-            start: startDate,
-            end: endDate,
-            workoutEvents: nil,
-            totalEnergyBurned: calorieQuantity,
-            totalDistance: nil,
-            metadata: [
-                HKMetadataKeyWorkoutBrandName: "GymTracker",
-                "WorkoutName": name,
-                "TotalSets": totalSets,
-                "TotalVolumeKg": totalVolume,
-            ]
-        )
+        let config = HKWorkoutConfiguration()
+        config.activityType = .traditionalStrengthTraining
+
+        let builder = HKWorkoutBuilder(healthStore: store, configuration: config, device: nil)
 
         do {
-            try await store.save(workout)
+            print("[HealthKit] Saving workout session \(sessionId.map(String.init) ?? "?") '\(name)' start=\(startDate) end=\(endDate) totalSets=\(totalSets) totalVolumeKg=\(totalVolume)")
 
+            try await builder.beginCollection(at: startDate)
+
+            // Add only the calorie sample — no heart rate samples attached
             let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
             let energySample = HKQuantitySample(
                 type: energyType,
@@ -251,11 +285,167 @@ final class HealthKitManager: @unchecked Sendable {
                 start: startDate,
                 end: endDate
             )
-            try await store.addSamples([energySample], to: workout)
+            try await builder.addSamples([energySample])
 
-            print("[HealthKit] Synced workout '\(name)': \(Int(totalCalories)) kcal")
+            try await builder.endCollection(at: endDate)
+
+            // Add metadata before finishing
+            var metadata: [String: Any] = [
+                HKMetadataKeyWorkoutBrandName: "Onyx Expenditure",
+                "WorkoutName": name,
+                "TotalSets": totalSets,
+                "TotalVolumeKg": totalVolume,
+            ]
+            if let sessionId {
+                metadata[backendSessionIdMetadataKey] = sessionId
+            }
+            try await builder.addMetadata(metadata)
+
+            try await builder.finishWorkout()
+
+            print("[HealthKit] Synced workout session \(sessionId.map(String.init) ?? "?") '\(name)': \(Int(totalCalories)) kcal")
+            return true
         } catch {
-            print("[HealthKit] Save workout error: \(error)")
+            print("[HealthKit] Save workout error for session \(sessionId.map(String.init) ?? "?") '\(name)': \(error)")
+            return false
         }
+    }
+
+    /// Delete workouts previously written by this app across legacy and current brand names.
+    func deleteAllGymTrackerWorkouts() async -> Int {
+        guard canWriteWorkouts else {
+            print("[HealthKit] Cannot delete workouts — no write authorization")
+            return 0
+        }
+
+        let workoutType = HKObjectType.workoutType()
+        let predicate = HKQuery.predicateForObjects(
+            withMetadataKey: HKMetadataKeyWorkoutBrandName,
+            allowedValues: workoutBrandNames
+        )
+
+        return await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(sampleType: workoutType, predicate: predicate, limit: HKObjectQueryNoLimit, sortDescriptors: nil) { [weak self] _, samples, error in
+                guard let self, let workouts = samples as? [HKWorkout], error == nil else {
+                    print("[HealthKit] Error querying workouts for deletion: \(error?.localizedDescription ?? "unknown")")
+                    continuation.resume(returning: 0)
+                    return
+                }
+
+                print("[HealthKit] Found \(workouts.count) branded workouts to delete")
+                guard !workouts.isEmpty else {
+                    continuation.resume(returning: 0)
+                    return
+                }
+
+                Task {
+                    var deletedWorkoutCount = 0
+
+                    do {
+                        for workout in workouts {
+                            let deleted = try await self.deleteWorkoutAndSamples(workout)
+                            if deleted {
+                                deletedWorkoutCount += 1
+                            }
+                        }
+                        print("[HealthKit] Deleted \(deletedWorkoutCount) branded workouts and their samples")
+                        continuation.resume(returning: deletedWorkoutCount)
+                    } catch {
+                        print("[HealthKit] Error deleting workouts: \(error.localizedDescription)")
+                        continuation.resume(returning: deletedWorkoutCount)
+                    }
+                }
+            }
+            store.execute(query)
+        }
+    }
+
+    private func deleteWorkoutAndSamples(_ workout: HKWorkout) async throws -> Bool {
+        let energySamples = try await loadEnergySamplesForDeletion(workout: workout)
+        if !energySamples.isEmpty {
+            try await store.delete(energySamples)
+        }
+        try await store.delete(workout)
+        return true
+    }
+
+    private func loadEnergySamplesForDeletion(workout: HKWorkout) async throws -> [HKSample] {
+        try await withCheckedThrowingContinuation { continuation in
+            let predicate = HKQuery.predicateForObjects(from: workout)
+            let energyType = HKObjectType.quantityType(forIdentifier: .activeEnergyBurned)!
+            let query = HKSampleQuery(
+                sampleType: energyType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                continuation.resume(returning: samples ?? [])
+            }
+            self.store.execute(query)
+        }
+    }
+
+    private func findExistingWorkout(
+        sessionId: Int?,
+        name: String,
+        startDate: Date,
+        endDate: Date
+    ) async -> HKWorkout? {
+        let workoutType = HKObjectType.workoutType()
+        let predicate = HKQuery.predicateForSamples(
+            withStart: startDate.addingTimeInterval(-60),
+            end: endDate.addingTimeInterval(60),
+            options: []
+        )
+
+        let workouts: [HKWorkout] = await withCheckedContinuation { continuation in
+            let query = HKSampleQuery(
+                sampleType: workoutType,
+                predicate: predicate,
+                limit: HKObjectQueryNoLimit,
+                sortDescriptors: nil
+            ) { _, samples, error in
+                if let error {
+                    print("[HealthKit] Existing workout lookup error: \(error.localizedDescription)")
+                    continuation.resume(returning: [])
+                    return
+                }
+                continuation.resume(returning: samples as? [HKWorkout] ?? [])
+            }
+            store.execute(query)
+        }
+
+        for workout in workouts {
+            guard workout.workoutActivityType == .traditionalStrengthTraining else { continue }
+            let metadata = workout.metadata ?? [:]
+            let brand = metadata[HKMetadataKeyWorkoutBrandName] as? String
+            guard brand.map({ workoutBrandNames.contains($0) }) ?? false else { continue }
+
+            if let sessionId,
+               let storedSessionId = metadata[backendSessionIdMetadataKey] as? NSNumber,
+               storedSessionId.intValue == sessionId {
+                return workout
+            }
+
+            if let sessionId,
+               let storedSessionId = metadata[backendSessionIdMetadataKey] as? String,
+               Int(storedSessionId) == sessionId {
+                return workout
+            }
+
+            let storedName = metadata["WorkoutName"] as? String
+            let sameName = storedName == name
+            let sameStart = abs(workout.startDate.timeIntervalSince(startDate)) < 1
+            let sameEnd = abs(workout.endDate.timeIntervalSince(endDate)) < 1
+            if sameName && sameStart && sameEnd {
+                return workout
+            }
+        }
+
+        return nil
     }
 }

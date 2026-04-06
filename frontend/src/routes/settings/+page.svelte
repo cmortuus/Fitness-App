@@ -1,10 +1,11 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { settings, latestBodyWeight } from '$lib/stores';
+  import { exercises, settings, latestBodyWeight } from '$lib/stores';
   import type { RestDurations } from '$lib/stores';
-  import { addBodyWeight, deleteBodyWeight, getBodyWeights, clearAuthTokens, getStoredUser, recalculateWeights } from '$lib/api';
+  import { addBodyWeight, createExercise, deleteBodyWeight, getBodyWeights, getExercises, clearAuthTokens, getStoredUser, recalculateWeights, updateExercise } from '$lib/api';
   import { writeBodyWeight, isHealthKitAvailable, requestHealthKitPermissions } from '$lib/healthkit';
   import { locale, setLocale, SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '$lib/i18n';
+  import type { BodyWeightEntry, Exercise } from '$lib/api';
 
   let healthKitAvailable = $state(false);
   let healthKitConnected = $state(false);
@@ -12,9 +13,58 @@
   async function connectHealthKit() {
     healthKitConnected = await requestHealthKitPermissions();
   }
-  import type { BodyWeightEntry } from '$lib/api';
 
   const currentUser = getStoredUser();
+
+  const movementTypes = [
+    { value: 'compound', label: 'Compound' },
+    { value: 'isolation', label: 'Isolation' },
+  ] as const;
+
+  const bodyRegions = [
+    { value: 'upper', label: 'Upper Body' },
+    { value: 'lower', label: 'Lower Body' },
+    { value: 'full_body', label: 'Full Body' },
+  ] as const;
+
+  const muscleGroups = [
+    { value: 'chest', label: 'Chest' },
+    { value: 'lats', label: 'Lats' },
+    { value: 'upper_back', label: 'Upper Back' },
+    { value: 'mid_back', label: 'Mid Back' },
+    { value: 'lower_back', label: 'Lower Back' },
+    { value: 'traps', label: 'Traps' },
+    { value: 'biceps', label: 'Biceps' },
+    { value: 'triceps', label: 'Triceps' },
+    { value: 'forearms', label: 'Forearms' },
+    { value: 'quadriceps', label: 'Quadriceps' },
+    { value: 'hamstrings', label: 'Hamstrings' },
+    { value: 'glutes', label: 'Glutes' },
+    { value: 'calves', label: 'Calves' },
+    { value: 'abs', label: 'Abs' },
+    { value: 'core', label: 'Core' },
+    { value: 'obliques', label: 'Obliques' },
+    { value: 'neck', label: 'Neck' },
+    { value: 'front_delts', label: 'Front Delts' },
+    { value: 'side_delts', label: 'Side Delts' },
+    { value: 'rear_delts', label: 'Rear Delts' },
+    { value: 'adductors', label: 'Adductors' },
+  ] as const;
+
+  let exerciseLibrary = $state<Exercise[]>([]);
+  let exerciseSearch = $state('');
+  let showExerciseEditor = $state(false);
+  let editingExercise = $state<Exercise | null>(null);
+  let savingExercise = $state(false);
+  let exerciseDisplayName = $state('');
+  let exerciseMovementType = $state<'compound' | 'isolation'>('compound');
+  let exerciseBodyRegion = $state<'upper' | 'lower' | 'full_body'>('upper');
+  let exercisePrimaryMuscles = $state<string[]>([]);
+  let exerciseSecondaryMuscles = $state<string[]>([]);
+  let exerciseDescription = $state('');
+  let exerciseIsUnilateral = $state(false);
+  let exerciseIsAssisted = $state(false);
+  let applyMode = $state<'future_only' | 'retroactive'>('future_only');
 
   // Collapsible sections
   let showBars = $state(false);
@@ -123,9 +173,134 @@
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
+  function muscleLabel(value: string): string {
+    return muscleGroups.find((m) => m.value === value)?.label ?? value.replace(/_/g, ' ');
+  }
+
+  function filteredExercises(): Exercise[] {
+    const query = exerciseSearch.trim().toLowerCase();
+    const sorted = [...exerciseLibrary].sort((a, b) => {
+      if (a.is_custom !== b.is_custom) return a.is_custom ? -1 : 1;
+      return a.display_name.localeCompare(b.display_name);
+    });
+    if (!query) return sorted;
+    return sorted.filter((exercise) =>
+      exercise.display_name.toLowerCase().includes(query) ||
+      exercise.name.toLowerCase().includes(query) ||
+      exercise.primary_muscles.some((muscle) => muscle.toLowerCase().includes(query))
+    );
+  }
+
+  async function refreshExerciseLibrary() {
+    const data = await getExercises();
+    exerciseLibrary = data;
+    exercises.set(data);
+  }
+
+  function resetExerciseForm() {
+    exerciseDisplayName = '';
+    exerciseMovementType = 'compound';
+    exerciseBodyRegion = 'upper';
+    exercisePrimaryMuscles = [];
+    exerciseSecondaryMuscles = [];
+    exerciseDescription = '';
+    exerciseIsUnilateral = false;
+    exerciseIsAssisted = false;
+    applyMode = 'future_only';
+  }
+
+  function openCreateExerciseEditor() {
+    editingExercise = null;
+    resetExerciseForm();
+    showExerciseEditor = true;
+  }
+
+  function openEditExerciseEditor(exercise: Exercise) {
+    editingExercise = exercise;
+    exerciseDisplayName = exercise.display_name;
+    exerciseMovementType = exercise.movement_type;
+    exerciseBodyRegion = exercise.body_region;
+    exercisePrimaryMuscles = [...exercise.primary_muscles];
+    exerciseSecondaryMuscles = [...exercise.secondary_muscles];
+    exerciseDescription = exercise.description ?? '';
+    exerciseIsUnilateral = exercise.is_unilateral;
+    exerciseIsAssisted = exercise.is_assisted;
+    applyMode = exercise.is_custom ? 'retroactive' : 'future_only';
+    showExerciseEditor = true;
+  }
+
+  function closeExerciseEditor() {
+    showExerciseEditor = false;
+    editingExercise = null;
+  }
+
+  function toggleMuscle(target: 'primary' | 'secondary', muscle: string) {
+    if (target === 'primary') {
+      exercisePrimaryMuscles = exercisePrimaryMuscles.includes(muscle)
+        ? exercisePrimaryMuscles.filter((m) => m !== muscle)
+        : [...exercisePrimaryMuscles, muscle];
+      exerciseSecondaryMuscles = exerciseSecondaryMuscles.filter((m) => m !== muscle);
+      return;
+    }
+    exerciseSecondaryMuscles = exerciseSecondaryMuscles.includes(muscle)
+      ? exerciseSecondaryMuscles.filter((m) => m !== muscle)
+      : [...exerciseSecondaryMuscles, muscle];
+    exercisePrimaryMuscles = exercisePrimaryMuscles.filter((m) => m !== muscle);
+  }
+
+  async function saveExerciseDefinition() {
+    if (!exerciseDisplayName.trim()) return;
+    if (exercisePrimaryMuscles.length === 0) {
+      alert('Please select at least one primary muscle group.');
+      return;
+    }
+
+    savingExercise = true;
+    try {
+      if (editingExercise) {
+        await updateExercise(editingExercise.id, {
+          display_name: exerciseDisplayName.trim(),
+          movement_type: exerciseMovementType,
+          body_region: exerciseBodyRegion,
+          is_unilateral: exerciseIsUnilateral,
+          is_assisted: exerciseIsAssisted,
+          description: exerciseDescription.trim() || null,
+          primary_muscles: exercisePrimaryMuscles,
+          secondary_muscles: exerciseSecondaryMuscles,
+          apply_mode: applyMode,
+        });
+      } else {
+        const systemName = exerciseDisplayName
+          .trim()
+          .toLowerCase()
+          .replace(/[^\w\s]/g, '')
+          .replace(/\s+/g, '_');
+        await createExercise({
+          name: systemName,
+          display_name: exerciseDisplayName.trim(),
+          movement_type: exerciseMovementType,
+          body_region: exerciseBodyRegion,
+          is_unilateral: exerciseIsUnilateral,
+          is_assisted: exerciseIsAssisted,
+          description: exerciseDescription.trim() || null,
+          primary_muscles: exercisePrimaryMuscles,
+          secondary_muscles: exerciseSecondaryMuscles,
+        });
+      }
+      await refreshExerciseLibrary();
+      closeExerciseEditor();
+    } catch (error) {
+      console.error('Failed to save exercise:', error);
+      alert('Failed to save exercise: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    } finally {
+      savingExercise = false;
+    }
+  }
+
   onMount(async () => {
     weighIns = await getBodyWeights(30);
     healthKitAvailable = await isHealthKitAvailable();
+    await refreshExerciseLibrary();
   });
 
   async function logWeighIn() {
@@ -310,6 +485,26 @@
     </div>
   </div>
 
+  <!-- ── Theme ───────────────────────────────────────────────────────── -->
+  <div class="card space-y-4">
+    <div>
+      <h3 class="text-lg font-semibold">Appearance</h3>
+      <p class="text-sm text-zinc-400 mt-1">Choose the app theme for the web app and sync it to your account.</p>
+    </div>
+    <div class="flex gap-3">
+      {#each [['dark', 'Dark'], ['light', 'Light']] as [val, label]}
+        <button
+          onclick={() => settings.update(s => ({ ...s, themePreference: val as 'dark' | 'light' }))}
+          class="flex-1 py-2.5 rounded-lg text-sm font-medium transition-colors {
+            $settings.themePreference === val
+              ? 'bg-primary-600 text-white'
+              : 'bg-zinc-800 hover:bg-gray-600 text-gray-300'
+          }"
+        >{label}</button>
+      {/each}
+    </div>
+  </div>
+
   <!-- ── Body Weight / Weigh-in Log ──────────────────────────────────── -->
   <div class="card space-y-4">
     <div>
@@ -411,11 +606,12 @@
     </div>
     <div class="flex flex-col gap-3">
       {#each [
-        ['rep',    'Rep first',    'Add 1 rep each session. Weight goes up only when crossing a rep-range bracket (5-9 → 10-14 → 15+).'],
+        ['double', 'Double progression', 'Build reps within a range (e.g. 8-12). When ALL sets hit the top, weight goes up and reps reset to the bottom. Most recommended for hypertrophy.'],
+        ['rep',    'Rep first',    'Add 1 rep each session. Weight goes up only when crossing a rep-range bracket (5-9 / 10-14 / 15+).'],
         ['weight', 'Weight first', 'Immediately translate the +1 rep into an equivalent weight increase via Epley. Reps stay fixed.'],
       ] as [val, label, desc]}
         <button
-          onclick={() => settings.update(s => ({ ...s, progressionStyle: val as 'rep' | 'weight' }))}
+          onclick={() => settings.update(s => ({ ...s, progressionStyle: val as 'rep' | 'weight' | 'double' }))}
           class="flex items-start gap-3 p-3 rounded-lg text-left transition-colors border {
             $settings.progressionStyle === val
               ? 'border-primary-500 bg-primary-600/10'
@@ -433,20 +629,82 @@
       {/each}
     </div>
 
+    <!-- Double progression explanation -->
+    {#if $settings.progressionStyle === 'double'}
+      <div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 space-y-1">
+        <p class="font-medium text-gray-300">How double progression works</p>
+        <p>Each exercise has a rep range. New plan exercises default to the range you set here:</p>
+        <ul class="list-disc list-inside space-y-0.5 pl-1">
+          <li>Each set independently progresses +1 rep per session</li>
+          <li>Reps are capped at the top of the range</li>
+          <li>When <strong>every set</strong> hits the top, weight increases by one increment</li>
+          <li>Reps reset to the bottom of the range and the cycle repeats</li>
+        </ul>
+        <p class="pt-1">Example at 40 kg with an 8-12 range: 3x8 &rarr; 3x9 &rarr; ... &rarr; 3x12 &rarr; 42.5 kg x 3x8</p>
+      </div>
+
+      <div class="grid grid-cols-2 gap-4">
+        <div>
+          <label class="label">Default double progression range start</label>
+          <input
+            type="number"
+            min="1"
+            max="30"
+            value={$settings.progression?.minRepsForIncrease ?? 8}
+            onchange={(e) => {
+              const nextMin = Math.max(1, parseInt((e.target as HTMLInputElement).value) || 1);
+              settings.update((s) => ({
+                ...s,
+                progression: {
+                  ...s.progression,
+                  minRepsForIncrease: nextMin,
+                  maxRepsForIncrease: Math.max(nextMin, s.progression.maxRepsForIncrease),
+                },
+              }));
+            }}
+            class="input"
+            style="font-size: 16px;"
+          />
+        </div>
+        <div>
+          <label class="label">Default double progression range end</label>
+          <input
+            type="number"
+            min={$settings.progression?.minRepsForIncrease ?? 8}
+            max="50"
+            value={$settings.progression?.maxRepsForIncrease ?? 12}
+            onchange={(e) => {
+              const floor = $settings.progression?.minRepsForIncrease ?? 8;
+              const nextMax = Math.max(floor, parseInt((e.target as HTMLInputElement).value) || floor);
+              settings.update((s) => ({
+                ...s,
+                progression: {
+                  ...s.progression,
+                  maxRepsForIncrease: nextMax,
+                },
+              }));
+            }}
+            class="input"
+            style="font-size: 16px;"
+          />
+        </div>
+      </div>
+    {/if}
+
     <!-- Rep bracket explanation — shown when "Rep first" style is active -->
     {#if $settings.progressionStyle === 'rep'}
       <div class="text-xs text-zinc-400 bg-zinc-900 rounded-lg p-3 space-y-1">
         <p class="font-medium text-gray-300">How rep brackets work</p>
         <p>Your rep range is split into three brackets:</p>
         <ul class="list-disc list-inside space-y-0.5 pl-1">
-          <li><span class="text-white font-mono">Bracket 1</span> — 1–9 reps</li>
-          <li><span class="text-white font-mono">Bracket 2</span> — 10–14 reps</li>
+          <li><span class="text-white font-mono">Bracket 1</span> — 1-9 reps</li>
+          <li><span class="text-white font-mono">Bracket 2</span> — 10-14 reps</li>
           <li><span class="text-white font-mono">Bracket 3</span> — 15+ reps</li>
         </ul>
         <p class="pt-0.5">
           Each session you add 1 rep. When the next rep would push you into a higher bracket,
           weight increases instead (via the Epley 1RM formula) and reps reset to the bottom of
-          the new bracket range.
+          the bracket range.
         </p>
       </div>
     {/if}
@@ -705,20 +963,37 @@
     <!-- Rep range -->
     <div class="grid grid-cols-2 gap-4">
       <div>
-        <label class="label">Min reps to increase weight</label>
+        <label class="label">Default rep range start</label>
         <input type="number" min="1" max="30"
                value={$settings.progression?.minRepsForIncrease ?? 8}
-               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, minRepsForIncrease: parseInt((e.target as HTMLInputElement).value) } }))}
+               onchange={(e) => {
+                 const nextMin = Math.max(1, parseInt((e.target as HTMLInputElement).value) || 1);
+                 settings.update(s => ({
+                   ...s,
+                   progression: {
+                     ...s.progression,
+                     minRepsForIncrease: nextMin,
+                     maxRepsForIncrease: Math.max(nextMin, s.progression.maxRepsForIncrease),
+                   }
+                 }));
+               }}
                class="input" style="font-size: 16px;" />
       </div>
       <div>
-        <label class="label">Max reps before forced increase</label>
-        <input type="number" min="1" max="50"
+        <label class="label">Default rep range end</label>
+        <input type="number" min={$settings.progression?.minRepsForIncrease ?? 8} max="50"
                value={$settings.progression?.maxRepsForIncrease ?? 12}
-               onchange={(e) => settings.update(s => ({ ...s, progression: { ...s.progression, maxRepsForIncrease: parseInt((e.target as HTMLInputElement).value) } }))}
+               onchange={(e) => {
+                 const floor = $settings.progression?.minRepsForIncrease ?? 8;
+                 const nextMax = Math.max(floor, parseInt((e.target as HTMLInputElement).value) || floor);
+                 settings.update(s => ({ ...s, progression: { ...s.progression, maxRepsForIncrease: nextMax } }));
+               }}
                class="input" style="font-size: 16px;" />
       </div>
     </div>
+    <p class="text-xs text-zinc-500 -mt-2">
+      These defaults feed new plan exercises, and double progression uses them as the default rep range until you override an exercise inside a plan.
+    </p>
 
     <!-- Max sets -->
     <div class="flex items-center justify-between">
@@ -806,6 +1081,77 @@
     {/each}
   </div>
 
+  <!-- ── Exercise Library ─────────────────────────────────────────── -->
+  <div class="card space-y-4">
+    <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h3 class="text-lg font-semibold">Exercise Library</h3>
+        <p class="text-sm text-zinc-400 mt-1">
+          Create custom exercises or customize a movement’s targets. Choose whether edits affect future programming only or your training history too.
+        </p>
+      </div>
+      <button
+        onclick={openCreateExerciseEditor}
+        class="px-4 py-2 rounded-lg text-sm font-medium bg-primary-600 text-white hover:bg-primary-500 transition-colors"
+      >
+        New Custom Exercise
+      </button>
+    </div>
+
+    <div class="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <input
+        type="text"
+        bind:value={exerciseSearch}
+        placeholder="Search exercises or muscle groups"
+        class="input"
+      />
+      <div class="text-xs text-zinc-500">
+        {exerciseLibrary.filter((exercise) => exercise.is_custom).length} custom
+        · {exerciseLibrary.length} total
+      </div>
+    </div>
+
+    <div class="space-y-2 max-h-[28rem] overflow-y-auto pr-1">
+      {#each filteredExercises() as exercise}
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/70 p-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="flex flex-wrap items-center gap-2">
+                <p class="font-medium text-white">{exercise.display_name}</p>
+                <span class="rounded-full px-2 py-0.5 text-[11px] {exercise.is_custom ? 'bg-primary-500/15 text-primary-300' : 'bg-zinc-800 text-zinc-400'}">
+                  {exercise.is_custom ? 'Custom' : 'Built-in'}
+                </span>
+              </div>
+              <p class="mt-1 text-xs text-zinc-500">
+                {exercise.movement_type} · {exercise.body_region.replace('_', ' ')}
+                {#if exercise.is_unilateral} · unilateral{/if}
+                {#if exercise.is_assisted} · assisted{/if}
+              </p>
+              <p class="mt-2 text-sm text-zinc-300">
+                {exercise.primary_muscles.map(muscleLabel).join(', ')}
+                {#if exercise.secondary_muscles.length}
+                  <span class="text-zinc-500"> · assist: {exercise.secondary_muscles.map(muscleLabel).join(', ')}</span>
+                {/if}
+              </p>
+            </div>
+            <button
+              onclick={() => openEditExerciseEditor(exercise)}
+              class="shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition-colors {exercise.is_custom ? 'bg-zinc-800 text-zinc-200 hover:bg-zinc-700' : 'bg-primary-500/15 text-primary-300 hover:bg-primary-500/25'}"
+            >
+              {exercise.is_custom ? 'Edit' : 'Customize'}
+            </button>
+          </div>
+        </div>
+      {/each}
+
+      {#if filteredExercises().length === 0}
+        <div class="rounded-xl border border-dashed border-zinc-800 p-6 text-center text-sm text-zinc-500">
+          No exercises match that search.
+        </div>
+      {/if}
+    </div>
+  </div>
+
   <!-- ── Language ─────────────────────────────────────────────────── -->
   <div class="card space-y-3">
     <h3 class="text-lg font-semibold">Language</h3>
@@ -855,7 +1201,7 @@
 
   <!-- ── Developer ────────────────────────────────────────────────────── -->
   {#if typeof document !== 'undefined'}
-    {@const onDev = document.cookie.includes('gymtracker_branch=dev')}
+    {@const onDev = $settings.branchPreference === 'dev'}
     <div class="card space-y-3">
       <h3 class="text-lg font-semibold">Developer</h3>
       <div class="flex items-center justify-between">
@@ -867,7 +1213,7 @@
         </div>
         <button
           onclick={() => {
-            const switchingToDev = !document.cookie.includes('gymtracker_branch=dev');
+            const switchingToDev = $settings.branchPreference !== 'dev';
             if (switchingToDev) {
               document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
             } else {
@@ -909,6 +1255,18 @@
           Update Now
         </button>
       </div>
+      <div class="flex items-center justify-between pt-2 border-t border-zinc-800">
+        <div>
+          <p class="text-sm text-zinc-300">Session repair tool</p>
+          <p class="text-xs text-zinc-500">Inspect and repair bad planned or in-progress workout state</p>
+        </div>
+        <a
+          href="/settings/session-repair"
+          class="px-4 py-2 rounded-lg text-sm font-medium transition-colors bg-zinc-800 text-zinc-200 hover:bg-zinc-700"
+        >
+          Open
+        </a>
+      </div>
     </div>
   {/if}
 
@@ -943,3 +1301,130 @@
     </div>
   </div>
 </div>
+
+{#if showExerciseEditor}
+  <div class="fixed inset-0 z-50 flex items-end justify-center bg-black/70 p-4 sm:items-center">
+    <div class="w-full max-w-3xl rounded-2xl border border-zinc-800 bg-zinc-950 shadow-2xl">
+      <div class="flex items-start justify-between gap-4 border-b border-zinc-800 p-5">
+        <div>
+          <h3 class="text-xl font-semibold text-white">
+            {editingExercise ? (editingExercise.is_custom ? 'Edit Custom Exercise' : 'Customize Exercise') : 'Create Custom Exercise'}
+          </h3>
+          <p class="mt-1 text-sm text-zinc-400">
+            {#if editingExercise}
+              {editingExercise.is_custom
+                ? 'Update your custom movement and choose whether the change stays in future programming or remaps your history too.'
+                : 'Make your own version of this movement with updated muscle targets or setup details.'}
+            {:else}
+              Add a movement to your personal exercise library.
+            {/if}
+          </p>
+        </div>
+        <button onclick={closeExerciseEditor} class="text-zinc-500 hover:text-white">✕</button>
+      </div>
+
+      <div class="max-h-[75vh] overflow-y-auto p-5 space-y-5">
+        <div>
+          <label class="label">Display Name</label>
+          <input bind:value={exerciseDisplayName} class="input" placeholder="e.g. Smith High Incline Press" />
+        </div>
+
+        <div class="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label class="label">Movement Type</label>
+            <select bind:value={exerciseMovementType} class="input">
+              {#each movementTypes as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label class="label">Body Region</label>
+            <select bind:value={exerciseBodyRegion} class="input">
+              {#each bodyRegions as option}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+
+        <div class="grid gap-3 sm:grid-cols-2">
+          <label class="flex items-center justify-between rounded-xl border border-zinc-800 px-4 py-3">
+            <span class="text-sm text-zinc-200">Unilateral</span>
+            <input type="checkbox" bind:checked={exerciseIsUnilateral} class="toggle" />
+          </label>
+          <label class="flex items-center justify-between rounded-xl border border-zinc-800 px-4 py-3">
+            <span class="text-sm text-zinc-200">Assisted</span>
+            <input type="checkbox" bind:checked={exerciseIsAssisted} class="toggle" />
+          </label>
+        </div>
+
+        <div>
+          <label class="label">Description</label>
+          <textarea bind:value={exerciseDescription} rows="3" class="input min-h-[88px]" placeholder="Optional notes about setup or technique"></textarea>
+        </div>
+
+        <div>
+          <label class="label">Primary Muscle Groups *</label>
+          <div class="mt-2 flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => toggleMuscle('primary', muscle.value)}
+                class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {exercisePrimaryMuscles.includes(muscle.value) ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Secondary Muscle Groups</label>
+          <div class="mt-2 flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => toggleMuscle('secondary', muscle.value)}
+                class="rounded-lg px-3 py-2 text-sm font-medium transition-colors {exerciseSecondaryMuscles.includes(muscle.value) ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        {#if editingExercise}
+          <div class="rounded-xl border border-zinc-800 bg-zinc-900/70 p-4">
+            <p class="text-sm font-medium text-white">Apply changes</p>
+            <div class="mt-3 grid gap-3 sm:grid-cols-2">
+              <button
+                type="button"
+                onclick={() => applyMode = 'future_only'}
+                class="rounded-xl border px-4 py-3 text-left transition-colors {applyMode === 'future_only' ? 'border-primary-500 bg-primary-500/10 text-primary-200' : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700'}"
+              >
+                <div class="font-medium">Future workouts only</div>
+                <div class="mt-1 text-xs text-zinc-400">Update plans and not-yet-started sessions, but keep historical logs unchanged.</div>
+              </button>
+              <button
+                type="button"
+                onclick={() => applyMode = 'retroactive'}
+                class="rounded-xl border px-4 py-3 text-left transition-colors {applyMode === 'retroactive' ? 'border-primary-500 bg-primary-500/10 text-primary-200' : 'border-zinc-800 bg-zinc-950 text-zinc-300 hover:border-zinc-700'}"
+              >
+                <div class="font-medium">Retroactive</div>
+                <div class="mt-1 text-xs text-zinc-400">Also remap past sets, exercise notes, and future programming to this customized version.</div>
+              </button>
+            </div>
+          </div>
+        {/if}
+      </div>
+
+      <div class="flex items-center justify-end gap-3 border-t border-zinc-800 p-5">
+        <button onclick={closeExerciseEditor} class="btn-secondary">Cancel</button>
+        <button onclick={saveExerciseDefinition} disabled={savingExercise || !exerciseDisplayName.trim()} class="btn-primary disabled:opacity-50">
+          {savingExercise ? 'Saving…' : editingExercise ? 'Save Changes' : 'Create Exercise'}
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}

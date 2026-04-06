@@ -1,13 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { Line, Bar } from 'svelte-chartjs';
+  import { daysAgoLocalDateString, localDateString } from '$lib/date';
+  import { Line } from 'svelte-chartjs';
   import {
     Chart,
     CategoryScale,
     LinearScale,
     PointElement,
     LineElement,
-    BarElement,
     Title,
     Tooltip,
     Legend,
@@ -17,11 +17,18 @@
   import type { ProgressMetric, ProgressionRecommendation, Exercise } from '$lib/api';
   import { settings } from '$lib/stores';
 
-  // Register Chart.js components (required by svelte-chartjs)
-  Chart.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler);
+  Chart.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend, Filler);
 
-  // Weight conversion
   const KG_TO_LBS = 2.20462;
+
+  // Returns the ISO Monday date string for the week containing dateStr
+  function weekStart(dateStr: string): string {
+    const d = new Date(dateStr + 'T00:00:00');
+    const day = d.getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+    const offset = day === 0 ? -6 : 1 - day; // shift back to Monday
+    d.setDate(d.getDate() + offset);
+    return d.toISOString().slice(0, 10);
+  }
 
   function displayWeight(kg: number): number {
     return $settings.weightUnit === 'lbs'
@@ -34,11 +41,50 @@
   let progressData = $state<ProgressMetric[]>([]);
   let recommendations = $state<ProgressionRecommendation[]>([]);
   let allExercises = $state<Exercise[]>([]);
-  let selectedExercise = $state<string>('all');
   let timeRange = $state<string>('30d');
-  let chartMode = $state<'1rm' | 'volume' | 'weight'>('1rm');
   let loading = $state(true);
   let error = $state<string | null>(null);
+  let selectedGroup = $state<string | null>(null);
+  let selectedSubGroup = $state<string | null>(null);
+  let selectedExercise = $state<string | null>(null);
+
+  // Muscle group definitions — order determines display order
+  const MUSCLE_GROUPS: Record<string, string[]> = {
+    Back:       ['lats', 'mid_back', 'upper_back', 'lower_back', 'traps'],
+    Chest:      ['chest'],
+    Shoulders:  ['front_delts', 'side_delts', 'rear_delts'],
+    Quads:      ['quadriceps'],
+    Hamstrings: ['hamstrings'],
+    Glutes:     ['glutes'],
+    Calves:     ['calves'],
+    Biceps:     ['biceps'],
+    Triceps:    ['triceps'],
+    Core:       ['abs', 'core', 'obliques'],
+    Forearms:   ['forearms'],
+    Neck:       ['neck'],
+  };
+
+  // Groups with sub-groups (2-level drill before exercises)
+  const SUB_GROUPS: Record<string, Record<string, string[]>> = {
+    Back: {
+      Lats:          ['lats'],
+      'Upper Back':  ['upper_back'],
+      'Mid Back':    ['mid_back'],
+      'Lower Back':  ['lower_back'],
+      Traps:         ['traps'],
+    },
+    Shoulders: {
+      'Front Delts': ['front_delts'],
+      'Side Delts':  ['side_delts'],
+      'Rear Delts':  ['rear_delts'],
+    },
+  };
+
+  const COLORS = [
+    '#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6',
+    '#ec4899', '#14b8a6', '#f97316', '#06b6d4', '#84cc16',
+    '#a78bfa', '#fb7185',
+  ];
 
   onMount(async () => {
     await loadData();
@@ -48,21 +94,10 @@
     loading = true;
     error = null;
     try {
-      const endDate = new Date().toISOString().split('T')[0];
-      let startDate: string;
+      const endDate = localDateString();
+      const daysBack = timeRange === 'all' ? 3650 : parseInt(timeRange.replace('d', ''));
+      const startDate = timeRange === 'all' ? '2000-01-01' : daysAgoLocalDateString(daysBack);
 
-      switch (timeRange) {
-        case '7d':
-          startDate = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-          break;
-        case '90d':
-          startDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-          break;
-        default:
-          startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-      }
-
-      const daysBack = parseInt(timeRange.replace('d', ''));
       const [progress, recs, exList] = await Promise.all([
         getProgress({ start_date: startDate, end_date: endDate }),
         getRecommendations(daysBack),
@@ -79,197 +114,163 @@
     }
   }
 
-  // Filter data by exercise
-  let filteredData = $derived(selectedExercise === 'all'
-    ? progressData
-    : progressData.filter(p => p.exercise_name === selectedExercise));
-
-  // Get unique exercise names across all data (not just filtered)
-  let exercises = $derived([...new Set(progressData.map(p => p.exercise_name))].sort());
-
-  // ─── Muscle group average 1RM rate of change ──────────────────────
-  interface MuscleGroupTrend {
-    muscle: string;
-    avgChangePercent: number;
-    exerciseCount: number;
-  }
-
-  let muscleGroupTrends = $derived.by((): MuscleGroupTrend[] => {
-    if (progressData.length === 0 || allExercises.length === 0) return [];
-
-    // Build exercise → primary muscles map
-    const exMuscleMap = new Map<string, string[]>();
+  // exercise_id → muscle group name (first match wins)
+  let exerciseIdToGroup = $derived.by(() => {
+    const map = new Map<number, string>();
     for (const ex of allExercises) {
-      exMuscleMap.set(ex.name, ex.primary_muscles ?? []);
-    }
-
-    // For each exercise, compute % change between first and last 1RM
-    const exerciseChanges = new Map<string, number>(); // exercise → % change
-    const exercisesByName = [...new Set(progressData.map(p => p.exercise_name))];
-
-    for (const exName of exercisesByName) {
-      const points = progressData
-        .filter(p => p.exercise_name === exName && p.estimated_1rm != null && p.estimated_1rm > 0)
-        .sort((a, b) => a.date.localeCompare(b.date));
-      if (points.length < 2) continue;
-      const first = points[0].estimated_1rm!;
-      const last = points[points.length - 1].estimated_1rm!;
-      const pctChange = ((last - first) / first) * 100;
-      exerciseChanges.set(exName, pctChange);
-    }
-
-    // Group by muscle
-    const muscleChanges = new Map<string, number[]>();
-    for (const [exName, pctChange] of exerciseChanges) {
-      const muscles = exMuscleMap.get(exName) ?? [];
-      if (muscles.length === 0) {
-        // Fallback: use exercise name prefix as muscle group
-        const group = exName.split('_').slice(-1)[0] || 'other';
-        if (!muscleChanges.has(group)) muscleChanges.set(group, []);
-        muscleChanges.get(group)!.push(pctChange);
-      }
-      for (const muscle of muscles) {
-        if (!muscleChanges.has(muscle)) muscleChanges.set(muscle, []);
-        muscleChanges.get(muscle)!.push(pctChange);
+      const muscles = ex.primary_muscles ?? [];
+      for (const [group, groupMuscles] of Object.entries(MUSCLE_GROUPS)) {
+        if (muscles.some(m => groupMuscles.includes(m))) {
+          map.set(ex.id, group);
+          break;
+        }
       }
     }
+    return map;
+  });
 
-    // Average per muscle group
-    const results: MuscleGroupTrend[] = [];
-    for (const [muscle, changes] of muscleChanges) {
-      const avg = changes.reduce((s, v) => s + v, 0) / changes.length;
-      results.push({
-        muscle: muscle.replace(/_/g, ' '),
-        avgChangePercent: Math.round(avg * 10) / 10,
-        exerciseCount: changes.length,
-      });
+  // exercise display name → group name (derived from exercise_id lookup)
+  let exerciseNameToGroup = $derived.by(() => {
+    const map = new Map<string, string>();
+    for (const p of progressData) {
+      if (p.exercise_id != null) {
+        const group = exerciseIdToGroup.get(p.exercise_id);
+        if (group) map.set(p.exercise_name, group);
+      }
     }
-
-    return results.sort((a, b) => b.avgChangePercent - a.avgChangePercent);
+    return map;
   });
 
-  // Colour palette for chart lines
-  const COLORS = ['#0ea5e9', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
-
-  // Chart data
-  let chartData = $derived(() => {
-    const dates = [...new Set(filteredData.map(p => p.date))].sort();
-    // Which exercises to plot depends on filter
-    const exNames = selectedExercise === 'all'
-      ? [...new Set(filteredData.map(p => p.exercise_name))].sort()
-      : [selectedExercise];
-
-    return {
-      labels: dates,
-      datasets: exNames.map((exercise, idx) => {
-        const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
-        return {
-          label: exercise,
-          data: dates.map(date => {
-            const point = exerciseData.find(p => p.date === date);
-            return point?.estimated_1rm != null ? displayWeight(point.estimated_1rm) : null;
-          }) as (number | null)[],
-          borderColor: COLORS[idx % COLORS.length],
-          backgroundColor: COLORS[idx % COLORS.length] + '20',
-          tension: 0.3,
-          spanGaps: true,
-        };
-      }),
-    };
-  });
-
-  // Volume chart data — total volume per date (aggregated across exercises if "all")
-  let volumeChartData = $derived(() => {
-    const dates = [...new Set(filteredData.map(p => p.date))].sort();
-    const exNames = selectedExercise === 'all'
-      ? [...new Set(filteredData.map(p => p.exercise_name))].sort()
-      : [selectedExercise];
-
-    return {
-      labels: dates,
-      datasets: exNames.map((exercise, idx) => {
-        const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
-        return {
-          label: exercise,
-          data: dates.map(date => {
-            const point = exerciseData.find(p => p.date === date);
-            return point?.volume_load ? displayWeight(point.volume_load) : null;
-          }) as (number | null)[],
-          backgroundColor: COLORS[idx % COLORS.length] + '80',
-          borderColor: COLORS[idx % COLORS.length],
-          borderWidth: 1,
-        };
-      }),
-    };
-  });
-
-  // Best working weight per session (max actual_weight across sets)
-  let weightChartData = $derived(() => {
-    const dates = [...new Set(filteredData.map(p => p.date))].sort();
-    const exNames = selectedExercise === 'all'
-      ? [...new Set(filteredData.map(p => p.exercise_name))].sort()
-      : [selectedExercise];
-
-    return {
-      labels: dates,
-      datasets: exNames.map((exercise, idx) => {
-        const exerciseData = filteredData.filter(p => p.exercise_name === exercise);
-        return {
-          label: exercise,
-          data: dates.map(date => {
-            const point = exerciseData.find(p => p.date === date);
-            // Use the recommended_weight field as a proxy for top set weight, or 1RM
-            return point?.estimated_1rm != null ? displayWeight(point.estimated_1rm) : null;
-          }) as (number | null)[],
-          borderColor: COLORS[idx % COLORS.length],
-          backgroundColor: COLORS[idx % COLORS.length] + '20',
-          tension: 0.3,
-          spanGaps: true,
-          fill: true,
-        };
-      }),
-    };
-  });
-
-  let activeChartData = $derived(() => {
-    switch (chartMode) {
-      case 'volume': return volumeChartData();
-      case 'weight': return weightChartData();
-      default: return chartData();
+  // exercise display name → primary muscles (for sub-group filtering)
+  let exerciseNameToMuscles = $derived.by(() => {
+    const idToMuscles = new Map<number, string[]>();
+    for (const ex of allExercises) idToMuscles.set(ex.id, ex.primary_muscles ?? []);
+    const map = new Map<string, string[]>();
+    for (const p of progressData) {
+      if (p.exercise_id != null) {
+        const muscles = idToMuscles.get(p.exercise_id);
+        if (muscles) map.set(p.exercise_name, muscles);
+      }
     }
+    return map;
   });
 
-  let chartTitle = $derived(
-    chartMode === '1rm' ? `Estimated 1RM Progress (${unit})`
-    : chartMode === 'volume' ? `Volume Load (${unit})`
-    : `Weight Trend (${unit})`
-  );
+  // Per-exercise weekly best 1RM: Map<exerciseName, Map<weekStartDate, maxEstimated1RM>>
+  // Uses Monday of each week as the key. One value per week = best set that week.
+  let exerciseWeeklyBest = $derived.by(() => {
+    const result = new Map<string, Map<string, number>>();
+    const names = [...new Set(progressData.map(p => p.exercise_name))];
+    for (const name of names) {
+      const points = progressData.filter(
+        p => p.exercise_name === name && p.estimated_1rm != null && p.estimated_1rm > 0
+      );
+      if (points.length === 0) continue;
+      const byWeek = new Map<string, number>();
+      for (const p of points) {
+        const wk = weekStart(p.date);
+        const prev = byWeek.get(wk);
+        byWeek.set(wk, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
+      }
+      result.set(name, byWeek);
+    }
+    return result;
+  });
 
-  let chartOptions = $derived({
+  // Per-exercise % change time series: Map<exerciseName, Map<weekStart, pctChange>>
+  // All series start at 0% on the first week.
+  // Uses weekly best 1RM (best set in each week) — eliminates session-to-session noise.
+  // For assisted exercises the backend returns estimated_1rm computed from
+  // (bodyweight - assistance), so a decreasing assistance weight correctly
+  // produces an increasing 1RM — no direction inversion needed here.
+  let exercisePctSeries = $derived.by(() => {
+    const result = new Map<string, Map<string, number>>();
+    for (const [name, byWeek] of exerciseWeeklyBest) {
+      const sortedWeeks = [...byWeek.keys()].sort();
+      const baseline = byWeek.get(sortedWeeks[0])!;
+      const series = new Map<string, number>();
+      for (const wk of sortedWeeks) {
+        const current = byWeek.get(wk)!;
+        const pct = ((current - baseline) / baseline) * 100;
+        series.set(wk, pct);
+      }
+      result.set(name, series);
+    }
+    return result;
+  });
+
+  // Week-over-week % change per exercise: last week vs the week before it.
+  // null when there is only one week of data (no prior week to compare).
+  let exerciseWowChange = $derived.by(() => {
+    const result = new Map<string, number | null>();
+    for (const [name, byWeek] of exerciseWeeklyBest) {
+      const sortedWeeks = [...byWeek.keys()].sort();
+      if (sortedWeeks.length < 2) {
+        result.set(name, null);
+        continue;
+      }
+      const last = byWeek.get(sortedWeeks[sortedWeeks.length - 1])!;
+      const prev = byWeek.get(sortedWeeks[sortedWeeks.length - 2])!;
+      result.set(name, prev > 0 ? Math.round(((last - prev) / prev) * 1000) / 10 : null);
+    }
+    return result;
+  });
+
+  // Absolute estimated 1RM per exercise per date (for individual exercise history chart)
+  let exerciseAbsolute1RM = $derived.by(() => {
+    const result = new Map<string, Map<string, number>>();
+    for (const name of [...new Set(progressData.map(p => p.exercise_name))]) {
+      const points = progressData.filter(p => p.exercise_name === name && p.estimated_1rm != null && p.estimated_1rm > 0);
+      if (points.length === 0) continue;
+      const byDate = new Map<string, number>();
+      for (const p of points) {
+        const prev = byDate.get(p.date);
+        byDate.set(p.date, prev == null ? p.estimated_1rm! : Math.max(prev, p.estimated_1rm!));
+      }
+      result.set(name, byDate);
+    }
+    return result;
+  });
+
+  // Chart data for a single selected exercise — shows actual 1RM over time
+  let selectedExerciseChartData = $derived.by(() => {
+    if (!selectedExercise) return { labels: [], datasets: [] };
+    const series = exerciseAbsolute1RM.get(selectedExercise);
+    if (!series) return { labels: [], datasets: [] };
+    const dates = [...series.keys()].sort();
+    return {
+      labels: dates,
+      datasets: [{
+        label: selectedExercise,
+        data: dates.map(d => Math.round(displayWeight(series.get(d)!) * 10) / 10),
+        borderColor: COLORS[0],
+        backgroundColor: COLORS[0] + '20',
+        tension: 0.3,
+        spanGaps: true,
+        pointRadius: 4,
+        fill: true,
+      }],
+    };
+  });
+
+  let selectedExerciseChartOptions = $derived({
     responsive: true,
     plugins: {
-      legend: {
-        position: 'bottom' as const,
-        display: selectedExercise !== 'all' || exercises.length <= 8,
-        maxHeight: 80,
-        labels: { color: '#d1d5db', boxWidth: 10, padding: 6, font: { size: 10 }, usePointStyle: true },
-      },
+      legend: { display: false },
       title: {
         display: true,
-        text: chartTitle,
+        text: selectedExercise ? `${selectedExercise} — Est. 1RM (${unit})` : '',
         color: '#d1d5db',
       },
       tooltip: {
         callbacks: {
-          label: (ctx: any) => `${ctx.dataset.label}: ${ctx.parsed.y?.toFixed(1) ?? '–'} ${unit}`,
+          label: (ctx: any) => `${ctx.parsed.y != null ? ctx.parsed.y.toFixed(1) : '–'} ${unit}`,
         },
       },
     },
     scales: {
       y: {
-        beginAtZero: chartMode === 'volume',
-        title: { display: true, text: `Weight (${unit})`, color: '#9ca3af' },
-        ticks: { color: '#9ca3af' },
+        title: { display: true, text: `Est. 1RM (${unit})`, color: '#9ca3af' },
+        ticks: { color: '#9ca3af', callback: (v: any) => `${v} ${unit}` },
         grid: { color: '#374151' },
       },
       x: {
@@ -279,63 +280,340 @@
       },
     },
   });
+
+  // Key stats for the selected exercise
+  let selectedExerciseStats = $derived.by(() => {
+    if (!selectedExercise) return null;
+    const series = exerciseAbsolute1RM.get(selectedExercise);
+    if (!series || series.size === 0) return null;
+    const dates = [...series.keys()].sort();
+    const values = dates.map(d => series.get(d)!);
+    const bestKg = Math.max(...values);
+    const latestKg = values[values.length - 1];
+    const firstKg = values[0];
+    const pctChange = firstKg > 0 ? Math.round((latestKg - firstKg) / firstKg * 1000) / 10 : 0;
+    const rec = recommendations.find(r => r.exercise_name === selectedExercise) ?? null;
+    return { bestKg, latestKg, firstKg, pctChange, sessions: dates.length, rec };
+  });
+
+  // Trained muscle groups with data in the current time range (in MUSCLE_GROUPS order)
+  let trainedGroups = $derived.by(() => {
+    const present = new Set<string>();
+    for (const [exName] of exercisePctSeries) {
+      const g = exerciseNameToGroup.get(exName);
+      if (g) present.add(g);
+    }
+    return Object.keys(MUSCLE_GROUPS).filter(g => present.has(g));
+  });
+
+  // Per-group aggregate % change series: for each date, average % change of exercises in group
+  let groupPctSeries = $derived.by(() => {
+    const result = new Map<string, Map<string, number>>();
+    for (const group of trainedGroups) {
+      const exNames = [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === group);
+      if (exNames.length === 0) continue;
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const groupSeries = new Map<string, number>();
+      for (const date of [...allDates].sort()) {
+        const vals: number[] = [];
+        for (const n of exNames) {
+          const v = exercisePctSeries.get(n)?.get(date);
+          if (v != null) vals.push(v);
+        }
+        if (vals.length > 0) groupSeries.set(date, vals.reduce((s, v) => s + v, 0) / vals.length);
+      }
+      result.set(group, groupSeries);
+    }
+    return result;
+  });
+
+  // Latest cumulative % change per group (chart endpoint — not used by cards)
+  let groupSummary = $derived.by(() => {
+    const result = new Map<string, number>();
+    for (const [group, series] of groupPctSeries) {
+      const vals = [...series.values()];
+      if (vals.length > 0) result.set(group, Math.round(vals[vals.length - 1] * 10) / 10);
+    }
+    return result;
+  });
+
+  // Week-over-week % change per muscle group (used by summary cards).
+  // Average of the WoW changes of exercises in that group; null when no prior week.
+  let groupWowSummary = $derived.by(() => {
+    const result = new Map<string, number | null>();
+    for (const group of trainedGroups) {
+      const exNames = [...exerciseWowChange.keys()].filter(n => exerciseNameToGroup.get(n) === group);
+      const vals = exNames.map(n => exerciseWowChange.get(n)).filter((v): v is number => v != null);
+      result.set(group, vals.length > 0 ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10 : null);
+    }
+    return result;
+  });
+
+  // Week-over-week % change per sub-group (for sub-group cards when selectedGroup is Back/Shoulders).
+  let subGroupWowSummary = $derived.by(() => {
+    if (!selectedGroup || !SUB_GROUPS[selectedGroup]) return new Map<string, number | null>();
+    const result = new Map<string, number | null>();
+    for (const [sgName, sgMuscles] of Object.entries(SUB_GROUPS[selectedGroup])) {
+      const exNames = [...exerciseWowChange.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => sgMuscles.includes(m))
+      );
+      const vals = exNames.map(n => exerciseWowChange.get(n)).filter((v): v is number => v != null);
+      result.set(sgName, vals.length > 0 ? Math.round(vals.reduce((s, v) => s + v, 0) / vals.length * 10) / 10 : null);
+    }
+    return result;
+  });
+
+  // Overview chart: one line per trained group
+  let overviewChartData = $derived.by(() => {
+    if (trainedGroups.length === 0) return { labels: [], datasets: [] };
+    const allDates = new Set<string>();
+    for (const [, s] of groupPctSeries) for (const d of s.keys()) allDates.add(d);
+    const dates = [...allDates].sort();
+    return {
+      labels: dates,
+      datasets: trainedGroups.map((group, idx) => {
+        const series = groupPctSeries.get(group)!;
+        return {
+          label: group,
+          data: dates.map(d => series.has(d) ? Math.round(series.get(d)! * 10) / 10 : null) as (number | null)[],
+          borderColor: COLORS[idx % COLORS.length],
+          backgroundColor: COLORS[idx % COLORS.length] + '20',
+          tension: 0.3,
+          spanGaps: true,
+          pointRadius: 3,
+        };
+      }),
+    };
+  });
+
+  // Helper: build Chart.js datasets from a list of labels and a series map
+  function buildChartDatasets(
+    labels: string[],
+    seriesMap: Map<string, Map<string, number>>,
+    dates: string[],
+  ) {
+    return labels.map((label, idx) => {
+      const s = seriesMap.get(label)!;
+      return {
+        label,
+        data: dates.map(d => s.has(d) ? Math.round(s.get(d)! * 10) / 10 : null) as (number | null)[],
+        borderColor: COLORS[idx % COLORS.length],
+        backgroundColor: COLORS[idx % COLORS.length] + '20',
+        tension: 0.3,
+        spanGaps: true,
+        pointRadius: 3,
+      };
+    });
+  }
+
+  // Sub-group aggregate % change series (one per sub-group of the selected group)
+  let subGroupPctSeries = $derived.by(() => {
+    if (!selectedGroup || !SUB_GROUPS[selectedGroup]) return new Map<string, Map<string, number>>();
+    const result = new Map<string, Map<string, number>>();
+    for (const [sgName, sgMuscles] of Object.entries(SUB_GROUPS[selectedGroup])) {
+      const exNames = [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => sgMuscles.includes(m))
+      );
+      if (exNames.length === 0) continue;
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const sgSeries = new Map<string, number>();
+      for (const date of [...allDates].sort()) {
+        const vals: number[] = [];
+        for (const n of exNames) {
+          const v = exercisePctSeries.get(n)?.get(date);
+          if (v != null) vals.push(v);
+        }
+        if (vals.length > 0) sgSeries.set(date, vals.reduce((s, v) => s + v, 0) / vals.length);
+      }
+      result.set(sgName, sgSeries);
+    }
+    return result;
+  });
+
+  // Trained sub-groups with data (in SUB_GROUPS order)
+  let trainedSubGroups = $derived.by(() => {
+    if (!selectedGroup || !SUB_GROUPS[selectedGroup]) return [] as string[];
+    return Object.keys(SUB_GROUPS[selectedGroup]).filter(sg => subGroupPctSeries.has(sg));
+  });
+
+  // Drill-down chart: 3-level logic
+  let drilldownChartData = $derived.by(() => {
+    if (!selectedGroup) return { labels: [], datasets: [] };
+    const hasSubGroups = !!SUB_GROUPS[selectedGroup];
+
+    if (selectedSubGroup) {
+      // Level 3: exercises in the selected sub-group
+      const subMuscles = SUB_GROUPS[selectedGroup]?.[selectedSubGroup] ?? MUSCLE_GROUPS[selectedGroup];
+      const exNames = [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => subMuscles.includes(m))
+      );
+      if (exNames.length === 0) return { labels: [], datasets: [] };
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const dates = [...allDates].sort();
+      const seriesMap = new Map(exNames.map(n => [n, exercisePctSeries.get(n)!]));
+      return { labels: dates, datasets: buildChartDatasets(exNames, seriesMap, dates) };
+    } else if (hasSubGroups) {
+      // Level 2: one line per sub-group
+      const active = trainedSubGroups;
+      if (active.length === 0) return { labels: [], datasets: [] };
+      const allDates = new Set<string>();
+      for (const sg of active) for (const d of subGroupPctSeries.get(sg)!.keys()) allDates.add(d);
+      const dates = [...allDates].sort();
+      return { labels: dates, datasets: buildChartDatasets(active, subGroupPctSeries, dates) };
+    } else {
+      // Level 2 flat: exercises directly in group
+      const exNames = [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
+      if (exNames.length === 0) return { labels: [], datasets: [] };
+      const allDates = new Set<string>();
+      for (const n of exNames) for (const d of exercisePctSeries.get(n)!.keys()) allDates.add(d);
+      const dates = [...allDates].sort();
+      const seriesMap = new Map(exNames.map(n => [n, exercisePctSeries.get(n)!]));
+      return { labels: dates, datasets: buildChartDatasets(exNames, seriesMap, dates) };
+    }
+  });
+
+  let activeChartData = $derived(
+    selectedExercise ? selectedExerciseChartData :
+    selectedGroup    ? drilldownChartData :
+                       overviewChartData
+  );
+
+  let activeChartOptions = $derived(selectedExercise ? selectedExerciseChartOptions : chartOptions);
+
+  let chartTitle = $derived(
+    selectedExercise
+      ? `${selectedExercise} — Est. 1RM (${unit})`
+      : selectedSubGroup
+        ? `${selectedGroup} › ${selectedSubGroup} — Est. 1RM % Change`
+        : selectedGroup
+          ? `${selectedGroup} — Est. 1RM % Change`
+          : 'Muscle Group Strength Trends (Est. 1RM % Change)'
+  );
+
+  let chartOptions = $derived({
+    responsive: true,
+    plugins: {
+      legend: {
+        position: 'bottom' as const,
+        labels: { color: '#d1d5db', boxWidth: 10, padding: 6, font: { size: 10 }, usePointStyle: true },
+      },
+      title: {
+        display: true,
+        text: chartTitle,
+        color: '#d1d5db',
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx: any) => {
+            const v = ctx.parsed.y;
+            return `${ctx.dataset.label}: ${v != null ? (v > 0 ? '+' : '') + v.toFixed(1) + '%' : '–'}`;
+          },
+        },
+      },
+    },
+    scales: {
+      y: {
+        title: { display: true, text: '% Change from First Week', color: '#9ca3af' },
+        ticks: {
+          color: '#9ca3af',
+          callback: (v: any) => (v > 0 ? '+' : '') + v + '%',
+        },
+        grid: { color: '#374151' },
+      },
+      x: {
+        title: { display: true, text: 'Date', color: '#9ca3af' },
+        ticks: { color: '#9ca3af' },
+        grid: { color: '#374151' },
+      },
+    },
+  });
+
+  // Recommendations filtered to selected exercise / sub-group / group
+  let filteredRecs = $derived.by(() => {
+    if (selectedExercise) return recommendations.filter(r => r.exercise_name === selectedExercise);
+    if (!selectedGroup) return recommendations;
+    let exNames: string[];
+    if (selectedSubGroup) {
+      const subMuscles = SUB_GROUPS[selectedGroup]?.[selectedSubGroup] ?? MUSCLE_GROUPS[selectedGroup];
+      exNames = [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => subMuscles.includes(m))
+      );
+    } else {
+      exNames = [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
+    }
+    const exSet = new Set(exNames);
+    return recommendations.filter(r => exSet.has(r.exercise_name));
+  });
+
+  // Exercises to show as cards (level 3: sub-group selected, or flat group)
+  let drilldownExercises = $derived.by(() => {
+    if (!selectedGroup) return [] as string[];
+    if (selectedSubGroup) {
+      const subMuscles = SUB_GROUPS[selectedGroup]?.[selectedSubGroup] ?? MUSCLE_GROUPS[selectedGroup];
+      return [...exercisePctSeries.keys()].filter(n =>
+        exerciseNameToMuscles.get(n)?.some(m => subMuscles.includes(m))
+      );
+    }
+    if (SUB_GROUPS[selectedGroup]) return [] as string[]; // show sub-group cards instead
+    return [...exercisePctSeries.keys()].filter(n => exerciseNameToGroup.get(n) === selectedGroup);
+  });
 </script>
 
 <div class="space-y-6 max-w-4xl mx-auto">
-  <h2 class="text-2xl font-bold">Progress</h2>
-
-  <!-- Filters -->
-  <div class="card">
-    <div class="flex flex-wrap gap-4">
-      <div>
-        <label class="label">Time Range</label>
-        <select bind:value={timeRange} onchange={loadData} class="input">
-          <option value="7d">Last 7 days</option>
-          <option value="30d">Last 30 days</option>
-          <option value="90d">Last 90 days</option>
-        </select>
-      </div>
-
-      <div>
-        <label class="label">Exercise</label>
-        <select bind:value={selectedExercise} class="input">
-          <option value="all">All Exercises</option>
-          {#each exercises as exercise}
-            <option value={exercise}>{exercise}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div>
-        <label class="label">Chart</label>
-        <div class="flex rounded-lg overflow-hidden border border-zinc-700">
-          <button
-            class="px-3 py-1.5 text-sm {chartMode === '1rm' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
-            onclick={() => chartMode = '1rm'}>1RM</button>
-          <button
-            class="px-3 py-1.5 text-sm {chartMode === 'volume' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
-            onclick={() => chartMode = 'volume'}>Volume</button>
-          <button
-            class="px-3 py-1.5 text-sm {chartMode === 'weight' ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-400'}"
-            onclick={() => chartMode = 'weight'}>Weight</button>
-        </div>
-      </div>
+  <!-- Header row with back button + time range -->
+  <div class="flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3 flex-wrap min-w-0">
+      {#if selectedExercise}
+        <button
+          onclick={() => { selectedExercise = null; }}
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1 shrink-0"
+        >
+          ← {selectedSubGroup ?? selectedGroup}
+        </button>
+        <h2 class="text-xl font-bold truncate">{selectedExercise}</h2>
+      {:else if selectedSubGroup}
+        <button
+          onclick={() => { selectedSubGroup = null; }}
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1 shrink-0"
+        >
+          ← {selectedGroup}
+        </button>
+        <h2 class="text-2xl font-bold">{selectedSubGroup}</h2>
+      {:else if selectedGroup}
+        <button
+          onclick={() => { selectedGroup = null; selectedSubGroup = null; }}
+          class="text-zinc-400 hover:text-white transition-colors text-sm flex items-center gap-1 shrink-0"
+        >
+          ← All Muscles
+        </button>
+        <h2 class="text-2xl font-bold">{selectedGroup}</h2>
+      {:else}
+        <h2 class="text-2xl font-bold">Progress</h2>
+      {/if}
+    </div>
+    <div>
+      <select bind:value={timeRange} onchange={loadData} class="input">
+        <option value="7d">Last 7 days</option>
+        <option value="30d">Last 30 days</option>
+        <option value="90d">Last 3 months</option>
+        <option value="180d">Last 6 months</option>
+        <option value="365d">Last year</option>
+        <option value="all">All time</option>
+      </select>
     </div>
   </div>
 
-  <!-- Progress Chart -->
+  <!-- Chart -->
   <div class="card">
-    <h3 class="text-lg font-semibold mb-4">{chartTitle}</h3>
     {#if loading}
-      <div class="animate-pulse bg-zinc-800 rounded h-48"></div>
+      <div class="animate-pulse bg-zinc-800 rounded h-64"></div>
     {:else if error}
       <p class="text-red-400 text-center py-8">{error}</p>
-    {:else if filteredData.length > 0}
-      {#if chartMode === 'volume'}
-        <Bar data={activeChartData()} options={chartOptions} />
-      {:else}
-        <Line data={activeChartData()} options={chartOptions} />
-      {/if}
+    {:else if activeChartData.datasets.length > 0}
+      <Line data={activeChartData} options={activeChartOptions} />
     {:else}
       <p class="text-zinc-400 text-center py-8">
         No data for the selected range. Complete a workout with logged sets to see your progress here.
@@ -343,102 +621,134 @@
     {/if}
   </div>
 
+  <!-- Overview: muscle group cards -->
+  {#if !selectedGroup && trainedGroups.length > 0 && !loading}
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+      {#each trainedGroups as group, idx}
+        {@const wow = groupWowSummary.get(group) ?? null}
+        <button
+          class="card text-left hover:bg-zinc-700/60 transition-colors"
+          onclick={() => selectedGroup = group}
+        >
+          <div class="flex items-center gap-2 mb-1">
+            <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
+            <p class="text-sm font-medium truncate">{group}</p>
+          </div>
+          <p class="text-2xl font-bold {wow != null && wow > 0 ? 'text-green-400' : wow != null && wow < 0 ? 'text-red-400' : 'text-zinc-400'}">
+            {wow != null ? (wow > 0 ? '+' : '') + wow + '%' : '–'}
+          </p>
+          <p class="text-xs text-zinc-500 mt-1">vs last week · Tap to explore →</p>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Sub-group cards (Back / Shoulders — level 2) -->
+  {#if selectedGroup && !selectedSubGroup && trainedSubGroups.length > 0 && !loading}
+    <div class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+      {#each trainedSubGroups as sg, idx}
+        {@const wow = subGroupWowSummary.get(sg) ?? null}
+        <button
+          class="card text-left hover:bg-zinc-700/60 transition-colors"
+          onclick={() => selectedSubGroup = sg}
+        >
+          <div class="flex items-center gap-2 mb-1">
+            <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
+            <p class="text-sm font-medium truncate">{sg}</p>
+          </div>
+          <p class="text-2xl font-bold {wow != null && wow > 0 ? 'text-green-400' : wow != null && wow < 0 ? 'text-red-400' : 'text-zinc-400'}">
+            {wow != null ? (wow > 0 ? '+' : '') + wow + '%' : '–'}
+          </p>
+          <p class="text-xs text-zinc-500 mt-1">vs last week · Tap to explore →</p>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Drill-down: individual exercise cards -->
+  {#if selectedGroup && drilldownExercises.length > 0 && !loading && !selectedExercise}
+    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+      {#each drilldownExercises as name, idx}
+        {@const wow = exerciseWowChange.get(name) ?? null}
+        <button
+          class="card flex items-center gap-3 text-left w-full hover:bg-zinc-700/60 transition-colors"
+          onclick={() => selectedExercise = name}
+        >
+          <div class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:{COLORS[idx % COLORS.length]}"></div>
+          <div class="min-w-0 flex-1">
+            <p class="text-sm text-zinc-300 truncate" title={name}>{name}</p>
+            <p class="text-lg font-bold {wow != null && wow > 0 ? 'text-green-400' : wow != null && wow < 0 ? 'text-red-400' : 'text-zinc-400'}">
+              {wow != null ? (wow > 0 ? '+' : '') + wow + '%' : '–'}
+            </p>
+            <p class="text-xs text-zinc-500 mt-0.5">vs last week · Tap for history →</p>
+          </div>
+        </button>
+      {/each}
+    </div>
+  {/if}
+
+  <!-- Exercise detail: key stats when a specific exercise is selected -->
+  {#if selectedExercise && selectedExerciseStats && !loading}
+    {@const s = selectedExerciseStats}
+    <div class="grid grid-cols-3 gap-3">
+      <div class="card text-center">
+        <p class="text-xs text-zinc-500 mb-1">Latest 1RM</p>
+        <p class="text-xl font-bold text-white">{displayWeight(s.latestKg).toFixed(1)}</p>
+        <p class="text-xs text-zinc-500">{unit}</p>
+      </div>
+      <div class="card text-center">
+        <p class="text-xs text-zinc-500 mb-1">Best 1RM</p>
+        <p class="text-xl font-bold text-white">{displayWeight(s.bestKg).toFixed(1)}</p>
+        <p class="text-xs text-zinc-500">{unit}</p>
+      </div>
+      <div class="card text-center">
+        <p class="text-xs text-zinc-500 mb-1">Change</p>
+        <p class="text-xl font-bold {s.pctChange > 0 ? 'text-green-400' : s.pctChange < 0 ? 'text-red-400' : 'text-zinc-400'}">
+          {s.pctChange > 0 ? '+' : ''}{s.pctChange}%
+        </p>
+        <p class="text-xs text-zinc-500">{s.sessions} sessions</p>
+      </div>
+    </div>
+  {/if}
+
   <!-- Recommendations -->
   <div class="card">
-    <h3 class="text-lg font-semibold mb-4">Progression Recommendations</h3>
+    <h3 class="text-lg font-semibold mb-4">
+      Progression Recommendations{selectedExercise ? ` — ${selectedExercise}` : selectedSubGroup ? ` — ${selectedSubGroup}` : selectedGroup ? ` — ${selectedGroup}` : ''}
+    </h3>
     {#if loading}
       <div class="space-y-2">
         {#each { length: 3 } as _}
           <div class="animate-pulse bg-zinc-800 rounded h-10"></div>
         {/each}
       </div>
-    {:else if recommendations.length > 0}
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-zinc-800 text-zinc-400">
-              <th class="py-2 px-3">Exercise</th>
-              <th class="py-2 px-3">Current best</th>
-              <th class="py-2 px-3">Recommended</th>
-              <th class="py-2 px-3">Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each recommendations as rec}
-              {@const delta = rec.recommended_weight - rec.current_weight}
-              <tr class="border-b border-zinc-800/50 hover:bg-zinc-900">
-                <td class="py-2 px-3 font-medium">{rec.exercise_name}</td>
-                <td class="py-2 px-3 font-mono">{displayWeight(rec.current_weight).toFixed(1)} {unit}</td>
-                <td class="py-2 px-3 font-mono {delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-yellow-400'}">
-                  {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
-                  {#if delta > 0}<span class="text-xs ml-1">↑</span>
-                  {:else if delta < 0}<span class="text-xs ml-1">↓</span>
-                  {:else}<span class="text-xs ml-1">→</span>{/if}
-                </td>
-                <td class="py-2 px-3 text-zinc-400">{rec.reason}</td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
-    {:else}
-      <p class="text-zinc-400 text-center py-6">
-        No recommendations yet — complete at least one workout in the selected time range.
-      </p>
-    {/if}
-  </div>
-
-  <!-- Muscle Group Trends -->
-  {#if muscleGroupTrends.length > 0}
-    <div class="card">
-      <h3 class="text-lg font-semibold mb-3">Strength Trends by Muscle</h3>
-      <p class="text-xs text-zinc-500 mb-4">Average 1RM change across exercises in each muscle group over the selected period</p>
-      <div class="grid grid-cols-2 sm:grid-cols-3 gap-2">
-        {#each muscleGroupTrends as trend}
-          <div class="bg-zinc-800/50 rounded-lg px-3 py-2">
-            <p class="text-xs text-zinc-400 capitalize truncate">{trend.muscle}</p>
-            <p class="text-lg font-bold {trend.avgChangePercent > 0 ? 'text-green-400' : trend.avgChangePercent < 0 ? 'text-red-400' : 'text-zinc-400'}">
-              {trend.avgChangePercent > 0 ? '+' : ''}{trend.avgChangePercent}%
-            </p>
-            <p class="text-[10px] text-zinc-600">{trend.exerciseCount} exercise{trend.exerciseCount !== 1 ? 's' : ''}</p>
+    {:else if filteredRecs.length > 0}
+      <div class="space-y-2">
+        {#each filteredRecs as rec}
+          {@const delta = rec.recommended_weight - rec.current_weight}
+          <div class="flex items-center gap-3 py-3 border-b border-zinc-800/50 last:border-0">
+            <div class="min-w-0 flex-1">
+              <p class="text-sm font-medium truncate" title={rec.exercise_name}>{rec.exercise_name}</p>
+              <p class="text-xs text-zinc-500 mt-0.5 line-clamp-2">{rec.reason}</p>
+            </div>
+            <div class="flex-shrink-0 text-right">
+              <p class="text-xs text-zinc-400">{displayWeight(rec.current_weight).toFixed(1)} {unit}</p>
+              <p class="text-sm font-mono font-bold {delta > 0 ? 'text-green-400' : delta < 0 ? 'text-red-400' : 'text-yellow-400'}">
+                {displayWeight(rec.recommended_weight).toFixed(1)} {unit}
+                {#if delta > 0}<span class="text-xs">↑</span>
+                {:else if delta < 0}<span class="text-xs">↓</span>
+                {:else}<span class="text-xs">→</span>{/if}
+              </p>
+            </div>
           </div>
         {/each}
       </div>
-    </div>
-  {/if}
-
-  <!-- Detailed Stats -->
-  <div class="card">
-    <h3 class="text-lg font-semibold mb-4">Session Log</h3>
-    {#if loading}
-      <div class="animate-pulse bg-zinc-800 rounded h-24"></div>
-    {:else if filteredData.length > 0}
-      <div class="overflow-x-auto">
-        <table class="w-full text-left text-sm">
-          <thead>
-            <tr class="border-b border-zinc-800 text-zinc-400">
-              <th class="py-2 px-3">Date</th>
-              <th class="py-2 px-3">Exercise</th>
-              <th class="py-2 px-3">Volume</th>
-              <th class="py-2 px-3">Est. 1RM</th>
-            </tr>
-          </thead>
-          <tbody>
-            {#each [...filteredData].reverse() as row}
-              <tr class="border-b border-zinc-800/50 hover:bg-zinc-900">
-                <td class="py-2 px-3 text-zinc-400">{row.date}</td>
-                <td class="py-2 px-3">{row.exercise_name}</td>
-                <td class="py-2 px-3 font-mono">{displayWeight(row.volume_load).toFixed(0)} {unit}</td>
-                <td class="py-2 px-3 font-mono">
-                  {row.estimated_1rm != null ? displayWeight(row.estimated_1rm).toFixed(1) : '—'} {unit}
-                </td>
-              </tr>
-            {/each}
-          </tbody>
-        </table>
-      </div>
     {:else}
-      <p class="text-zinc-400 text-center py-4">No data for selected filters.</p>
+      <p class="text-zinc-400 text-center py-6">
+        {selectedGroup
+          ? `No recommendations for ${selectedGroup} in this period.`
+          : 'No recommendations yet — complete at least one workout in the selected time range.'}
+      </p>
     {/if}
   </div>
 </div>

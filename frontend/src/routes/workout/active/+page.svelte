@@ -4,15 +4,17 @@
   import { beforeNavigate } from '$app/navigation';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
-    getExercises, getPlan, getPlans, getRecentExercises, getSession, getSessions,
-    createSessionFromPlan, createSession, startSession,
+    getExercises, getPlan, getPlans, getNextWorkout, getRecentExercises, getSession, getSessions,
+    createSessionFromPlan, createSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
-    getExerciseHistory, getAllExerciseNotes, setExerciseNote,
-    saveExerciseFeedback, syncSessionToPlan, patchSession,
+    getExerciseHistory, getAllExerciseNotes, setExerciseNote, getPersonalRecords,
+    saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
+    updatePlan,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, ExerciseHistorySession, WorkoutSession } from '$lib/api';
+  import type { Exercise, WorkoutPlan, PlannedDay, PlannedExercise, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution, PersonalRecord } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
+  import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
   import html2canvas from 'html2canvas';
   import { writeWorkout } from '$lib/healthkit';
 
@@ -26,20 +28,19 @@
     return $settings.weightUnit === 'lbs' ? lbsToKg(val) : Math.round(val * 100) / 100;
   }
 
-  // Convert kg from backend to user's display unit, rounded to nearest 5 lbs / 2.5 kg
+  // Convert kg from backend to user's display unit — no rounding (preserves user input)
   const KG_TO_LBS = 2.20462;
   function fromKg(kg: number): number {
     const v = $settings.weightUnit === 'lbs' ? kg * KG_TO_LBS : kg;
-    return $settings.weightUnit === 'lbs'
-      ? Math.round(v / 5) * 5
-      : Math.round(v / 2.5) * 2.5;
+    return Math.round(v * 100) / 100;  // 2 decimal places only
   }
 
-  // Round weight to the nearest 5 lbs / 2.5 kg increment
+  // Round weight to the nearest 2.5 lbs / 0.5 kg — matches standard plate increments
+  // to see the ideal target and adjust to their available weights themselves.
   function roundWeight(w: number): number {
     return $settings.weightUnit === 'lbs'
-      ? Math.round(w / 5) * 5
-      : Math.round(w / 2.5) * 2.5;
+      ? Math.round(w / 2.5) * 2.5
+      : Math.round(w * 2) / 2;  // nearest 0.5 kg
   }
 
   // Round reps to nearest 5 (so suggestions are always 5, 10, 15, 20…)
@@ -94,13 +95,17 @@
     // Original suggestions for deviation warning
     initWeight: number | null;
     initReps: number | null;
+    isExtrapolated: boolean;  // weight adjusted for fatigue/freshness due to reorder
     setType: string;  // 'standard' | 'standard_partials' | 'myo_rep' | 'myo_rep_match' | 'drop_set'
     partialReps: number | null;  // for standard_partials — partial ROM reps after full ROM
     drops: { weightLbs: number | null; reps: number | null }[];  // for drop sets only
+    pegWeights: { peg1: number; peg2: number; peg3: number } | null;  // Prime machines: per-side weight per peg
   }
 
   interface UIExercise {
     uiId: string;
+    blockId: string | null;
+    persistKey: string;
     exerciseId: number;
     sets: UISet[];
     isUnilateral: boolean;     // overrides exercise default; shows L/R inputs
@@ -109,10 +114,63 @@
     groupType: 'superset' | 'circuit' | null;
   }
 
+  interface PersistedSessionExerciseStructure {
+    order: string[];
+    groups: Record<string, { groupId: string | null; groupType: 'superset' | 'circuit' | null }>;
+  }
+
   interface ExerciseGroup {
     groupId: string | null;
     groupType: 'superset' | 'circuit' | null;
     exercises: UIExercise[];
+  }
+
+  function makeBlockId(): string {
+    return globalThis.crypto?.randomUUID?.() ?? `block-${Date.now()}-${Math.random()}`;
+  }
+
+  function makePersistKey(
+    blockId: string | null,
+    exerciseId: number,
+    sets: { backendId: number | null; setNumber: number }[],
+    fallback: string,
+  ) {
+    if (blockId) return `block-${blockId}`;
+    const firstBackendId = sets.find((set) => set.backendId != null)?.backendId;
+    if (firstBackendId != null) return `set-${firstBackendId}`;
+    return `tmp-${exerciseId}-${fallback}`;
+  }
+
+  function getSessionSetBlockKey(set: Set): string {
+    return set.exercise_block_id ? `block-${set.exercise_block_id}` : `legacy-${set.exercise_id}`;
+  }
+
+  type SessionSetBlock = {
+    key: string;
+    blockId: string | null;
+    exerciseId: number;
+    sets: Set[];
+  };
+
+  function groupSessionSetsByBlock(sets: Set[]): SessionSetBlock[] {
+    const orderedBlocks: SessionSetBlock[] = [];
+    const byKey = new Map<string, SessionSetBlock>();
+    for (const set of [...sets].sort((a, b) => a.id - b.id)) {
+      const key = getSessionSetBlockKey(set);
+      let block = byKey.get(key);
+      if (!block) {
+        block = {
+          key,
+          blockId: set.exercise_block_id ?? null,
+          exerciseId: set.exercise_id,
+          sets: [],
+        };
+        byKey.set(key, block);
+        orderedBlocks.push(block);
+      }
+      block.sets.push(set);
+    }
+    return orderedBlocks;
   }
 
   function computeGroups(exercises: UIExercise[]): ExerciseGroup[] {
@@ -139,6 +197,8 @@
   let sessionId = $state<number | null>(null);
   let workoutName = $state('Workout');
   let allExercises = $state<Exercise[]>([]);
+  let personalRecordsByExercise = $state<Record<number, PersonalRecord>>({});
+  let startingPersonalRecordsByExercise = $state<Record<number, PersonalRecord>>({});
   let uiExercises = $state<UIExercise[]>([]);
 
   let exerciseGroups = $derived(computeGroups(uiExercises));
@@ -151,6 +211,8 @@
   let finishing = $state(false);
   let syncToPlan = $state(true);
   let hasLinkedPlan = $state(false);
+  let activePlan = $state<WorkoutPlan | null>(null);
+  let activePlanDayNumber = $state<number | null>(null);
   let syncCount = $state<number | null>(null);
   let syncStructural = $state<number | null>(null);
   let summaryCardEl = $state<HTMLDivElement | undefined>(undefined);
@@ -192,25 +254,116 @@
   let prCelebration = $state<{ exercise: string; type: string; value: string } | null>(null);
   let prTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  function checkForPR(ex: UIExercise, set: UISet) {
+  function indexPersonalRecords(records: PersonalRecord[]): Record<number, PersonalRecord> {
+    return Object.fromEntries(records.map((record) => [record.exercise_id, record]));
+  }
+
+  function emptyPersonalRecord(exercise: Exercise): PersonalRecord {
+    return {
+      exercise_id: exercise.id,
+      display_name: exercise.display_name,
+      name: exercise.name,
+      max_weight_kg: 0,
+      max_weight_date: null,
+      max_reps: 0,
+      max_reps_date: null,
+      best_1rm_kg: 0,
+      best_1rm_date: null,
+      best_set_weight_kg: 0,
+      best_set_reps: 0,
+    };
+  }
+
+  function getSetRepCount(ex: UIExercise, set: UISet): number {
+    return ex.isUnilateral
+      ? Math.min(set.repsLeft ?? 0, set.repsRight ?? 0)
+      : (set.reps ?? 0);
+  }
+
+  function getSetWeightKg(set: UISet): number {
+    return set.weightLbs != null ? toKg(set.weightLbs) : 0;
+  }
+
+  function getEstimatedOneRmKg(weightKg: number, reps: number): number {
+    return weightKg > 0 && reps > 0 ? weightKg * (1 + reps / 30) : 0;
+  }
+
+  function formatDisplayWeight(kg: number): string {
+    return `${fromKg(kg)} ${unit}`;
+  }
+
+  type PRHit = {
+    type: 'weight' | 'reps' | '1rm';
+    value: string;
+    rawValue: number;
+  };
+
+  function getPrHits(
+    ex: UIExercise,
+    set: UISet,
+    recordMap: Record<number, PersonalRecord>,
+  ): PRHit[] {
     const exercise = allExercises.find(e => e.id === ex.exerciseId);
-    if (!exercise || !set.initWeight || !set.initReps) return;
-    const w = set.weightLbs ?? 0;
-    const r = ex.isUnilateral ? Math.min(set.repsLeft ?? 0, set.repsRight ?? 0) : (set.reps ?? 0);
+    if (!exercise) return [];
+
+    const baseline = recordMap[ex.exerciseId] ?? emptyPersonalRecord(exercise);
+    const reps = getSetRepCount(ex, set);
+    const weightKg = getSetWeightKg(set);
+    const estOneRmKg = getEstimatedOneRmKg(weightKg, reps);
     const isAsst = exercise.is_assisted ?? false;
 
-    let prType = '';
-    let prValue = '';
-    if (!isAsst && w > (set.initWeight ?? 0)) {
-      prType = 'Weight PR';
-      prValue = `${w} ${unit}`;
-    } else if (r > (set.initReps ?? 0)) {
-      prType = 'Rep PR';
-      prValue = `${r} reps`;
+    const hits: PRHit[] = [];
+    if (!isAsst && weightKg > baseline.max_weight_kg) {
+      hits.push({ type: 'weight', value: formatDisplayWeight(weightKg), rawValue: weightKg });
+    }
+    if (reps > baseline.max_reps) {
+      hits.push({ type: 'reps', value: `${reps} reps`, rawValue: reps });
+    }
+    if (!isAsst && estOneRmKg > baseline.best_1rm_kg) {
+      hits.push({ type: '1rm', value: formatDisplayWeight(estOneRmKg), rawValue: estOneRmKg });
+    }
+    return hits;
+  }
+
+  function updateLivePersonalRecords(ex: UIExercise, set: UISet) {
+    const exercise = allExercises.find(e => e.id === ex.exerciseId);
+    if (!exercise) return;
+
+    const current = personalRecordsByExercise[ex.exerciseId] ?? emptyPersonalRecord(exercise);
+    const reps = getSetRepCount(ex, set);
+    const weightKg = getSetWeightKg(set);
+    const estOneRmKg = getEstimatedOneRmKg(weightKg, reps);
+    const updated: PersonalRecord = { ...current };
+
+    if (weightKg > updated.max_weight_kg) {
+      updated.max_weight_kg = weightKg;
+    }
+    if (reps > updated.max_reps) {
+      updated.max_reps = reps;
+    }
+    if (estOneRmKg > updated.best_1rm_kg) {
+      updated.best_1rm_kg = estOneRmKg;
+      updated.best_set_weight_kg = weightKg;
+      updated.best_set_reps = reps;
     }
 
-    if (prType) {
-      prCelebration = { exercise: exercise.display_name, type: prType, value: prValue };
+    personalRecordsByExercise = {
+      ...personalRecordsByExercise,
+      [ex.exerciseId]: updated,
+    };
+  }
+
+  function checkForPR(ex: UIExercise, set: UISet) {
+    const exercise = allExercises.find(e => e.id === ex.exerciseId);
+    if (!exercise) return;
+
+    const hits = getPrHits(ex, set, personalRecordsByExercise);
+    if (hits.length > 0) {
+      updateLivePersonalRecords(ex, set);
+      const hit = hits.find((candidate) => candidate.type === '1rm');
+      if (!hit) return;
+      const label = '1RM PR';
+      prCelebration = { exercise: exercise.display_name, type: label, value: hit.value };
       if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
       fireConfetti();
       if (prTimeout) clearTimeout(prTimeout);
@@ -236,27 +389,171 @@
     suggestion_detail?: string;
   }>>({});
 
-  function getMuscleGroup(exerciseId: number): string {
+  type PersistedFeedbackState = {
+    recoveryAskedMuscles: string[];
+    effortSubmitted: number[];
+    feedbackData: Record<number, {
+      recovery_rating?: string;
+      rir?: number;
+      pump_rating?: string;
+      suggestion?: string;
+      suggestion_detail?: string;
+    }>;
+    dismissedRecoveryExerciseIds: number[];
+    dismissedEffortExerciseIds: number[];
+  };
+
+  function feedbackStorageKey(id: number): string {
+    return `hgt_session_feedback_${id}`;
+  }
+
+  function saveFeedbackDraftState() {
+    if (typeof localStorage === 'undefined' || !sessionId) return;
+    const dismissedRecoveryExerciseIds = Object.entries(showRecoveryPrompt)
+      .filter(([, visible]) => visible === false)
+      .map(([uiId]) => uiExercises.find(ex => ex.uiId === uiId)?.exerciseId)
+      .filter((exerciseId): exerciseId is number => exerciseId != null);
+    const dismissedEffortExerciseIds = Object.entries(showEffortPrompt)
+      .filter(([, visible]) => visible === false)
+      .map(([uiId]) => uiExercises.find(ex => ex.uiId === uiId)?.exerciseId)
+      .filter((exerciseId): exerciseId is number => exerciseId != null);
+
+    const payload: PersistedFeedbackState = {
+      recoveryAskedMuscles: [...recoveryAskedMuscles],
+      effortSubmitted: [...effortSubmitted],
+      feedbackData,
+      dismissedRecoveryExerciseIds,
+      dismissedEffortExerciseIds,
+    };
+    localStorage.setItem(feedbackStorageKey(sessionId), JSON.stringify(payload));
+  }
+
+  async function restoreFeedbackState(sessId: number) {
+    let nextRecoveryAskedMuscles = new Set<string>();
+    let nextEffortSubmitted = new Set<number>();
+    let nextFeedbackData: Record<number, {
+      recovery_rating?: string;
+      rir?: number;
+      pump_rating?: string;
+      suggestion?: string;
+      suggestion_detail?: string;
+    }> = {};
+    let dismissedRecoveryExerciseIds = new Set<number>();
+    let dismissedEffortExerciseIds = new Set<number>();
+
+    try {
+      const saved = await getExerciseFeedback(sessId);
+      for (const entry of saved) {
+        nextFeedbackData[entry.exercise_id] = {
+          recovery_rating: entry.recovery_rating ?? undefined,
+          rir: entry.rir ?? undefined,
+          pump_rating: entry.pump_rating ?? undefined,
+          suggestion: entry.suggestion ?? undefined,
+          suggestion_detail: entry.suggestion_detail ?? undefined,
+        };
+        if (entry.recovery_rating) {
+          for (const muscle of getRecoveryMuscles(entry.exercise_id)) {
+            nextRecoveryAskedMuscles.add(muscle);
+          }
+          dismissedRecoveryExerciseIds.add(entry.exercise_id);
+        }
+        if (entry.rir != null || entry.pump_rating || entry.suggestion) {
+          nextEffortSubmitted.add(entry.exercise_id);
+          dismissedEffortExerciseIds.add(entry.exercise_id);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load saved feedback:', e);
+    }
+
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(feedbackStorageKey(sessId));
+      if (raw) {
+        try {
+          const parsed: PersistedFeedbackState = JSON.parse(raw);
+          nextRecoveryAskedMuscles = new Set([
+            ...nextRecoveryAskedMuscles,
+            ...(parsed.recoveryAskedMuscles ?? []),
+          ]);
+          nextEffortSubmitted = new Set([
+            ...nextEffortSubmitted,
+            ...(parsed.effortSubmitted ?? []),
+          ]);
+          nextFeedbackData = { ...nextFeedbackData, ...(parsed.feedbackData ?? {}) };
+          dismissedRecoveryExerciseIds = new Set([
+            ...dismissedRecoveryExerciseIds,
+            ...(parsed.dismissedRecoveryExerciseIds ?? []),
+          ]);
+          dismissedEffortExerciseIds = new Set([
+            ...dismissedEffortExerciseIds,
+            ...(parsed.dismissedEffortExerciseIds ?? []),
+          ]);
+        } catch (e) {
+          console.error('Failed to parse saved feedback draft:', e);
+        }
+      }
+    }
+
+    const nextShowRecoveryPrompt: Record<string, boolean> = {};
+    const nextShowEffortPrompt: Record<string, boolean> = {};
+    for (const ex of uiExercises) {
+      if (dismissedRecoveryExerciseIds.has(ex.exerciseId)) nextShowRecoveryPrompt[ex.uiId] = false;
+      if (dismissedEffortExerciseIds.has(ex.exerciseId)) nextShowEffortPrompt[ex.uiId] = false;
+    }
+
+    recoveryAskedMuscles = nextRecoveryAskedMuscles;
+    effortSubmitted = nextEffortSubmitted;
+    feedbackData = nextFeedbackData;
+    showRecoveryPrompt = nextShowRecoveryPrompt;
+    showEffortPrompt = nextShowEffortPrompt;
+  }
+
+  function clearFeedbackDraftState(id: number | null) {
+    if (typeof localStorage === 'undefined' || !id) return;
+    localStorage.removeItem(feedbackStorageKey(id));
+  }
+
+  function getRecoveryMuscles(exerciseId: number): string[] {
     const ex = allExercises.find(e => e.id === exerciseId);
-    return ex?.primary_muscles?.[0] ?? 'other';
+    const muscles = ex?.primary_muscles?.filter(Boolean) ?? [];
+    return muscles.length > 0 ? muscles : ['other'];
+  }
+
+  function formatMuscleLabel(muscle: string): string {
+    return muscle.replace(/_/g, ' ');
+  }
+
+  function getRecoveryPromptMuscles(exerciseId: number): string[] {
+    return getRecoveryMuscles(exerciseId).filter((muscle) => !recoveryAskedMuscles.has(muscle));
+  }
+
+  function getRecoveryPromptLabel(exerciseId: number): string {
+    const muscles = getRecoveryPromptMuscles(exerciseId).map(formatMuscleLabel);
+    if (muscles.length === 0) return 'muscles';
+    if (muscles.length === 1) return muscles[0];
+    if (muscles.length === 2) return `${muscles[0]} and ${muscles[1]}`;
+    return `${muscles.slice(0, -1).join(', ')}, and ${muscles[muscles.length - 1]}`;
+  }
+
+  function getMuscleGroup(exerciseId: number): string {
+    return getRecoveryMuscles(exerciseId)[0] ?? 'other';
   }
 
   function shouldShowRecovery(ex: UIExercise): boolean {
-    const muscle = getMuscleGroup(ex.exerciseId);
-    const firstSetDone = ex.sets.length > 0 && (ex.sets[0].done || ex.sets[0].skipped);
-    const notYetAsked = !recoveryAskedMuscles.has(muscle);
+    const firstSetDone = ex.sets.length > 0 && ex.sets[0].done;
+    const notYetAsked = getRecoveryPromptMuscles(ex.exerciseId).length > 0;
     return firstSetDone && notYetAsked && showRecoveryPrompt[ex.uiId] !== false;
   }
 
   function shouldShowEffort(ex: UIExercise): boolean {
-    const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped);
+    const allDone = ex.sets.length > 0 && ex.sets.every(s => s.done || s.skipped) && ex.sets.some(s => s.done);
     const alreadySubmitted = effortSubmitted.has(ex.exerciseId);
     return allDone && !alreadySubmitted && showEffortPrompt[ex.uiId] !== false;
   }
 
   async function submitRecovery(ex: UIExercise, rating: 'poor' | 'ok' | 'good' | 'fresh') {
-    const muscle = getMuscleGroup(ex.exerciseId);
-    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    const muscles = getRecoveryPromptMuscles(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, ...muscles]);
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
     feedbackData = { ...feedbackData, [ex.exerciseId]: { ...feedbackData[ex.exerciseId], recovery_rating: rating } };
     if (sessionId) {
@@ -267,8 +564,8 @@
   }
 
   function dismissRecovery(ex: UIExercise) {
-    const muscle = getMuscleGroup(ex.exerciseId);
-    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, muscle]);
+    const muscles = getRecoveryPromptMuscles(ex.exerciseId);
+    recoveryAskedMuscles = new Set([...recoveryAskedMuscles, ...muscles]);
     showRecoveryPrompt = { ...showRecoveryPrompt, [ex.uiId]: false };
   }
 
@@ -319,17 +616,38 @@
     effortSubmitted = new Set([...effortSubmitted, ex.exerciseId]);
   }
 
-  // Workout clock — only starts on first set completion
-  let startedAt = $state<number>(0);
-  let elapsed = $state(0);
+  // Preserve the first-completed-set time for resume / export only.
+  let startedAt = $state<number | null>(null);
   let clockInterval: ReturnType<typeof setInterval> | null = null;
-  let clockPaused = $state(false);
-  let clockStarted = $state(false);
-  let pauseOffset = $state(0); // accumulated pause time in ms
 
   // ─── Plate calculator ──────────────────────────────────────────────────
   const PLATES_LBS = [45, 35, 25, 10, 5, 2.5];
   const PLATES_KG = [20, 15, 10, 5, 2.5, 1.25];
+
+  function getExerciseSearchText(exercise: Exercise | undefined): string {
+    if (!exercise) return '';
+    return `${exercise.name ?? ''} ${exercise.display_name ?? ''}`.toLowerCase();
+  }
+
+  function isRackableEzBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('rackable') && (text.includes('ez_bar') || text.includes('ez bar') || text.includes('curl_bar') || text.includes('curl bar'));
+  }
+
+  function isEzBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('ez_bar') || text.includes('ez bar') || text.includes('curl_bar') || text.includes('curl bar');
+  }
+
+  function isAxleBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('axle_bar') || text.includes('axle bar');
+  }
+
+  function isSwissBarExercise(exercise: Exercise | undefined): boolean {
+    const text = getExerciseSearchText(exercise);
+    return text.includes('swiss_bar') || text.includes('swiss bar');
+  }
 
   function shouldShowPlates(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
@@ -341,9 +659,9 @@
     // Smith machine variants
     if (n.includes('smith') || d.includes('smith')) return true;
     // EZ bar / curl bar variants (plate-loaded bars)
-    if (n.includes('ez_bar') || n.includes('ez bar') || d.includes('ez bar')) return true;
-    if (n.includes('axle_bar') || d.includes('axle bar')) return true;
-    if (n.includes('swiss_bar') || d.includes('swiss bar')) return true;
+    if (isEzBarExercise(exercise)) return true;
+    if (isAxleBarExercise(exercise)) return true;
+    if (isSwissBarExercise(exercise)) return true;
     if (n.includes('rackable') || d.includes('rackable')) return true;
     // T-bar row / landmine
     if (n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || d.includes('t-bar') || d.includes('t bar')) return true;
@@ -353,10 +671,58 @@
     return false;
   }
 
-  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+  function isNamedOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
     if (!exercise) return false;
     const n = exercise.name?.toLowerCase() ?? '';
-    return n.includes('t_bar') || n.includes('t-bar') || n.includes('t bar') || n.includes('landmine');
+    const d = (exercise.display_name ?? '').toLowerCase();
+    return (
+      n.includes('t_bar') ||
+      n.includes('t-bar') ||
+      n.includes('t bar') ||
+      d.includes('t-bar') ||
+      d.includes('t bar') ||
+      n.includes('landmine') ||
+      d.includes('landmine')
+    );
+  }
+
+  function isOneSidedPlateExercise(exercise: Exercise | undefined): boolean {
+    return isNamedOneSidedPlateExercise(exercise);
+  }
+
+  /** True if exercise is a Prime plate-loaded machine (3-peg tracking) */
+  function isPrimePlateLoaded(exercise: Exercise | undefined): boolean {
+    if (!exercise) return false;
+    return exercise.is_prime && exercise.equipment_type === 'plate_loaded';
+  }
+
+  /** Distribute total per-side weight across 3 pegs (peg3 first, then peg2, then peg1).
+   *  Uses plate increments for clean distribution. */
+  function distributeToPegs(totalPerSide: number): { peg1: number; peg2: number; peg3: number } {
+    const increment = $settings.weightUnit === 'lbs' ? 5 : 2.5;
+    // For now, unlimited peg capacity — fill peg3 first
+    // Round total to increment
+    const rounded = Math.round(totalPerSide / increment) * increment;
+    // Simple strategy: put everything on peg3
+    // In practice, users will adjust per-peg manually and overload will
+    // suggest incrementing peg3 first
+    return { peg1: 0, peg2: 0, peg3: Math.max(0, rounded) };
+  }
+
+  /** Update total weight from peg values */
+  function syncWeightFromPegs(set: UISet) {
+    if (!set.pegWeights) return;
+    const perSide = set.pegWeights.peg1 + set.pegWeights.peg2 + set.pegWeights.peg3;
+    set.weightLbs = roundWeight(perSide * 2);
+  }
+
+  function clearPlateBannerFocus() {
+    focusedWeightSetId = null;
+    focusedExerciseId = null;
+    const active = document.activeElement;
+    if (active instanceof HTMLInputElement) {
+      active.blur();
+    }
   }
 
   // Derived: plate banner data for the currently focused weight input
@@ -366,6 +732,8 @@
       if (ex.exerciseId !== focusedExerciseId) continue;
       const exercise = allExercises.find((e: Exercise) => e.id === ex.exerciseId);
       if (!exercise || !shouldShowPlates(exercise)) return null;
+      // Prime machines use PrimePegVisual instead
+      if (isPrimePlateLoaded(exercise)) return null;
       for (let i = 0; i < ex.sets.length; i++) {
         const set = ex.sets[i];
         if (set.localId === focusedWeightSetId) {
@@ -387,6 +755,28 @@
     return null;
   });
 
+  // Derived: Prime peg banner data for the currently focused weight input
+  let primePegBanner = $derived.by(() => {
+    if (!focusedWeightSetId || !focusedExerciseId) return null;
+    for (const ex of uiExercises) {
+      if (ex.exerciseId !== focusedExerciseId) continue;
+      const exercise = allExercises.find((e: Exercise) => e.id === ex.exerciseId);
+      if (!exercise || !isPrimePlateLoaded(exercise)) return null;
+      for (let i = 0; i < ex.sets.length; i++) {
+        const set = ex.sets[i];
+        if (set.localId === focusedWeightSetId && set.pegWeights) {
+          const prevPegs = i > 0 ? ex.sets[i - 1].pegWeights : null;
+          return {
+            pegWeights: set.pegWeights,
+            isLbs: $settings.weightUnit === 'lbs',
+            prevPegWeights: prevPegs,
+          };
+        }
+      }
+    }
+    return null;
+  });
+
   /** Get bar/sled weight for plate math. Uses display base if set, else actual weight. */
   function getBarWeight(exercise: Exercise | undefined): number {
     const mw = $settings.machineWeights;
@@ -399,16 +789,15 @@
       if (n.includes('smith')) key = 'smithMachine';
       else if (n.includes('leg_press') || n.includes('leg press')) key = 'legPress';
       else if (n.includes('hack_squat') || n.includes('hack squat')) key = 'hackSquat';
-      else if (n.includes('t_bar') || n.includes('t-bar')) key = 'tBarRow';
+      else if (isNamedOneSidedPlateExercise(exercise)) key = 'tBarRow';
       else if (n.includes('belt_squat') || n.includes('belt squat')) key = 'beltSquat';
       // Use display base for plate math if configured, otherwise actual weight
       return mw[`${key}_displayBase`] ?? mw[key] ?? defaultBar;
     }
     // Specialty bars
     const n = exercise.name.toLowerCase();
-    if (n.includes('ez_bar') || n.includes('ez bar') || n.includes('curl_bar')) {
-      return n.includes('rackable') ? (mw.ezBarRackable ?? 35) : (mw.ezBar ?? 25);
-    }
+    if (isRackableEzBarExercise(exercise)) return mw.ezBarRackable ?? 35;
+    if (isEzBarExercise(exercise)) return mw.ezBar ?? 25;
     if (n.includes('safety_squat') || n.includes('ssb')) return mw.safetySquatBar ?? 65;
     if (n.includes('trap_bar') || n.includes('hex_bar')) return mw.trapBar ?? 45;
     return mw.barbell ?? defaultBar;
@@ -450,6 +839,47 @@
   let recentExercises = $state<Exercise[]>([]);
   // Swap mode: when set, the modal replaces this exercise instead of adding
   let swapTargetUiId = $state<string | null>(null);
+  let showCustomExerciseModal = $state(false);
+  let customExerciseDisplayName = $state('');
+  let customMovementType = $state<'compound' | 'isolation'>('compound');
+  let customBodyRegion = $state<'upper' | 'lower' | 'full_body'>('upper');
+  let customPrimaryMuscles = $state<string[]>([]);
+  let customSecondaryMuscles = $state<string[]>([]);
+
+  const muscleGroups = [
+    { value: 'chest', label: 'Chest' },
+    { value: 'lats', label: 'Lats' },
+    { value: 'upper_back', label: 'Upper Back' },
+    { value: 'mid_back', label: 'Mid Back' },
+    { value: 'lower_back', label: 'Lower Back' },
+    { value: 'traps', label: 'Traps' },
+    { value: 'biceps', label: 'Biceps' },
+    { value: 'triceps', label: 'Triceps' },
+    { value: 'forearms', label: 'Forearms' },
+    { value: 'quadriceps', label: 'Quadriceps' },
+    { value: 'hamstrings', label: 'Hamstrings' },
+    { value: 'glutes', label: 'Glutes' },
+    { value: 'calves', label: 'Calves' },
+    { value: 'abs', label: 'Abs' },
+    { value: 'core', label: 'Core' },
+    { value: 'obliques', label: 'Obliques' },
+    { value: 'neck', label: 'Neck' },
+    { value: 'front_delts', label: 'Front Delts' },
+    { value: 'side_delts', label: 'Side Delts' },
+    { value: 'rear_delts', label: 'Rear Delts' },
+    { value: 'adductors', label: 'Adductors' },
+  ];
+
+  const movementTypes = [
+    { value: 'compound', label: 'Compound' },
+    { value: 'isolation', label: 'Isolation' },
+  ] as const;
+
+  const bodyRegions = [
+    { value: 'upper', label: 'Upper Body' },
+    { value: 'lower', label: 'Lower Body' },
+    { value: 'full_body', label: 'Full Body' },
+  ] as const;
 
   // ─── Lifecycle ────────────────────────────────────────────────────────────
   onMount(async () => {
@@ -459,9 +889,15 @@
       const dayNumber = parseInt(params.get('day') || '1');
       const isDeload = params.get('deload') === 'true';
 
-      const [exData, notesData] = await Promise.all([getExercises(), getAllExerciseNotes()]);
+      const [exData, notesData, recordData] = await Promise.all([
+        getExercises(),
+        getAllExerciseNotes(),
+        getPersonalRecords().catch(() => []),
+      ]);
       allExercises = exData;
       exerciseStore.set(allExercises);
+      personalRecordsByExercise = indexPersonalRecords(recordData);
+      startingPersonalRecordsByExercise = indexPersonalRecords(recordData);
       // Convert string keys to numbers
       for (const [k, v] of Object.entries(notesData)) {
         exerciseNotes[Number(k)] = v.note;
@@ -505,7 +941,20 @@
           currentSession.set(inProgress);
           await resumeSession();
         } else {
-          // ── No active session: show plan picker ────────────────────────
+          // ── No active session: auto-start next scheduled workout if known ─
+          try {
+            const next = await getNextWorkout();
+            if (next && next.plan && next.day && !next.is_complete) {
+              // Update the URL bar so back-navigation works correctly.
+              // NOTE: goto() with replaceState does NOT re-run onMount (same-route
+              // navigation reuses the component), so we must call startFromPlan
+              // directly here rather than relying on the URL change to trigger it.
+              goto(`/workout/active?plan=${next.plan.id}&day=${next.day.day_number}`, { replaceState: true });
+              await startFromPlan(next.plan.id, next.day.day_number);
+              return;
+            }
+          } catch { /* fall through to picker if next-workout lookup fails */ }
+          // ── Fall back to manual plan picker ───────────────────────────────
           plans = await getPlans();
           showPicker = true;
           loading = false;
@@ -527,7 +976,10 @@
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) {
-        if (sessionId) saveDrafts();
+        if (sessionId) {
+          saveDrafts();
+          saveFeedbackDraftState();
+        }
       } else {
         // App came back to foreground — catch up the rest timer
         if (restActive && restEndTime > 0) {
@@ -544,69 +996,140 @@
       }
     });
     window.addEventListener('beforeunload', () => {
-      if (sessionId) saveDrafts();
+      if (sessionId) {
+        const anyDone = uiExercises.some(ex => ex.sets.some(s => s.done));
+        if (!anyDone) {
+          // No sets completed — silently delete the empty planned session
+          const token = localStorage.getItem('hgt_access_token');
+          fetch(`/api/sessions/${sessionId}`, {
+            method: 'DELETE',
+            keepalive: true,
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+          });
+        } else {
+          saveDrafts();
+          saveFeedbackDraftState();
+        }
+      }
     });
   }
 
-  // Save drafts before navigating away — session will auto-resume when you come back
+  // Auto-cancel empty sessions on navigation; save drafts for in-progress ones
   beforeNavigate(() => {
-    if (sessionId) saveDrafts();
+    if (sessionId) {
+      const anyDone = uiExercises.some(ex => ex.sets.some(s => s.done));
+      if (!anyDone) {
+        // No sets completed — delete the empty planned session silently
+        deleteSession(sessionId).catch(() => {});
+        sessionId = null;
+        currentSession.set(null);
+      } else {
+        saveDrafts();
+        saveFeedbackDraftState();
+      }
+    }
   });
 
   // ─── Start helpers ────────────────────────────────────────────────────────
+  function sessionMatchesRequestedDay(session: WorkoutSession, plan: WorkoutPlan, day: PlannedDay): boolean {
+    if (session.workout_plan_id !== plan.id) return false;
+    if (!session.name) return false;
+    return session.name === `${plan.name} - ${day.day_name}`;
+  }
+
   async function startFromPlan(planId: number, dayNumber: number) {
     loading = true;
     showPicker = false;
     try {
       const bodyWtKg = $latestBodyWeight?.weight_kg ?? 0;
+      const plan = await getPlan(planId);
+      activePlan = plan;
+      activePlanDayNumber = dayNumber;
+      const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
+      if (!day) throw new Error(`Plan ${planId} has no day ${dayNumber}`);
       let raw;
       try {
         raw = await createSessionFromPlan(planId, dayNumber, $settings.progressionStyle, bodyWtKg);
       } catch (e: any) {
         if (e?.response?.status === 409) {
-          // Session already in progress — resume it instead of showing conflict dialog
+          // Only resume automatically when the in-progress session matches the requested day.
           const detail = e?.response?.data?.detail;
           const existingId: number | null =
             detail && typeof detail === 'object' ? detail.session_id ?? null : null;
           if (existingId != null) {
-            currentSession.set(await getSession(existingId));
+            const existing = await getSession(existingId);
+            if (sessionMatchesRequestedDay(existing, plan, day)) {
+              currentSession.set(existing);
+              await resumeSession();
+              return;
+            }
+            conflictSession = existing;
+            conflictRetry = () => startFromPlan(planId, dayNumber);
+            conflictRequestedName = `${plan.name} - ${day.day_name}`;
+            loading = false;
+            return;
+          }
+
+          // Fallback: only auto-resume a matching in-progress session.
+          const sessions = await getSessions({ limit: 5 });
+          const matching = sessions.find(s =>
+            s.started_at && !s.completed_at && sessionMatchesRequestedDay(s, plan, day)
+          );
+          if (matching) {
+            currentSession.set(matching);
             await resumeSession();
             return;
           }
-          // Fallback: check for any in-progress session
-          const sessions = await getSessions({ limit: 5 });
+
           const inProgress = sessions.find(s => s.started_at && !s.completed_at);
           if (inProgress) {
-            currentSession.set(inProgress);
-            await resumeSession();
+            conflictSession = await getSession(inProgress.id);
+            conflictRetry = () => startFromPlan(planId, dayNumber);
+            conflictRequestedName = `${plan.name} - ${day.day_name}`;
+            loading = false;
             return;
           }
+
           await handleConflict(e, () => startFromPlan(planId, dayNumber));
           return;
         }
         throw e;
       }
-      const sess = await startSession(raw.id);
-      sessionId = sess.id;
-      workoutName = sess.name ?? 'Workout';
+      sessionId = raw.id;
+      workoutName = raw.name ?? 'Workout';
       hasLinkedPlan = true;
-      currentSession.set(sess);
-
-      const plan = await getPlan(planId);
-      const day = plan.days.find(d => d.day_number === dayNumber) ?? plan.days[0];
+      currentSession.set(raw);
 
       if (day) {
+        const sessionBlocks = groupSessionSetsByBlock(raw.sets);
+        const unusedByExercise = new Map<number, SessionSetBlock[]>();
+        for (const block of sessionBlocks) {
+          const existing = unusedByExercise.get(block.exerciseId) ?? [];
+          existing.push(block);
+          unusedByExercise.set(block.exerciseId, existing);
+        }
+        const usedBlockKeys = new Set<string>();
+
         uiExercises = day.exercises.map(pe => {
           const exercise = allExercises.find(e => e.id === pe.exercise_id);
           const isUni = exercise?.is_unilateral ?? false;
+          let matchedBlock =
+            (pe.block_id
+              ? sessionBlocks.find((block) => block.blockId === pe.block_id)
+              : null) ?? null;
+          if (!matchedBlock) {
+            const candidates = unusedByExercise.get(pe.exercise_id) ?? [];
+            matchedBlock = candidates.find((block) => !usedBlockKeys.has(block.key)) ?? null;
+          }
+          if (matchedBlock) usedBlockKeys.add(matchedBlock.key);
+          const blockId = pe.block_id ?? matchedBlock?.blockId ?? makeBlockId();
           const sets: UISet[] = [];
           for (let i = 1; i <= pe.sets; i++) {
-            const bset = sess.sets.find(
-              s => s.exercise_id === pe.exercise_id && s.set_number === i
-            );
+            const bset = matchedBlock?.sets.find((s) => s.set_number === i);
             // Pre-fill with progressive overload suggestions when available (0 = blank)
+            // Round suggested weights to nearest increment — user inputs stay unrounded
             const suggestedWeight = bset?.planned_weight_kg != null && bset.planned_weight_kg > 0
-              ? fromKg(bset.planned_weight_kg)
+              ? roundWeight(fromKg(bset.planned_weight_kg))
               : null;
             const suggestedReps = (bset?.planned_reps ?? 0) > 0 ? bset!.planned_reps : null;
             // Per-side planned reps for unilateral exercises (null for bilateral)
@@ -623,13 +1146,13 @@
 
             // Restore draft values if the user was mid-workout (cross-device sync)
             const hasDraft = bset?.draft_weight_kg != null || bset?.draft_reps != null;
-            const draftWeight = bset?.draft_weight_kg != null ? fromKg(bset.draft_weight_kg) : null;
+            const draftWeight = bset?.draft_weight_kg != null ? roundWeight(fromKg(bset.draft_weight_kg)) : null;
             const draftReps = bset?.draft_reps ?? null;
             const draftLeft = bset?.draft_reps_left ?? null;
             const draftRight = bset?.draft_reps_right ?? null;
 
             sets.push({
-              localId: `${pe.exercise_id}-${i}`,
+              localId: `${blockId}-${i}`,
               backendId: bset?.id ?? null,
               setNumber: i,
               weightLbs: hasDraft ? draftWeight : suggestedWeight,
@@ -646,16 +1169,24 @@
               oneRM,
               initWeight: suggestedWeight,
               initReps:   suggestedReps,
+              isExtrapolated: bset?.is_extrapolated ?? false,
               setType: bset?.set_type || 'standard',
               partialReps: bset?.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
               drops: bset?.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
                 weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
                 reps: d.reps ?? null,
               })) : [],
+              pegWeights: bset?.peg_weights ? {
+                peg1: fromKg(bset.peg_weights.peg1 ?? 0),
+                peg2: fromKg(bset.peg_weights.peg2 ?? 0),
+                peg3: fromKg(bset.peg_weights.peg3 ?? 0),
+              } : null,
             });
           }
           return {
             uiId: `${pe.exercise_id}-${Date.now()}-${Math.random()}`,
+            blockId,
+            persistKey: makePersistKey(blockId, pe.exercise_id, sets, `${Date.now()}-${Math.random()}`),
             exerciseId: pe.exercise_id,
             sets,
             isUnilateral: isUni,
@@ -675,12 +1206,8 @@
   }
 
   function startClockIfNeeded() {
-    if (clockStarted) return;
-    clockStarted = true;
+    if (startedAt !== null) return;
     startedAt = Date.now();
-    clockInterval = setInterval(() => {
-      elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
   }
 
   async function startFreeSession() {
@@ -700,10 +1227,9 @@
         }
         throw e;
       }
-      const sess = await startSession(raw.id);
-      sessionId = sess.id;
-      workoutName = sess.name ?? 'Workout';
-      currentSession.set(sess);
+      sessionId = raw.id;
+      workoutName = raw.name ?? 'Workout';
+      currentSession.set(raw);
 
       // Clock starts on first set completion, not here (#524)
     } catch (e) {
@@ -722,37 +1248,31 @@
       workoutName = sess.name ?? 'Workout';
       hasLinkedPlan = sess.workout_plan_id != null;
       currentSession.set(sess);
+      if (sess.workout_plan_id) {
+        try {
+          activePlan = await getPlan(sess.workout_plan_id);
+          activePlanDayNumber = sess.plan_day_number ?? null;
+        } catch { /* non-critical */ }
+      }
 
-      // Restore elapsed time from when the session started.
-      // Use parseUtcMs so the naive datetime from the backend is treated as UTC.
       if (sess.started_at) {
         startedAt = parseUtcMs(sess.started_at);
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
       } else {
-        startedAt = Date.now();
+        startedAt = null;
       }
-      clockInterval = setInterval(() => {
-        elapsed = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
-      }, 1000);
 
-      // Group sets by exercise, preserving insertion order
-      const exerciseOrder: number[] = [];
-      const setsByExercise = new Map<number, typeof sess.sets>();
-      for (const s of [...sess.sets].sort((a, b) => a.id - b.id)) {
-        if (!exerciseOrder.includes(s.exercise_id)) {
-          exerciseOrder.push(s.exercise_id);
-          setsByExercise.set(s.exercise_id, []);
-        }
-        setsByExercise.get(s.exercise_id)!.push(s);
-      }
+      const blocks = groupSessionSetsByBlock(sess.sets);
 
       const bwKg = $latestBodyWeight?.weight_kg ?? 0;
 
-      uiExercises = exerciseOrder.map(exerciseId => {
+      uiExercises = blocks.map((block, blockIndex) => {
+        const exerciseId = block.exerciseId;
         const exercise = allExercises.find(e => e.id === exerciseId);
         const isUni = exercise?.is_unilateral ?? false;
         const isAss = exercise?.is_assisted ?? false;
-        const backendSets = setsByExercise.get(exerciseId)!;
+        const backendSets = block.sets;
+        const blockIdentity = block.blockId ?? null;
+        const blockLocalKey = blockIdentity ?? `legacy-${exerciseId}-${blockIndex}`;
 
         const sets: UISet[] = backendSets.map(bset => {
           const isDone = bset.completed_at != null;
@@ -765,10 +1285,10 @@
             }
           } else if (bset.draft_weight_kg != null) {
             // Incomplete with draft: user was mid-edit before navigating away
-            weightVal = fromKg(bset.draft_weight_kg);
+            weightVal = roundWeight(fromKg(bset.draft_weight_kg));
           } else if (bset.planned_weight_kg != null && bset.planned_weight_kg > 0) {
-            // Incomplete: use planned/suggested weight
-            weightVal = fromKg(bset.planned_weight_kg);
+            // Incomplete: use planned/suggested weight (rounded to nearest increment)
+            weightVal = roundWeight(fromKg(bset.planned_weight_kg));
           }
 
           let repsVal: number | null;
@@ -793,13 +1313,13 @@
 
           // Assisted exercises store the assist amount directly — no BW math needed.
           const sugW = bset.planned_weight_kg != null && bset.planned_weight_kg > 0
-            ? fromKg(bset.planned_weight_kg)
+            ? roundWeight(fromKg(bset.planned_weight_kg))
             : null;
           const sugR = bset.planned_reps ?? null;
           const oneRM = sugW && sugW > 0 && sugR && sugR > 0 ? sugW * (1 + sugR / 30) : null;
 
           return {
-            localId: `${exerciseId}-${bset.set_number}-resume`,
+            localId: `${blockLocalKey}-${bset.set_number}-resume`,
             backendId: bset.id,
             setNumber: bset.set_number,
             weightLbs: weightVal,
@@ -814,17 +1334,25 @@
             oneRM,
             initWeight: sugW,
             initReps: sugR,
+            isExtrapolated: bset.is_extrapolated ?? false,
             setType: bset.set_type || 'standard',
             partialReps: bset.sub_sets?.find((d: any) => d.type === 'partial')?.reps ?? null,
             drops: bset.sub_sets ? bset.sub_sets.filter((d: any) => d.type !== 'partial').map((d: any) => ({
               weightLbs: d.weight_kg ? fromKg(d.weight_kg) : null,
               reps: d.reps ?? null,
             })) : [],
+            pegWeights: bset.peg_weights ? {
+              peg1: fromKg(bset.peg_weights.peg1 ?? 0),
+              peg2: fromKg(bset.peg_weights.peg2 ?? 0),
+              peg3: fromKg(bset.peg_weights.peg3 ?? 0),
+            } : null,
           };
         });
 
         return {
           uiId: `${exerciseId}-${Date.now()}-${Math.random()}`,
+          blockId: blockIdentity,
+          persistKey: makePersistKey(blockIdentity, exerciseId, sets, `${Date.now()}-${Math.random()}`),
           exerciseId,
           sets,
           isUnilateral: isUni,
@@ -833,6 +1361,11 @@
           groupType: null,
         };
       });
+
+      // Restore user-defined planning-stage structure if they changed it during this session
+      uiExercises = loadSessionStructure(uiExercises);
+
+      await restoreFeedbackState(sess.id);
     } catch (e) {
       error = 'Failed to resume workout: ' + (e instanceof Error ? e.message : String(e));
     } finally {
@@ -855,15 +1388,6 @@
     return new Date(hasOffset ? ts : ts + 'Z').getTime();
   }
 
-  function formatClock(s: number) {
-    const h = Math.floor(s / 3600);
-    const m = Math.floor((s % 3600) / 60);
-    const sec = s % 60;
-    return h > 0
-      ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-      : `${m}:${String(sec).padStart(2, '0')}`;
-  }
-
   function formatRest(s: number) {
     return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
   }
@@ -871,11 +1395,22 @@
   // ─── Epley bi-directional helpers ────────────────────────────────────────
   function epleyReps(oneRM: number, weight: number): number {
     if (weight <= 0) return 0;
-    return roundReps((oneRM / weight - 1) * 30);
+    // Round to nearest integer (not nearest 5) so small weight changes produce
+    // smooth, proportional rep adjustments rather than large 5-rep jumps.
+    return Math.max(1, Math.round((oneRM / weight - 1) * 30));
   }
   function epleyWeight(oneRM: number, reps: number): number {
     if (reps <= 0) return 0;
     return roundWeight(oneRM / (1 + reps / 30));
+  }
+  // Returns true if currentWeight is close enough to initWeight to show a rep
+  // recommendation. Bounds: ±20% (compound) or ±15% (isolation), floor ±5 lbs.
+  function withinWeightBounds(currentWeight: number | null, initWeight: number | null, isCompound: boolean): boolean {
+    if (currentWeight == null || currentWeight <= 0) return false;
+    if (initWeight == null || initWeight <= 0) return true;
+    const pct = isCompound ? 0.20 : 0.15;
+    const bound = Math.max(initWeight * pct, 5);
+    return Math.abs(currentWeight - initWeight) <= bound;
   }
 
   // Sync myo_rep_match sets: copy weight/reps from set 1 to all match sets
@@ -968,6 +1503,11 @@
               draft_reps_left: set.repsLeft,
               draft_reps_right: set.repsRight,
             }),
+            ...(set.pegWeights && { peg_weights: JSON.stringify({
+              peg1: toKg(set.pegWeights.peg1),
+              peg2: toKg(set.pegWeights.peg2),
+              peg3: toKg(set.pegWeights.peg3),
+            }) }),
           });
         } catch { /* ignore individual failures */ }
       }
@@ -1004,6 +1544,7 @@
       if (bId === null) {
         const created = await addSet(sessionId, {
           exercise_id: ex.exerciseId,
+          exercise_block_id: ex.blockId ?? undefined,
           set_number: set.setNumber,
           planned_reps: set.reps ?? undefined,
           planned_weight_kg: weightKg,
@@ -1040,6 +1581,11 @@
         ...(notes && { notes }),
         ...(set.setType !== 'standard' && { set_type: set.setType }),
         ...(subSetsData && subSetsData.length > 0 && { sub_sets: subSetsData }),
+        ...(set.pegWeights && { peg_weights: JSON.stringify({
+          peg1: toKg(set.pegWeights.peg1),
+          peg2: toKg(set.pegWeights.peg2),
+          peg3: toKg(set.pegWeights.peg3),
+        }) }),
       });
 
       set.reps = effectiveReps; // sync reps field for drop-off calc
@@ -1202,7 +1748,7 @@
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (!ex) return;
     const set = ex.sets.find(s => s.localId === localId);
-    if (!set || set.done) return;
+    if (!set) return;
 
     if (set.backendId !== null) {
       try { await deleteSet(sessionId, set.backendId); } catch { /* ignore */ }
@@ -1211,6 +1757,9 @@
     ex.sets = ex.sets.filter(s => s.localId !== localId);
     ex.sets.forEach((s, i) => { s.setNumber = i + 1; });
     uiExercises = [...uiExercises];
+
+    // Reset timer if no sets are done anymore
+    resetTimerIfNoDoneSets();
   }
 
   function addSetRow(exUiId: string) {
@@ -1218,7 +1767,7 @@
     if (!ex) return;
     const last = ex.sets[ex.sets.length - 1];
     ex.sets = [...ex.sets, {
-      localId: `${ex.exerciseId}-${ex.sets.length + 1}-${Date.now()}`,
+      localId: `${ex.blockId ?? ex.persistKey}-${ex.sets.length + 1}-${Date.now()}`,
       backendId: null,
       setNumber: ex.sets.length + 1,
       weightLbs: last?.weightLbs ?? null,
@@ -1232,7 +1781,7 @@
       initWeight: null,
       initReps: null,
       setType: ex.sets[0]?.setType || 'standard',
-      partialReps: null, drops: [],
+      partialReps: null, drops: [], pegWeights: null,
     }];
     uiExercises = [...uiExercises];
   }
@@ -1283,7 +1832,7 @@
           repsRight: ex.isUnilateral ? w.reps : null,
           done: false, skipped: false, doneLeft: false, doneRight: false,
           saving: false, oneRM: null, initWeight: null, initReps: null,
-          setType: 'warmup', partialReps: null, drops: [],
+          setType: 'warmup', partialReps: null, drops: [], pegWeights: null,
         });
       }
       ex.sets = ex.sets.filter(s => s.setType !== 'warmup');
@@ -1323,7 +1872,7 @@
         initWeight: null,
         initReps: null,
         setType: 'warmup',
-        partialReps: null, drops: [],
+        partialReps: null, drops: [], pegWeights: null,
       });
     }
 
@@ -1337,12 +1886,125 @@
     uiExercises = [...uiExercises];
   }
 
+  function exerciseOrderKey(sid: number | null) {
+    return sid ? `hgt_exercise_order_${sid}` : null;
+  }
+
+  function exerciseStructureKey(sid: number | null) {
+    return sid ? `hgt_session_structure_${sid}` : null;
+  }
+
+  function saveSessionStructure() {
+    const key = exerciseStructureKey(sessionId);
+    if (!key || typeof localStorage === 'undefined') return;
+    const payload: PersistedSessionExerciseStructure = {
+      order: uiExercises.map(e => e.persistKey),
+      groups: Object.fromEntries(
+        uiExercises.map(e => [
+          e.persistKey,
+          { groupId: e.groupId, groupType: e.groupType },
+        ]),
+      ),
+    };
+    localStorage.setItem(key, JSON.stringify(payload));
+  }
+
+  function loadSessionStructure(exercises: UIExercise[]): UIExercise[] {
+    if (typeof localStorage === 'undefined') return exercises;
+    const structureKey = exerciseStructureKey(sessionId);
+    const legacyOrderKey = exerciseOrderKey(sessionId);
+    try {
+      const rawStructure = structureKey ? localStorage.getItem(structureKey) : null;
+      if (rawStructure) {
+        const saved: PersistedSessionExerciseStructure = JSON.parse(rawStructure);
+        const order = Array.isArray(saved.order) ? saved.order : [];
+        const groups = saved.groups ?? {};
+        const ordered = order
+          .map(key => exercises.find(e => e.persistKey === key))
+          .filter((e): e is UIExercise => e != null)
+          .map((exercise) => {
+            const group = groups[exercise.persistKey];
+            return group
+              ? { ...exercise, groupId: group.groupId ?? null, groupType: group.groupType ?? null }
+              : exercise;
+          });
+        const rest = exercises
+          .filter(e => !order.includes(e.persistKey))
+          .map((exercise) => {
+            const group = groups[exercise.persistKey];
+            return group
+              ? { ...exercise, groupId: group.groupId ?? null, groupType: group.groupType ?? null }
+              : exercise;
+          });
+        return [...ordered, ...rest];
+      }
+
+      const savedOrder = legacyOrderKey ? localStorage.getItem(legacyOrderKey) : null;
+      if (!savedOrder) return exercises;
+      const order: number[] = JSON.parse(savedOrder);
+      const ordered = order
+        .map(id => exercises.find(e => e.exerciseId === id))
+        .filter((e): e is UIExercise => e != null);
+      const rest = exercises.filter(e => !order.includes(e.exerciseId));
+      return [...ordered, ...rest];
+    } catch {
+      return exercises;
+    }
+  }
+
   function moveExercise(idx: number, dir: -1 | 1) {
     const target = idx + dir;
     if (target < 0 || target >= uiExercises.length) return;
     const arr = [...uiExercises];
     [arr[idx], arr[target]] = [arr[target], arr[idx]];
     uiExercises = arr;
+    saveSessionStructure();
+    persistReorderToPlan();
+  }
+
+  async function persistReorderToPlan() {
+    if (!activePlan || !activePlanDayNumber) return;
+    const day = activePlan.days.find(d => d.day_number === activePlanDayNumber);
+    if (!day) return;
+    const byBlockId = new Map<string, PlannedExercise>(
+      day.exercises.filter(e => e.block_id).map(e => [e.block_id!, e])
+    );
+    // Also index by exercise_id for exercises without block_id (legacy sessions)
+    const byExerciseId = new Map<number, PlannedExercise>(
+      day.exercises.map(e => [e.exercise_id, e])
+    );
+    const newOrder = uiExercises
+      .map(ue => {
+        if (ue.blockId) return byBlockId.get(ue.blockId);
+        // Fallback: match by exercise_id for legacy exercises without block_id
+        return byExerciseId.get(ue.exerciseId);
+      })
+      .filter((e): e is PlannedExercise => e != null);
+    // Append any plan exercises not represented in uiExercises
+    const includedBlockIds = new Set(newOrder.map(e => e.block_id).filter(Boolean));
+    const includedExIds = new Set(newOrder.map(e => e.exercise_id));
+    const missing = day.exercises.filter(e =>
+      (e.block_id ? !includedBlockIds.has(e.block_id) : !includedExIds.has(e.exercise_id))
+    );
+    const reordered = [...newOrder, ...missing];
+    const updatedDays = activePlan.days.map(d =>
+      d.day_number === activePlanDayNumber ? { ...d, exercises: reordered } : d
+    );
+    try {
+      const updated = await updatePlan(activePlan.id, {
+        name: activePlan.name,
+        description: activePlan.description ?? undefined,
+        block_type: activePlan.block_type,
+        duration_weeks: activePlan.duration_weeks,
+        number_of_days: activePlan.number_of_days,
+        days: updatedDays,
+        auto_progression: activePlan.auto_progression,
+        is_draft: activePlan.is_draft,
+      });
+      activePlan = updated;
+    } catch (err) {
+      console.error('Failed to persist exercise reorder to plan:', err);
+    }
   }
 
   async function removeExercise(exUiId: string) {
@@ -1353,6 +2015,17 @@
       await Promise.allSettled(backendIds.map(id => deleteSet(sessionId!, id)));
     }
     uiExercises = uiExercises.filter(e => e.uiId !== exUiId);
+    saveSessionStructure();
+
+    // Reset timer if no sets are done anymore
+    resetTimerIfNoDoneSets();
+  }
+
+  function resetTimerIfNoDoneSets() {
+    const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
+    if (!anyDone) {
+      startedAt = null;
+    }
   }
 
   // ─── Rest timer ───────────────────────────────────────────────────────────
@@ -1375,6 +2048,7 @@
   let highlightTimeout: ReturnType<typeof setTimeout> | null = null;
 
   function handlePostSetCompletion(exUiId: string) {
+    clearPlateBannerFocus();
     const ex = uiExercises.find(e => e.uiId === exUiId);
     if (!ex?.groupId) {
       startRestTimer(exUiId);
@@ -1421,6 +2095,7 @@
       group.forEach(e => e.groupType = t);
     }
     uiExercises = [...uiExercises];
+    saveSessionStructure();
   }
 
   /** Play a short chime using Web Audio API (no audio file needed) */
@@ -1575,6 +2250,70 @@
     searchInputEl?.focus();
   }
 
+  function resetCustomExerciseForm(prefill = '') {
+    customExerciseDisplayName = prefill;
+    customMovementType = 'compound';
+    customBodyRegion = 'upper';
+    customPrimaryMuscles = [];
+    customSecondaryMuscles = [];
+  }
+
+  function openCustomExerciseModal(prefill = searchQuery.trim()) {
+    resetCustomExerciseForm(prefill);
+    showCustomExerciseModal = true;
+  }
+
+  function closeCustomExerciseModal() {
+    showCustomExerciseModal = false;
+  }
+
+  async function createCustomExerciseForWorkout() {
+    const rawName = customExerciseDisplayName.trim();
+    if (!rawName) return;
+    if (customPrimaryMuscles.length === 0) {
+      alert('Please select at least one primary muscle group');
+      return;
+    }
+
+    const capitalizedDisplayName = rawName.replace(/\b\w/g, c => c.toUpperCase());
+    const systemName = capitalizedDisplayName
+      .toLowerCase()
+      .replace(/[^\w\s]/g, '')
+      .replace(/\s+/g, '_');
+
+    // Detect Prime machines and prompt for equipment type
+    let equipmentType: string | undefined;
+    let isPrime = false;
+    if (systemName.includes('prime')) {
+      const isPlateLoaded = confirm(
+        'This looks like a Prime Fitness machine.\n\n' +
+        'Is it plate-loaded (has weight pegs)?\n\n' +
+        'OK = Plate-loaded (3-peg tracking)\n' +
+        'Cancel = Selectorized (pin-loaded stack)'
+      );
+      isPrime = true;
+      equipmentType = isPlateLoaded ? 'plate_loaded' : 'machine';
+    }
+
+    try {
+      const newExercise = await createExercise({
+        name: systemName,
+        display_name: capitalizedDisplayName,
+        movement_type: customMovementType,
+        body_region: customBodyRegion,
+        ...(equipmentType && { equipment_type: equipmentType }),
+        ...(isPrime && { is_prime: true }),
+        primary_muscles: customPrimaryMuscles,
+        secondary_muscles: customSecondaryMuscles,
+      });
+      allExercises = await getExercises();
+      pickingExercise = newExercise;
+      showCustomExerciseModal = false;
+    } catch (error) {
+      alert('Failed to create exercise: ' + (error instanceof Error ? error.message : 'Unknown error'));
+    }
+  }
+
   function confirmAdd() {
     if (!pickingExercise) return;
 
@@ -1597,7 +2336,7 @@
           saving: false,
           oneRM: null, initWeight: null, initReps: null,
           setType: 'standard' as string,
-          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[],
+          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
         }));
         // Delete old backend sets
         for (const s of oldEx.sets) {
@@ -1605,8 +2344,11 @@
             deleteSet(sessionId, s.backendId).catch(() => {});
           }
         }
+        const preservedBlockId = oldEx.blockId ?? makeBlockId();
         uiExercises[idx] = {
           uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+          blockId: preservedBlockId,
+          persistKey: oldEx.persistKey,
           exerciseId: pickingExercise.id,
           sets: newSets,
           isUnilateral: pickingExercise.is_unilateral,
@@ -1615,6 +2357,7 @@
           groupType: oldEx.groupType,
         };
         uiExercises = [...uiExercises];
+        saveSessionStructure();
       }
       swapTargetUiId = null;
     } else {
@@ -1633,10 +2376,13 @@
         oneRM: null, initWeight: null, initReps: null,
         setType: 'standard' as string,
         partialReps: null,
-        drops: [] as { weightLbs: number | null; reps: number | null }[],
+        drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
       }));
+      const blockId = makeBlockId();
       uiExercises = [...uiExercises, {
         uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+        blockId,
+        persistKey: makePersistKey(blockId, pickingExercise.id, sets, `${Date.now()}-${Math.random()}`),
         exerciseId: pickingExercise.id,
         sets,
         isUnilateral: pickingExercise.is_unilateral,
@@ -1644,6 +2390,7 @@
         groupId: null,
         groupType: null,
       }];
+      saveSessionStructure();
     }
     showAddModal = false;
     pickingExercise = null;
@@ -1653,9 +2400,15 @@
   // ─── Finish workout ───────────────────────────────────────────────────────
   async function doFinish() {
     if (!sessionId) { goto('/'); return; }
+    const finishedSessionId = sessionId;
     finishing = true;
     try {
       await completeSession(sessionId);
+      // Clean up any saved exercise order for this session
+      const orderKey = exerciseOrderKey(sessionId);
+      if (orderKey && typeof localStorage !== 'undefined') localStorage.removeItem(orderKey);
+      const structureKey = exerciseStructureKey(sessionId);
+      if (structureKey && typeof localStorage !== 'undefined') localStorage.removeItem(structureKey);
       // Persist any notes the user entered
       const noteKey = `hgt_session_note_${sessionId}`;
       const savedNote = localStorage.getItem(noteKey)?.trim();
@@ -1669,7 +2422,14 @@
       }
       if (syncToPlan) {
         try {
-          const data = await syncSessionToPlan(sessionId);
+          const data = await syncSessionToPlan(sessionId, {
+            exercises: uiExercises.map((exercise) => ({
+              exercise_id: exercise.exerciseId,
+              exercise_block_id: exercise.blockId,
+              group_id: exercise.groupId,
+              group_type: exercise.groupType,
+            })),
+          });
           syncCount = data.updated;
           syncStructural = data.structural_changes ?? 0;
         } catch (e) {
@@ -1682,11 +2442,12 @@
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
+    clearFeedbackDraftState(finishedSessionId);
     // Compute PRs before clearing UI state
     prs = detectPRs();
     // Write workout to HealthKit (no-op on web/PWA)
     writeWorkout({
-      startDate: new Date(Date.now() - elapsed * 1000),
+      startDate: new Date(startedAt ?? Date.now()),
       endDate: new Date(),
       workoutName: workoutName,
     }).catch(() => {}); // fire and forget
@@ -1696,6 +2457,7 @@
 
   async function doDiscard() {
     if (!sessionId) { goto('/'); return; }
+    const discardedSessionId = sessionId;
     const confirmed = confirm('Discard this workout? All progress will be permanently deleted.');
     if (!confirmed) return;
     try {
@@ -1703,9 +2465,14 @@
     } catch (e) {
       console.error('Failed to delete session:', e);
     }
+    const orderKey = exerciseOrderKey(sessionId);
+    if (orderKey && typeof localStorage !== 'undefined') localStorage.removeItem(orderKey);
+    const structureKey = exerciseStructureKey(sessionId);
+    if (structureKey && typeof localStorage !== 'undefined') localStorage.removeItem(structureKey);
     if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
     if (restInterval)  { clearInterval(restInterval);  restInterval  = null; }
     currentSession.set(null);
+    clearFeedbackDraftState(discardedSessionId);
     goto('/');
   }
 
@@ -1718,26 +2485,17 @@
     for (const ex of uiExercises) {
       const exercise = getEx(ex.exerciseId);
       if (!exercise) continue;
-      const isAsst = exercise.is_assisted ?? false;
       const doneSetsEx = ex.sets.filter(s => s.done);
       if (doneSetsEx.length === 0) continue;
-      let foundWeight = false;
-      let foundReps = false;
+      let bestOneRm: PRHit | null = null;
       for (const s of doneSetsEx) {
-        const w = s.weightLbs ?? 0;
-        const r = s.reps ?? (ex.isUnilateral ? Math.min(s.repsLeft ?? 0, s.repsRight ?? 0) : 0);
-        if (!s.initWeight || !s.initReps) continue;
-        // Weight PR: beat the suggested weight (not applicable for assisted)
-        if (!foundWeight && !isAsst && w > (s.initWeight ?? 0)) {
-          results.push({ exerciseName: exercise.display_name, type: 'weight', value: `${w} ${unit}` });
-          foundWeight = true;
-        }
-        // Rep PR: beat the suggested reps
-        if (!foundReps && r > (s.initReps ?? 0)) {
-          results.push({ exerciseName: exercise.display_name, type: 'reps', value: `${r} reps` });
-          foundReps = true;
+        for (const hit of getPrHits(ex, s, startingPersonalRecordsByExercise)) {
+          if (hit.type === '1rm' && (!bestOneRm || hit.rawValue > bestOneRm.rawValue)) {
+            bestOneRm = hit;
+          }
         }
       }
+      if (bestOneRm) results.push({ exerciseName: exercise.display_name, type: '1rm', value: bestOneRm.value });
     }
     return results;
   }
@@ -1805,6 +2563,7 @@
   // ─── Conflict state (existing in-progress session blocks starting a new one) ──
   let conflictSession = $state<WorkoutSession | null>(null);
   let conflictRetry = $state<(() => Promise<void>) | null>(null); // re-run after abandoning
+  let conflictRequestedName = $state<string | null>(null);
 
   async function handleConflict(err: any, retry: () => Promise<void>) {
     // Prefer the structured session_id from the 409 response body; fall back
@@ -1829,6 +2588,7 @@
     const sess = conflictSession;
     conflictSession = null;
     conflictRetry = null;
+    conflictRequestedName = null;
     // Ensure the store is set so resumeSession() can look up the ID
     if (sess) currentSession.set(sess);
     await resumeSession();
@@ -1848,7 +2608,15 @@
     conflictSession = null;
     const retry = conflictRetry;
     conflictRetry = null;
+    conflictRequestedName = null;
     if (retry) await retry();
+  }
+
+  function keepRequestedPlanned() {
+    conflictSession = null;
+    conflictRetry = null;
+    conflictRequestedName = null;
+    goto('/');
   }
 
   // ─── Exercise notes toggle ────────────────────────────────────────────────
@@ -1878,6 +2646,57 @@
     return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
+  function historySetReps(set: ExerciseHistorySession['sets'][number]): string {
+    if (set.actual_reps == null && (set.reps_left != null || set.reps_right != null)) {
+      return `L:${set.reps_left ?? '—'}/R:${set.reps_right ?? '—'}`;
+    }
+    return `${set.actual_reps ?? '—'}`;
+  }
+
+  function historySetWeight(
+    set: ExerciseHistorySession['sets'][number],
+    isAssisted: boolean,
+  ): string | null {
+    if (set.actual_weight_kg == null) return null;
+    const displayWeight = isAssisted ? -fromKg(set.actual_weight_kg) : fromKg(set.actual_weight_kg);
+    return `${displayWeight}`;
+  }
+
+  function historySessionInlineSummary(
+    session: ExerciseHistorySession,
+    isAssisted: boolean,
+  ): string {
+    const parts: string[] = [];
+    let currentWeight: string | null = null;
+    let currentReps: string[] = [];
+
+    const flush = () => {
+      if (currentReps.length === 0) return;
+      if (currentWeight != null) {
+        parts.push(`${currentWeight}x${currentReps.join(', ')}`);
+      } else {
+        parts.push(`x${currentReps.join(', ')}`);
+      }
+      currentWeight = null;
+      currentReps = [];
+    };
+
+    for (const set of session.sets) {
+      const reps = historySetReps(set);
+      const weight = historySetWeight(set, isAssisted);
+      if (weight === currentWeight) {
+        currentReps.push(reps);
+      } else {
+        flush();
+        currentWeight = weight;
+        currentReps = [reps];
+      }
+    }
+
+    flush();
+    return parts.join(', ');
+  }
+
   // ─── Un-complete a set ────────────────────────────────────────────────────
   async function uncompleteSet(exUiId: string, localId: string) {
     if (!sessionId) return;
@@ -1898,14 +2717,8 @@
       set.doneLeft = false;
       set.doneRight = false;
 
-      // If no sets are done anymore, reset timer (#528)
-      const anyDone = uiExercises.some(e => e.sets.some(s => s.done));
-      if (!anyDone && clockStarted) {
-        clockStarted = false;
-        elapsed = 0;
-        startedAt = 0;
-        if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-      }
+      // Reset timer if no sets are done anymore
+      resetTimerIfNoDoneSets();
     } catch (e) {
       console.error('Failed to uncomplete set:', e);
     } finally {
@@ -1930,6 +2743,7 @@
       if (bId === null) {
         const created = await addSet(sessionId, {
           exercise_id: ex.exerciseId,
+          exercise_block_id: ex.blockId ?? undefined,
           set_number: set.setNumber,
           planned_reps: set.reps ?? undefined,
           planned_weight_kg: set.weightLbs != null ? toKg(set.weightLbs) : undefined,
@@ -2055,24 +2869,40 @@
 
   </div>
 
-<!-- ─── Conflict: existing in-progress session ────────────────────────── -->
+<!-- ─── Conflict: existing active session ─────────────────────────────── -->
 {:else if conflictSession}
   <div class="flex items-center justify-center flex-1 p-4">
     <div class="card max-w-md w-full text-center space-y-4">
       <div class="text-amber-400 text-4xl">⚠️</div>
-      <h2 class="text-xl font-semibold">Workout already in progress</h2>
+      <h2 class="text-xl font-semibold">Workout conflict</h2>
       <p class="text-zinc-400 text-sm">
-        <span class="text-white font-medium">{conflictSession.name}</span> is still active.
-        Do you want to continue it or abandon it and start a new one?
+        You tried to start
+        <span class="text-white font-medium">{conflictRequestedName ?? 'a new workout'}</span>,
+        but another session is already in progress.
       </p>
+      <div class="grid gap-3 text-left">
+        <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Requested workout</p>
+          <p class="text-sm font-medium text-white">{conflictRequestedName ?? 'New workout'}</p>
+          <p class="text-xs text-zinc-500 mt-1">This will stay planned unless you explicitly replace the active session.</p>
+        </div>
+        <div class="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3">
+          <p class="text-[11px] uppercase tracking-wide text-amber-400/80 mb-1">Active workout</p>
+          <p class="text-sm font-medium text-white">{conflictSession.name}</p>
+          <p class="text-xs text-zinc-500 mt-1">Status: in progress</p>
+        </div>
+      </div>
       <div class="flex flex-col gap-3 pt-1">
-        <button onclick={continueExisting} class="btn-primary w-full">▶ Continue Existing Workout</button>
+        <button onclick={continueExisting} class="btn-primary w-full">▶ Resume Active Workout</button>
         <button
           onclick={abandonAndRetry}
           class="w-full px-4 py-2 rounded-lg border border-red-700 text-red-400 hover:bg-red-900/20 transition-colors text-sm font-medium"
-        >🗑 Abandon & Start New</button>
+        >🗑 Abandon Active & Start Requested Workout</button>
+        <button
+          onclick={keepRequestedPlanned}
+          class="w-full px-4 py-2 rounded-lg border border-zinc-700 text-zinc-300 hover:bg-zinc-800 transition-colors text-sm font-medium"
+        >Keep Requested Workout Planned</button>
       </div>
-      <a href="/plans" class="block text-xs text-zinc-500 hover:text-zinc-300 transition-colors">← Back to Plans</a>
     </div>
   </div>
 
@@ -2089,8 +2919,8 @@
 
 <!-- ─── Finished screen ────────────────────────────────────────────────── -->
 {:else if finished}
-  <div class="flex items-center justify-center flex-1 p-4">
-    <div class="card max-w-lg w-full" bind:this={summaryCardEl}>
+  <div class="flex-1 overflow-y-auto px-4 py-4">
+    <div class="card max-w-lg w-full mx-auto mb-8" bind:this={summaryCardEl}>
       <div class="text-center mb-6">
         <div class="text-6xl mb-3">🎉</div>
         <h2 class="text-3xl font-bold">Workout done!</h2>
@@ -2098,14 +2928,10 @@
       </div>
 
       <!-- Stats -->
-      <div class="grid grid-cols-3 gap-4 mb-6">
+      <div class="grid grid-cols-2 gap-4 mb-6">
         <div class="bg-zinc-900 rounded-lg p-3 text-center">
           <p class="text-2xl font-bold text-primary-400">{summaryDoneSets}</p>
           <p class="text-xs text-zinc-400 mt-0.5">Sets done</p>
-        </div>
-        <div class="bg-zinc-900 rounded-lg p-3 text-center">
-          <p class="text-2xl font-bold text-primary-400">{formatClock(elapsed)}</p>
-          <p class="text-xs text-zinc-400 mt-0.5">Duration</p>
         </div>
         <div class="bg-zinc-900 rounded-lg p-3 text-center">
           <p class="text-2xl font-bold text-primary-400">{Math.round(summaryVolumeLbs).toLocaleString()}</p>
@@ -2193,23 +3019,6 @@
         <div class="flex-1 min-w-0">
           <h1 class="text-sm font-semibold truncate text-zinc-200">{workoutName}</h1>
           <div class="flex items-center gap-3 mt-0.5">
-            <button
-              onclick={() => {
-                if (clockPaused) {
-                  // Resume: add pause duration to offset
-                  pauseOffset += Date.now() - (startedAt + (elapsed * 1000) + pauseOffset);
-                  clockInterval = setInterval(() => {
-                    elapsed = Math.max(0, Math.floor((Date.now() - startedAt - pauseOffset) / 1000));
-                  }, 1000);
-                } else {
-                  // Pause: stop the clock
-                  if (clockInterval) { clearInterval(clockInterval); clockInterval = null; }
-                }
-                clockPaused = !clockPaused;
-              }}
-              class="text-base font-mono font-bold {clockPaused ? 'text-amber-400 animate-pulse' : 'text-primary-400'}"
-              title={clockPaused ? 'Resume timer' : 'Pause timer'}
-            >{formatClock(elapsed)}{clockPaused ? ' ⏸' : ''}</button>
             <span class="text-xs text-zinc-500">{doneSets}/{totalSets} sets</span>
           </div>
         </div>
@@ -2303,9 +3112,9 @@
               </div>
               <div class="flex items-center gap-1 ml-3 mt-0.5">
                 <!-- Reorder buttons -->
-                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i > 0) { [uiExercises[i-1], uiExercises[i]] = [uiExercises[i], uiExercises[i-1]]; uiExercises = [...uiExercises]; } }}
+                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i > 0) moveExercise(i, -1); }}
                         class="text-zinc-500 hover:text-white px-1 text-sm">▲</button>
-                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i < uiExercises.length - 1) { [uiExercises[i], uiExercises[i+1]] = [uiExercises[i+1], uiExercises[i]]; uiExercises = [...uiExercises]; } }}
+                <button onclick={() => { const i = uiExercises.indexOf(ex); if (i < uiExercises.length - 1) moveExercise(i, 1); }}
                         class="text-zinc-500 hover:text-white px-1 text-sm">▼</button>
                 {#if exercise?.description}
                   <button
@@ -2421,8 +3230,7 @@
                               set.weightLbs = val;
                               if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                                 const r = epleyReps(set.oneRM, val);
-                                set.repsLeft = r;
-                                set.repsRight = r;
+                                if (r >= 4) { set.repsLeft = r; set.repsRight = r; }
                               }
                               const idx = ex.sets.indexOf(set);
                               for (let i = idx + 1; i < ex.sets.length; i++) {
@@ -2431,8 +3239,7 @@
                                   s.weightLbs = val;
                                   if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                     const r = epleyReps(s.oneRM, val);
-                                    s.repsLeft = r;
-                                    s.repsRight = r;
+                                    if (r >= 4) { s.repsLeft = r; s.repsRight = r; }
                                   }
                                 } else { break; }
                               }
@@ -2448,7 +3255,10 @@
                             {#if isAssistedEx && set.weightLbs !== null}
                               <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
                             {/if}
-                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                            {#if set.isExtrapolated && !set.done}
+                              <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
+                            {/if}
+                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                               {#if estReps < 5}
                                 <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -2473,14 +3283,6 @@
                             const r = v === '' ? null : parseInt(v);
                             if (side === 'left') set.repsLeft = r;
                             else set.repsRight = r;
-                            if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                              const newW = epleyWeight(set.oneRM, r);
-                              set.weightLbs = newW;
-                              const idx = ex.sets.indexOf(set);
-                              for (let i = idx + 1; i < ex.sets.length; i++) {
-                                if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
-                              }
-                            }
                             uiExercises = [...uiExercises];
                           }}
                           disabled={set.done || sideDone || isMyoMatchLocked(ex, set)} min="0"
@@ -2601,7 +3403,12 @@
                           set.weightLbs = val;
                           // Epley: always update rep suggestion for this set
                           if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
-                            set.reps = epleyReps(set.oneRM, val);
+                            const newReps = epleyReps(set.oneRM, val);
+                            if (newReps >= 4) set.reps = newReps;
+                          }
+                          // Auto-distribute to pegs for Prime machines
+                          if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
+                            set.pegWeights = distributeToPegs(val / 2);
                           }
                           // Propagate to subsequent sets only while each next set
                           // had the same weight as the set just edited (chain stops at first mismatch)
@@ -2610,8 +3417,12 @@
                             const s = ex.sets[i];
                             if (!s.done && s.weightLbs === oldWeight) {
                               s.weightLbs = val;
+                              if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
+                                s.pegWeights = distributeToPegs(val / 2);
+                              }
                               if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
-                                s.reps = epleyReps(s.oneRM, val);
+                                const newReps = epleyReps(s.oneRM, val);
+                                if (newReps >= 4) s.reps = newReps;
                               }
                             } else { break; }
                           }
@@ -2626,7 +3437,10 @@
                       {#if isAssistedEx && set.weightLbs !== null}
                         <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
                       {/if}
-                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done}
+                      {#if set.isExtrapolated && !set.done}
+                        <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
+                      {/if}
+                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                         {#if estReps < 5}
                           <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -2650,14 +3464,6 @@
                           const v = (e.target as HTMLInputElement).value;
                           const r = v === '' ? null : parseInt(v);
                           set.reps = r;
-                          if (!isAssistedEx && r != null && r > 0 && set.oneRM != null) {
-                            const newW = epleyWeight(set.oneRM, r);
-                            set.weightLbs = newW;
-                            const idx = ex.sets.indexOf(set);
-                            for (let i = idx + 1; i < ex.sets.length; i++) {
-                              if (!ex.sets[i].done) ex.sets[i].weightLbs = newW;
-                            }
-                          }
                           uiExercises = [...uiExercises];
                         }}
                         disabled={set.done || isMyoMatchLocked(ex, set)} min="0" placeholder="reps"
@@ -2744,6 +3550,52 @@
                       + Add Drop
                     </button>
                   {/if}
+                  <!-- Prime machine peg weight breakdown -->
+                  {#if isPrimePlateLoaded(exercise) && !set.done && !set.skipped}
+                    {@const pegs = set.pegWeights ?? { peg1: 0, peg2: 0, peg3: 0 }}
+                    <div class="col-span-full px-2 mt-1 mb-1">
+                      <div class="bg-zinc-800/50 rounded-lg px-3 py-2">
+                        <p class="text-[10px] text-zinc-500 mb-1.5 font-medium">Per-side peg weights ({unit})</p>
+                        <div class="flex items-center gap-2">
+                          {#each ['peg1', 'peg2', 'peg3'] as pegKey, pi}
+                            <div class="flex flex-col items-center gap-0.5 flex-1">
+                              <span class="text-[9px] text-zinc-500">Peg {pi + 1}</span>
+                              <input
+                                type="number" inputmode="decimal"
+                                value={pegs[pegKey as keyof typeof pegs] || ''}
+                                oninput={(e) => {
+                                  const v = (e.target as HTMLInputElement).value;
+                                  const val = v === '' ? 0 : Math.abs(parseFloat(v));
+                                  if (!set.pegWeights) set.pegWeights = { peg1: 0, peg2: 0, peg3: 0 };
+                                  set.pegWeights[pegKey as keyof typeof set.pegWeights] = val;
+                                  syncWeightFromPegs(set);
+                                  uiExercises = [...uiExercises];
+                                }}
+                                disabled={set.done}
+                                class="set-input !w-full !text-xs !py-1"
+                                placeholder="0"
+                                onfocus={() => { focusedWeightSetId = set.localId; focusedExerciseId = ex.exerciseId; }}
+                              />
+                            </div>
+                          {/each}
+                          <div class="flex flex-col items-center gap-0.5">
+                            <span class="text-[9px] text-zinc-400">Total</span>
+                            <span class="text-xs text-zinc-300 font-mono py-1">
+                              {roundWeight((pegs.peg1 + pegs.peg2 + pegs.peg3) * 2)}
+                            </span>
+                          </div>
+                        </div>
+                        <button
+                          class="text-[10px] text-primary-400 hover:text-primary-300 mt-1"
+                          onclick={() => {
+                            const totalPerSide = (set.weightLbs ?? 0) / 2;
+                            set.pegWeights = distributeToPegs(totalPerSide);
+                            uiExercises = [...uiExercises];
+                          }}
+                        >Auto-distribute from total</button>
+                      </div>
+                    </div>
+                  {/if}
                 {/if}
               {/each}
             </div>
@@ -2771,9 +3623,9 @@
 
           <!-- ── Recovery prompt (after first set of new muscle group) ── -->
           {#if shouldShowRecovery(ex)}
-            {@const muscle = getMuscleGroup(ex.exerciseId)}
+            {@const muscleLabel = getRecoveryPromptLabel(ex.exerciseId)}
             <div class="mx-1 mb-2 px-3 py-2.5 rounded-xl bg-blue-500/10 border border-blue-500/20">
-              <p class="text-xs text-blue-300 mb-2">How recovered is your <span class="font-semibold capitalize">{muscle}</span> from last session?</p>
+              <p class="text-xs text-blue-300 mb-2">How recovered is your <span class="font-semibold capitalize">{muscleLabel}</span> from last session?</p>
               <div class="flex gap-2">
                 {#each [['😩', 'poor', 'Poor'], ['😐', 'ok', 'OK'], ['💪', 'good', 'Good'], ['🔥', 'fresh', 'Fresh']] as [emoji, value, label]}
                   <button
@@ -2902,28 +3754,29 @@
     </div><!-- /scrollable -->
 
     <!-- ─── Rest timer banner (always visible) ──────────────────────────────── -->
-    <div class="sticky bottom-0 z-30 flex items-center px-4 py-3 border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}">
+    <div class="sticky bottom-0 z-30 flex items-center px-4 {restActive ? 'py-2.5' : 'py-2'} border-t transition-colors {restActive ? 'bg-zinc-900/95 backdrop-blur border-primary-500/30' : 'bg-zinc-900/80 backdrop-blur border-zinc-800'}"
+         style="padding-bottom: max({restActive ? '0.625rem' : '0.5rem'}, env(safe-area-inset-bottom, 0px))">
       {#if restActive}
         <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
+          <div class="w-7 h-7 rounded-full bg-primary-500/20 flex items-center justify-center shrink-0">
             <span class="text-primary-400 text-xs font-bold">REST</span>
           </div>
-          <span class="text-3xl font-mono font-bold tracking-tight text-white">{formatRest(restSecs)}</span>
+          <span class="text-[1.65rem] font-mono font-bold tracking-tight text-white leading-none">{formatRest(restSecs)}</span>
         </div>
         <div class="flex items-center gap-2 shrink-0">
           <button onclick={() => { restEndTime = Math.max(Date.now() + 1000, restEndTime - 15000); restSecs = Math.max(1, Math.ceil((restEndTime - Date.now()) / 1000)); }}
-                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">−15s</button>
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[38px]">−15s</button>
           <button onclick={() => { restEndTime += 15000; restSecs = Math.ceil((restEndTime - Date.now()) / 1000); }}
-                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[40px]">+15s</button>
+                  class="px-3 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-xl text-xs font-medium transition-colors min-h-[38px]">+15s</button>
           <button onclick={skipRest}
-                  class="px-5 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[40px]">Skip</button>
+                  class="px-4 py-2 bg-primary-600 hover:bg-primary-500 text-white rounded-xl text-sm font-semibold transition-colors min-h-[38px]">Skip</button>
         </div>
       {:else}
         <div class="flex items-center gap-3 flex-1">
-          <div class="w-8 h-8 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
+          <div class="w-7 h-7 rounded-full bg-zinc-700/50 flex items-center justify-center shrink-0">
             <span class="text-zinc-500 text-xs font-bold">REST</span>
           </div>
-          <span class="text-sm text-zinc-500">Ready</span>
+          <span class="text-xs text-zinc-500">Ready</span>
         </div>
       {/if}
     </div>
@@ -2947,7 +3800,17 @@
             Add Exercise
           {/if}
         </h3>
-        <button onclick={() => { showAddModal = false; swapTargetUiId = null; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        <div class="flex items-center gap-3">
+          {#if !pickingExercise}
+            <button
+              onclick={() => openCustomExerciseModal()}
+              class="w-8 h-8 rounded-full bg-primary-600 hover:bg-primary-500 text-white text-lg leading-none flex items-center justify-center"
+              aria-label="Create custom exercise"
+              title="Create custom exercise"
+            >+</button>
+          {/if}
+          <button onclick={() => { showAddModal = false; swapTargetUiId = null; showCustomExerciseModal = false; }} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+        </div>
       </div>
 
       {#if !pickingExercise}
@@ -3019,9 +3882,25 @@
                 </div>
               {/if}
             </button>
-          {:else}
-            <p class="text-zinc-500 text-sm text-center py-8">No exercises found</p>
           {/each}
+
+          <button
+            onclick={() => openCustomExerciseModal()}
+            class="w-full text-left px-3 py-3 rounded-lg border border-dashed border-primary-500/40 bg-primary-500/5 hover:bg-primary-500/10 transition-colors mt-1"
+          >
+            <div class="text-sm font-medium text-primary-300">Create custom exercise</div>
+            <div class="text-xs text-zinc-500 mt-0.5">
+              {#if searchQuery.trim()}
+                Add “{searchQuery.trim()}” if it is missing from the list
+              {:else}
+                Add a new exercise without leaving the workout
+              {/if}
+            </div>
+          </button>
+
+          {#if filteredExercises.length === 0}
+            <p class="text-zinc-500 text-sm text-center py-6">No exercises found</p>
+          {/if}
         </div>
 
       {:else}
@@ -3053,6 +3932,97 @@
   </div>
 {/if}
 
+{#if showCustomExerciseModal}
+  <div class="fixed inset-0 bg-black/80 flex items-center justify-center z-[60] p-4">
+    <div class="bg-zinc-900 w-full max-w-md rounded-2xl border border-white/8 shadow-2xl max-h-[92vh] overflow-y-auto">
+      <div class="flex items-center justify-between px-4 py-4 border-b border-white/5">
+        <h4 class="text-lg font-semibold">Create Custom Exercise</h4>
+        <button onclick={closeCustomExerciseModal} class="text-zinc-400 hover:text-white text-xl leading-none">✕</button>
+      </div>
+
+      <div class="p-4 space-y-4">
+        <div>
+          <label class="label">Exercise Name *</label>
+          <input
+            type="text"
+            bind:value={customExerciseDisplayName}
+            class="input"
+            placeholder="e.g. Incline Dumbbell Press"
+          />
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="label">Movement Type</label>
+            <select bind:value={customMovementType} class="input">
+              {#each movementTypes as type}
+                <option value={type.value}>{type.label}</option>
+              {/each}
+            </select>
+          </div>
+          <div>
+            <label class="label">Body Region</label>
+            <select bind:value={customBodyRegion} class="input">
+              {#each bodyRegions as region}
+                <option value={region.value}>{region.label}</option>
+              {/each}
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Primary Muscle Groups *</label>
+          <div class="flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => {
+                  customPrimaryMuscles = customPrimaryMuscles.includes(muscle.value)
+                    ? customPrimaryMuscles.filter(m => m !== muscle.value)
+                    : [...customPrimaryMuscles, muscle.value];
+                }}
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customPrimaryMuscles.includes(muscle.value) ? 'bg-primary-600 text-white' : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+
+        <div>
+          <label class="label">Secondary Muscle Groups</label>
+          <div class="flex flex-wrap gap-2">
+            {#each muscleGroups as muscle}
+              <button
+                type="button"
+                onclick={() => {
+                  customSecondaryMuscles = customSecondaryMuscles.includes(muscle.value)
+                    ? customSecondaryMuscles.filter(m => m !== muscle.value)
+                    : [...customSecondaryMuscles, muscle.value];
+                }}
+                class="px-3 py-2 rounded-lg text-sm font-medium transition-colors {customSecondaryMuscles.includes(muscle.value) ? 'bg-indigo-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'}"
+              >
+                {muscle.label}
+              </button>
+            {/each}
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end gap-3 px-4 py-4 border-t border-white/5">
+        <button onclick={closeCustomExerciseModal} class="btn-secondary">Cancel</button>
+        <button
+          onclick={createCustomExerciseForWorkout}
+          class="btn-primary"
+          disabled={!customExerciseDisplayName.trim()}
+        >
+          Create Exercise
+        </button>
+      </div>
+    </div>
+  </div>
+{/if}
+
 <!-- ─── Exercise History Modal ─────────────────────────────────────────────── -->
 {#if historyExerciseId !== null}
   {@const histEx = getEx(historyExerciseId)}
@@ -3078,43 +4048,22 @@
           <p class="text-zinc-500 text-sm text-center py-10">No history yet for this exercise.</p>
         {:else}
           {#each historyData as session}
-            <div>
-              <div class="flex items-baseline justify-between mb-1.5">
-                <div class="flex items-baseline gap-2">
-                  {#if session.week_number != null && session.plan_name}
-                    <span class="text-sm font-semibold text-primary-400">{session.plan_name} wk {session.week_number}</span>
-                  {:else if session.session_name}
-                    <span class="text-sm font-semibold text-zinc-300">{session.session_name}</span>
-                  {/if}
-                  <span class="text-xs text-zinc-500">{fmtHistDate(session.date)}</span>
-                </div>
-              </div>
-              <div class="bg-zinc-950 rounded-lg overflow-hidden">
-                <div class="grid px-3 py-1.5 border-b border-zinc-800" style="grid-template-columns: 2rem 1fr 1fr">
-                  <span class="text-xs text-zinc-500">#</span>
-                  <span class="text-xs text-zinc-500 text-right">{histEx?.is_assisted ? '−Assist' : `Wt (${unit})`}</span>
-                  <span class="text-xs text-zinc-500 text-right">Reps</span>
-                </div>
-                {#each session.sets as s}
-                  {@const dispW = s.actual_weight_kg != null
-                    ? (histEx?.is_assisted
-                        ? -fromKg(s.actual_weight_kg)   // assist amount stored directly; show as negative
-                        : fromKg(s.actual_weight_kg))
-                    : null}
-                  <div class="grid px-3 py-1.5 border-b border-gray-800 last:border-0" style="grid-template-columns: 2rem 1fr 1fr">
-                    <span class="text-xs text-zinc-500 font-mono">{s.set_number}</span>
-                    <span class="text-sm font-mono text-right {dispW != null ? 'text-white' : 'text-gray-600'}">
-                      {dispW != null ? dispW : '—'}
-                    </span>
-                    <span class="text-sm font-mono text-right {(s.actual_reps != null || s.reps_left != null || s.reps_right != null) ? 'text-white' : 'text-gray-600'}">
-                      {#if s.actual_reps == null && (s.reps_left != null || s.reps_right != null)}
-                        L:{s.reps_left ?? '—'}/R:{s.reps_right ?? '—'}
-                      {:else}
-                        {s.actual_reps ?? '—'}
-                      {/if}
-                    </span>
+            {@const sessionSummary = historySessionInlineSummary(session, histEx?.is_assisted ?? false)}
+            <div class="bg-zinc-950 rounded-lg overflow-hidden border border-zinc-800">
+              <div class="px-3 py-3">
+                <div class="min-w-0">
+                  <div class="flex items-baseline gap-2 flex-wrap">
+                    {#if session.week_number != null && session.plan_name}
+                      <span class="text-sm font-semibold text-primary-400">{session.plan_name} wk {session.week_number}</span>
+                    {:else if session.session_name}
+                      <span class="text-sm font-semibold text-zinc-300">{session.session_name}</span>
+                    {/if}
+                    <span class="text-xs text-zinc-500">{fmtHistDate(session.date)}</span>
                   </div>
-                {/each}
+                  <p class="text-sm text-zinc-300 mt-1 font-mono break-words">
+                    {sessionSummary || 'No completed sets'}
+                  </p>
+                </div>
               </div>
             </div>
           {/each}
@@ -3127,12 +4076,11 @@
 
 <!-- PR Celebration Toast -->
 {#if prCelebration}
-  <div class="fixed top-4 left-4 right-4 z-50 animate-bounce">
-    <div class="bg-gradient-to-r from-amber-600 to-yellow-500 rounded-2xl px-5 py-4 shadow-2xl text-center">
-      <p class="text-2xl mb-1">🎉🏆🎉</p>
-      <p class="text-lg font-bold text-white">{prCelebration.type}!</p>
-      <p class="text-sm text-white/90">{prCelebration.exercise}</p>
-      <p class="text-xl font-bold text-white mt-1">{prCelebration.value}</p>
+  <div class="fixed top-4 left-1/2 -translate-x-1/2 z-50">
+    <div class="bg-amber-500/95 text-white px-4 py-2 rounded-xl shadow-xl shadow-amber-500/20 text-center backdrop-blur-sm min-w-[14rem]">
+      <div class="text-[11px] font-semibold uppercase tracking-wide opacity-90">{prCelebration.type}</div>
+      <div class="text-sm font-semibold truncate">{prCelebration.exercise}</div>
+      <div class="text-base font-bold">{prCelebration.value}</div>
     </div>
   </div>
 {/if}
@@ -3148,15 +4096,12 @@
       prevWeight={plateBanner.prevWeight}
     />
   </div>
-{/if}
-
-<!-- PR celebration overlay -->
-{#if prCelebration}
-  <div class="fixed top-20 left-1/2 -translate-x-1/2 z-50 animate-bounce">
-    <div class="bg-gradient-to-r from-yellow-500/90 to-amber-500/90 text-white px-6 py-3 rounded-2xl shadow-2xl shadow-yellow-500/30 text-center backdrop-blur-sm">
-      <div class="text-2xl font-black">🏆 NEW PR!</div>
-      <div class="text-sm font-semibold opacity-90">{prCelebration.exercise}</div>
-      <div class="text-lg font-bold">{prCelebration.type}: {prCelebration.value}</div>
-    </div>
+{:else if primePegBanner}
+  <div class="fixed bottom-0 left-0 right-0 z-40 bg-zinc-900/95 border-t border-zinc-700 px-4 py-2 backdrop-blur-sm">
+    <PrimePegVisual
+      pegWeights={primePegBanner.pegWeights}
+      isLbs={primePegBanner.isLbs}
+      prevPegWeights={primePegBanner.prevPegWeights}
+    />
   </div>
 {/if}

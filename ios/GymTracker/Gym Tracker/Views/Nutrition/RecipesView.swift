@@ -102,7 +102,7 @@ struct RecipesView: View {
     private func loadRecipes() async {
         loading = true
         do {
-            recipes = try await APIClient.shared.get("/recipes")
+            recipes = try await APIClient.shared.get("/recipes/")
         } catch {
             print("[Recipes] Load error: \(error)")
         }
@@ -326,6 +326,8 @@ struct RecipeDetailView: View {
 
 struct RecipeBuilderView: View {
     let existing: RecipeModel?
+    let sourceEntries: [NutritionEntry]
+    let onSaved: (() -> Void)?
 
     @State private var name = ""
     @State private var description = ""
@@ -334,8 +336,10 @@ struct RecipeBuilderView: View {
     @State private var saving = false
     @Environment(\.dismiss) private var dismiss
 
-    init(existing: RecipeModel? = nil) {
+    init(existing: RecipeModel? = nil, sourceEntries: [NutritionEntry] = [], onSaved: (() -> Void)? = nil) {
         self.existing = existing
+        self.sourceEntries = sourceEntries
+        self.onSaved = onSaved
         if let r = existing {
             _name = State(initialValue: r.name)
             _description = State(initialValue: r.description ?? "")
@@ -351,6 +355,10 @@ struct RecipeBuilderView: View {
                     fat: "\(Int($0.fat))"
                 )
             } ?? [])
+        } else if !sourceEntries.isEmpty {
+            _name = State(initialValue: Self.defaultRecipeName(for: sourceEntries))
+            _description = State(initialValue: Self.defaultRecipeDescription(for: sourceEntries))
+            _ingredients = State(initialValue: sourceEntries.map(Self.draftIngredient(from:)))
         }
     }
 
@@ -376,6 +384,11 @@ struct RecipeBuilderView: View {
             Form {
                 // Recipe info
                 Section("Recipe Info") {
+                    if existing == nil, !sourceEntries.isEmpty {
+                        Label("Prefilled from \(sourceEntries.count) selected food log item\(sourceEntries.count == 1 ? "" : "s").", systemImage: "checkmark.circle")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
                     TextField("Recipe Name", text: $name)
                     TextField("Description (optional)", text: $description, axis: .vertical)
                         .lineLimit(2...4)
@@ -456,13 +469,40 @@ struct RecipeBuilderView: View {
             if let existing {
                 let _: RecipeModel = try await APIClient.shared.put("/recipes/\(existing.id)", body: body)
             } else {
-                let _: RecipeModel = try await APIClient.shared.post("/recipes", body: body)
+                let _: RecipeModel = try await APIClient.shared.post("/recipes/", body: body)
             }
+            onSaved?()
             dismiss()
         } catch {
             print("[RecipeBuilder] Save error: \(error)")
         }
         saving = false
+    }
+
+    private static func draftIngredient(from entry: NutritionEntry) -> DraftIngredient {
+        let quantity = entry.quantity_g ?? 1
+        let quantityText = quantity == quantity.rounded() ? "\(Int(quantity))" : String(format: "%.1f", quantity)
+        return DraftIngredient(
+            name: entry.name,
+            quantity: quantityText,
+            unit: entry.quantity_g == nil ? "serving" : "g",
+            calories: "\(Int(entry.calories ?? 0))",
+            protein: "\(Int(entry.protein ?? 0))",
+            carbs: "\(Int(entry.carbs ?? 0))",
+            fat: "\(Int(entry.fat ?? 0))"
+        )
+    }
+
+    private static func defaultRecipeName(for entries: [NutritionEntry]) -> String {
+        let meals = Set(entries.compactMap(\.meal))
+        if meals.count == 1, let meal = meals.first, !meal.isEmpty {
+            return "\(meal.capitalized) Recipe"
+        }
+        return "Mixed Meal Recipe"
+    }
+
+    private static func defaultRecipeDescription(for entries: [NutritionEntry]) -> String {
+        "Created from \(entries.count) logged food item\(entries.count == 1 ? "" : "s")."
     }
 }
 

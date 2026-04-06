@@ -31,12 +31,9 @@ class Settings(BaseSettings):
     usda_api_key: str = "DEMO_KEY"
     calorieninjas_api_key: str = ""
 
-    # Database
-    database_url: str = "sqlite+aiosqlite:///./homegym.db"
-    database_sync_url: str = "sqlite:///./homegym.db"
-    # For PostgreSQL, use:
-    # database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/homegym"
-    # database_sync_url: str = "postgresql://postgres:postgres@localhost:5432/homegym"
+    # Database (PostgreSQL)
+    database_url: str = "postgresql+asyncpg://homegym:homegym_secret@localhost:5432/homegym"
+    database_sync_url: str = "postgresql://homegym:homegym_secret@localhost:5432/homegym"
 
 
 

@@ -27,6 +27,7 @@
 		F1A2B3C4D5E607182930A1B2 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B3C4D5E60718293041B2C3 /* ActivityView.swift */; };
 		A3B4C5D6E7F80829304152B3 /* WorkoutSyncService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */; };
 		C5D6E7F8091A2B3C4D5E6F70 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E7F8091A2B3C4D5E6F7081 /* HomeView.swift */; };
+		AA11BB22CC33DD44EE55FF66 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA11BB22CC33DD44EE55FF67 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -51,6 +52,7 @@
 		B4C5D6E7F8092930415263C4 /* WorkoutSyncService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkoutSyncService.swift; sourceTree = "<group>"; };
 		D6E7F8091A2B3C4D5E6F7081 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		D2B3C4D5E60718293041B2C3 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
+		AA11BB22CC33DD44EE55FF67 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = "Gym Tracker/Assets.xcassets"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -184,6 +186,7 @@
 		F69C1351246969DB8656A402 = {
 			isa = PBXGroup;
 			children = (
+				AA11BB22CC33DD44EE55FF67 /* Assets.xcassets */,
 				B2168D43F10C6D46410E6BB1 /* App */,
 				0D0451F80BCCEB4FC0688DE6 /* Components */,
 				540479158DBFCF4AE3653C01 /* Models */,
@@ -201,6 +204,7 @@
 			buildConfigurationList = 7A03BA10B4A2C352CA73F801 /* Build configuration list for PBXNativeTarget "Gym Tracker" */;
 			buildPhases = (
 				F17230695C4BAD5F706149D2 /* Sources */,
+				AA11BB22CC33DD44EE55FF68 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -247,6 +251,17 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		AA11BB22CC33DD44EE55FF68 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AA11BB22CC33DD44EE55FF66 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
 		F17230695C4BAD5F706149D2 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
@@ -291,6 +306,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.lethal.gymtracker.native;
+				PRODUCT_NAME = GymTracker;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -432,6 +448,7 @@
 					"@executable_path/Frameworks",
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = dev.lethal.gymtracker.native;
+				PRODUCT_NAME = GymTracker;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};

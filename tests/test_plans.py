@@ -2,7 +2,7 @@
 import pytest
 from httpx import AsyncClient
 
-from tests.conftest import create_exercise, create_plan
+from tests.conftest import create_exercise, create_plan, start_session_from_plan, log_set
 
 pytestmark = pytest.mark.asyncio(loop_scope="function")
 
@@ -41,6 +41,53 @@ class TestPlansCRUD:
         assert data["block_type"] == "hypertrophy"
         assert data["duration_weeks"] == 8
         assert "id" in data
+
+    async def test_create_plan_preserves_superset_grouping(self, client: AsyncClient):
+        """POST /plans/ keeps group metadata for supersets/circuits."""
+        ex1 = await create_exercise(client, name="bench_press", display_name="Bench Press")
+        ex2 = await create_exercise(client, name="barbell_row", display_name="Barbell Row", primary_muscles=["back"])
+
+        r = await client.post(
+            "/api/plans/",
+            json={
+                "name": "Superset Plan",
+                "block_type": "hypertrophy",
+                "duration_weeks": 8,
+                "number_of_days": 1,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Day 1",
+                        "exercises": [
+                            {
+                                "exercise_id": ex1["id"],
+                                "sets": 3,
+                                "reps": 8,
+                                "starting_weight_kg": 0,
+                                "progression_type": "linear",
+                                "group_id": "g-1",
+                                "group_type": "superset",
+                            },
+                            {
+                                "exercise_id": ex2["id"],
+                                "sets": 3,
+                                "reps": 10,
+                                "starting_weight_kg": 0,
+                                "progression_type": "linear",
+                                "group_id": "g-1",
+                                "group_type": "superset",
+                            },
+                        ],
+                    }
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+        exercises = r.json()["days"][0]["exercises"]
+        assert exercises[0]["group_id"] == "g-1"
+        assert exercises[0]["group_type"] == "superset"
+        assert exercises[1]["group_id"] == "g-1"
+        assert exercises[1]["group_type"] == "superset"
 
     async def test_create_plan_invalid_exercise_id(self, client: AsyncClient):
         """exercise_id that doesn't exist returns 422."""
@@ -92,6 +139,128 @@ class TestPlansCRUD:
         assert r.status_code == 200
         data = r.json()
         assert data["is_archived"] is True
+
+    async def test_update_plan_rir_overrides(self, client: AsyncClient):
+        """PUT /plans/{id}/rir-overrides persists whole-plan, muscle, and exercise overrides."""
+        ex = await create_exercise(client, primary_muscles=["quadriceps"], secondary_muscles=["glutes"])
+        plan = await create_plan(client, ex["id"])
+
+        r = await client.put(
+            f"/api/plans/{plan['id']}/rir-overrides",
+            json={
+                "plan": 2,
+                "muscles": {"quadriceps": 3},
+                "exercises": {str(ex["id"]): 1},
+            },
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["rir_overrides"]["plan"] == 2
+        assert data["rir_overrides"]["muscles"]["quadriceps"] == 3
+        assert data["rir_overrides"]["exercises"][str(ex["id"])] == 1
+
+    async def test_get_plan_recommendations_flags_low_recovery_low_rir(self, client: AsyncClient):
+        """GET /plans/{id}/recommendations suggests backing off and adding a set when effort is too high."""
+        ex = await create_exercise(client, display_name="Squat", primary_muscles=["quadriceps"], secondary_muscles=["glutes"])
+        plan = await create_plan(client, ex["id"], sets=3, reps=8)
+        sess = await start_session_from_plan(client, plan["id"])
+        await log_set(client, sess["id"], sess["sets"][0]["id"], 100.0, 8)
+        complete_r = await client.post(f"/api/sessions/{sess['id']}/complete")
+        assert complete_r.status_code == 200, complete_r.text
+        feedback_r = await client.post(
+            f"/api/sessions/{sess['id']}/feedback",
+            json={
+                "exercise_id": ex["id"],
+                "recovery_rating": "poor",
+                "rir": 0,
+                "pump_rating": "good",
+                "suggestion": "ease",
+                "suggestion_detail": "Hold steady — recovery needs time",
+            },
+        )
+        assert feedback_r.status_code == 201, feedback_r.text
+
+        r = await client.get(f"/api/plans/{plan['id']}/recommendations")
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert len(data) == 1
+        assert data[0]["type"] == "backoff_rir"
+        assert data[0]["recommended_rir"] == 2
+        assert data[0]["add_set"] is True
+
+    async def test_next_workout_defaults_to_first_day(self, client: AsyncClient):
+        """GET /plans/next-workout returns day 1 when nothing is completed yet."""
+        ex = await create_exercise(client)
+        r = await client.post(
+            "/api/plans/",
+            json={
+                "name": "Two Day Plan",
+                "block_type": "hypertrophy",
+                "duration_weeks": 4,
+                "number_of_days": 2,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Monday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 3, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                    {
+                        "day_number": 2,
+                        "day_name": "Tuesday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 3, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+
+        next_r = await client.get("/api/plans/next-workout")
+        assert next_r.status_code == 200
+        data = next_r.json()
+        assert data["plan"]["name"] == "Two Day Plan"
+        assert data["day"]["day_name"] == "Monday"
+        assert data["day_number"] == 1
+        assert data["week_number"] == 1
+        assert data["is_complete"] is False
+
+    async def test_next_workout_advances_after_completed_day(self, client: AsyncClient):
+        """GET /plans/next-workout advances to the next day after a completion."""
+        ex = await create_exercise(client)
+        r = await client.post(
+            "/api/plans/",
+            json={
+                "name": "Two Day Plan",
+                "block_type": "hypertrophy",
+                "duration_weeks": 4,
+                "number_of_days": 2,
+                "days": [
+                    {
+                        "day_number": 1,
+                        "day_name": "Monday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 1, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                    {
+                        "day_number": 2,
+                        "day_name": "Tuesday",
+                        "exercises": [{"exercise_id": ex["id"], "sets": 1, "reps": 8, "starting_weight_kg": 0, "progression_type": "linear"}],
+                    },
+                ],
+            },
+        )
+        assert r.status_code == 201, r.text
+        plan = r.json()
+
+        sess = await start_session_from_plan(client, plan["id"], day=1)
+        await log_set(client, sess["id"], sess["sets"][0]["id"], 100.0, 8)
+        complete_r = await client.post(f"/api/sessions/{sess['id']}/complete")
+        assert complete_r.status_code == 200, complete_r.text
+
+        next_r = await client.get("/api/plans/next-workout")
+        assert next_r.status_code == 200
+        data = next_r.json()
+        assert data["day"]["day_name"] == "Tuesday"
+        assert data["day_number"] == 2
+        assert data["week_number"] == 1
 
     async def test_reuse_plan(self, client: AsyncClient):
         """POST /plans/{id}/reuse creates new unarchived copy."""
@@ -236,6 +405,51 @@ class TestPlansCRUD:
         assert data["number_of_days"] == 1
         assert data["days"][0]["day_name"] == "Push"
         assert data["days"][0]["exercises"][0]["sets"] == 4
+
+    async def test_update_plan_days_preserves_grouping_and_order(self, client: AsyncClient):
+        """PUT /plans/{id} keeps explicit exercise order and superset metadata."""
+        ex1 = await create_exercise(client, name="bench_press", display_name="Bench Press")
+        ex2 = await create_exercise(client, name="barbell_row", display_name="Barbell Row", primary_muscles=["back"])
+        plan = await create_plan(client, ex1["id"], sets=3, reps=8)
+
+        new_days = [
+            {
+                "day_number": 1,
+                "day_name": "Upper",
+                "exercises": [
+                    {
+                        "exercise_id": ex2["id"],
+                        "sets": 4,
+                        "reps": 10,
+                        "starting_weight_kg": 0,
+                        "progression_type": "linear",
+                        "group_id": "g-upper",
+                        "group_type": "superset",
+                    },
+                    {
+                        "exercise_id": ex1["id"],
+                        "sets": 4,
+                        "reps": 8,
+                        "starting_weight_kg": 0,
+                        "progression_type": "linear",
+                        "group_id": "g-upper",
+                        "group_type": "superset",
+                    },
+                ],
+            }
+        ]
+        r = await client.put(
+            f"/api/plans/{plan['id']}",
+            json={"number_of_days": 1, "days": new_days},
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()
+        exercises = data["days"][0]["exercises"]
+        assert [ex["exercise_id"] for ex in exercises] == [ex2["id"], ex1["id"]]
+        assert exercises[0]["group_id"] == "g-upper"
+        assert exercises[0]["group_type"] == "superset"
+        assert exercises[1]["group_id"] == "g-upper"
+        assert exercises[1]["group_type"] == "superset"
 
     async def test_update_plan_not_found(self, client: AsyncClient):
         """PUT /plans/99999 returns 404."""

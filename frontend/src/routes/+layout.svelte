@@ -47,8 +47,7 @@
 
       // Ensure branch cookie matches DB preference (survives cache clears)
       if (typeof document !== 'undefined') {
-        const pref = $settings as any;
-        const wantsDev = pref.branchPreference === 'dev';
+        const wantsDev = $settings.branchPreference === 'dev';
         const hasCookie = document.cookie.includes('gymtracker_branch=dev');
         if (wantsDev && !hasCookie) {
           document.cookie = 'gymtracker_branch=dev; path=/; max-age=31536000; Secure; SameSite=Lax';
@@ -77,6 +76,19 @@
     if (typeof document !== 'undefined') {
       document.body.classList.toggle('large-targets', $settings.largerTouchTargets);
     }
+  });
+
+  // ── Theme preference ─────────────────────────────────────────────────
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    const theme = $settings.themePreference ?? 'dark';
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+    document.body.dataset.theme = theme;
+
+    const themeColor = theme === 'light' ? '#f4f4f5' : '#09090b';
+    const meta = document.querySelector('meta[name="theme-color"]');
+    meta?.setAttribute('content', themeColor);
   });
 
   // ── Offline detection + sync ──────────────────────────────────────────
@@ -192,7 +204,11 @@
           style="padding-top: env(safe-area-inset-top);"
   >
     <div class="flex items-center justify-between px-4 h-14">
-      <span class="text-lg font-bold gradient-text tracking-tight">GymTracker</span>
+      <a href="/"
+         class="text-lg font-bold gradient-text tracking-tight hover:opacity-90 focus:outline-none focus:ring-2 focus:ring-primary-500/60 rounded-sm"
+      >
+        Onyx Expenditure
+      </a>
 
       <div class="flex items-center gap-3">
         <!-- Desktop nav links (hidden on mobile) -->
@@ -219,20 +235,20 @@
 
   <!-- ── Offline banner ──────────────────────────────────────────────── -->
   {#if !$isOnline}
-    <div role="alert" class="fixed top-0 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium">
+    <div role="alert" class="fixed bottom-16 left-0 right-0 z-50 bg-amber-600 text-white text-center text-xs py-1.5 font-medium md:bottom-0">
       📡 Offline — changes will sync when reconnected
       {#if $pendingSyncCount > 0}
         <span class="ml-1 opacity-80">({$pendingSyncCount} pending)</span>
       {/if}
     </div>
   {:else if $syncStatus === 'syncing'}
-    <div class="fixed top-0 left-0 right-0 z-50 bg-blue-600 text-white text-center text-xs py-1.5 font-medium">
+    <div class="fixed bottom-16 left-0 right-0 z-50 bg-blue-600 text-white text-center text-xs py-1.5 font-medium md:bottom-0">
       🔄 Syncing offline changes... ({$pendingSyncCount} remaining)
     </div>
   {/if}
 
-  <!-- ── Bottom nav (mobile only) ──────────────────────────────────────── -->
-  <nav aria-label="Mobile navigation" class="bottom-nav md:hidden" class:hidden={keyboardOpen}>
+  <!-- ── Bottom nav (mobile only) — hidden during active workout so it doesn't cover the rest timer ── -->
+  <nav aria-label="Mobile navigation" class="bottom-nav md:hidden" class:hidden={keyboardOpen || $page.url.pathname.startsWith('/workout/active')}>
     {#each mobileNavItems as item}
       <a href={item.path} class="bottom-nav-item {isActive(item.path) ? 'active' : ''}">
         <span class="text-xl leading-none">{item.icon}</span>

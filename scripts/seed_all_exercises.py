@@ -34,6 +34,7 @@ EQUIPMENT_MAP = {
     "ring": "bodyweight",
     "parallel": "bodyweight",  # parallel dips
     "bench": "bodyweight",     # bench dips
+    "prime": "plate_loaded",   # Prime Fitness plate-loaded machines
 }
 
 

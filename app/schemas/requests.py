@@ -2,6 +2,7 @@
 
 from datetime import date, datetime
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, Field, model_validator
 
@@ -61,6 +62,7 @@ class ExerciseCreate(BaseModel):
     equipment_type: str = "other"
     is_unilateral: bool = False
     is_assisted: bool = False
+    is_prime: bool = False
     description: str | None = None
     primary_muscles: list[str] = []
     secondary_muscles: list[str] = []
@@ -79,11 +81,15 @@ class ExerciseResponse(BaseModel):
     id: int
     name: str
     display_name: str
+    user_id: int | None = None
+    source_exercise_id: int | None = None
+    is_custom: bool = False
     movement_type: str
     body_region: str
     equipment_type: str = "other"
     is_unilateral: bool = False
     is_assisted:   bool = False
+    is_prime:      bool = False
     description: str | None
     primary_muscles: list[str]
     secondary_muscles: list[str]
@@ -91,9 +97,31 @@ class ExerciseResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ExerciseUpdate(BaseModel):
+    display_name: str
+    movement_type: MovementType = MovementType.COMPOUND
+    body_region: BodyRegion = BodyRegion.UPPER
+    is_unilateral: bool = False
+    is_assisted: bool = False
+    description: str | None = None
+    primary_muscles: list[str] = []
+    secondary_muscles: list[str] = []
+    apply_mode: str = Field(default="future_only", pattern="^(future_only|retroactive)$")
+
+    @model_validator(mode="after")
+    def no_overlap_between_primary_and_secondary(self) -> "ExerciseUpdate":
+        overlap = set(self.primary_muscles) & set(self.secondary_muscles)
+        if overlap:
+            raise ValueError(
+                f"A muscle cannot be both primary and secondary: {sorted(overlap)}"
+            )
+        return self
+
+
 # Set schemas
 class SetCreate(BaseModel):
     exercise_id: int
+    exercise_block_id: str | None = None
     set_number: int
     planned_reps: int | None = None
     planned_weight_kg: float | None = None
@@ -101,12 +129,14 @@ class SetCreate(BaseModel):
 
 
 class SetUpdate(BaseModel):
+    exercise_id: int | None = None
     actual_reps: int | None = None
     actual_weight_kg: float | None = None
     reps_left: int | None = None
     reps_right: int | None = None
     set_type: str | None = None
-    sub_sets: str | None = None  # JSON for drop set entries
+    sub_sets: list | str | None = None
+    peg_weights: dict | list | str | None = None  # JSON: {"peg1":kg,"peg2":kg,"peg3":kg} per side
     notes: str | None = None
     completed_at: datetime | None = None
     started_at: datetime | None = None
@@ -120,6 +150,11 @@ class SetUpdate(BaseModel):
 class SetResponse(BaseModel):
     id: int
     exercise_id: int
+    exercise_block_id: str | None = None
+    exercise_name: str | None = None
+    movement_type: str | None = None
+    body_region: str | None = None
+    equipment_type: str | None = None
     set_number: int
     planned_reps: int | None = None
     planned_reps_left: int | None = None
@@ -131,6 +166,7 @@ class SetResponse(BaseModel):
     reps_right: int | None = None
     set_type: str = "standard"
     sub_sets: list | str | None = None
+    peg_weights: dict | list | str | None = None
     notes: str | None = None
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -139,6 +175,7 @@ class SetResponse(BaseModel):
     draft_reps_left: int | None = None
     draft_reps_right: int | None = None
     skipped_at: str | None = None
+    is_extrapolated: bool = False
 
     model_config = {"from_attributes": True}
 
@@ -160,6 +197,7 @@ class WorkoutSessionResponse(BaseModel):
     date: date
     status: WorkoutStatusSchema
     workout_plan_id: int | None = None
+    plan_day_number: int | None = None
     total_volume_kg: float
     total_sets: int
     total_reps: int
@@ -171,17 +209,41 @@ class WorkoutSessionResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class WorkoutSessionAuditResponse(BaseModel):
+    id: int
+    workout_session_id: int
+    from_status: str | None
+    to_status: str | None
+    reason: str
+    endpoint: str
+    actor_username: str | None
+    source_device: str | None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 # Workout plan schemas
 class PlannedExercise(BaseModel):
+    block_id: str | None = None
     exercise_id: int
     sets: int
-    reps: int
+    reps: int = 8  # bottom of rep range for double progression
+    rep_range_top: int = 12  # top of rep range for double progression
     starting_weight_kg: float
     progression_type: str = "linear"
     set_type: str = "standard"
     drops: int | None = None  # number of drops for drop sets
     rest_seconds: int | None = 90
     notes: str | None = None
+    group_id: str | None = None
+    group_type: Literal["superset", "circuit"] | None = None
+
+
+class PlanRirOverrides(BaseModel):
+    plan: int | None = None
+    muscles: dict[str, int] = Field(default_factory=dict)
+    exercises: dict[str, int] = Field(default_factory=dict)
 
 
 class PlannedDay(BaseModel):
@@ -210,6 +272,18 @@ class WorkoutPlanCreate(BaseModel):
     days: list[PlannedDay] = []
     auto_progression: bool = True
     is_draft: bool = False
+    rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
+
+
+class SyncPlanExercise(BaseModel):
+    exercise_block_id: str | None = None
+    exercise_id: int
+    group_id: str | None = None
+    group_type: Literal["superset", "circuit"] | None = None
+
+
+class SyncSessionToPlanRequest(BaseModel):
+    exercises: list[SyncPlanExercise] = Field(default_factory=list)
 
 
 class WorkoutPlanResponse(BaseModel):
@@ -221,6 +295,7 @@ class WorkoutPlanResponse(BaseModel):
     current_week: int
     number_of_days: int
     days: list[PlannedDay]
+    rir_overrides: PlanRirOverrides = Field(default_factory=PlanRirOverrides)
     auto_progression: bool
     is_draft: bool = False
     is_archived: bool = False
@@ -282,6 +357,21 @@ class FoodItemCreate(BaseModel):
     serving_size_g: float = Field(default=100, gt=0)
     serving_label: str | None = None
     micronutrients: dict | None = None
+
+    @model_validator(mode="after")
+    def align_calories_with_macros(self) -> "FoodItemCreate":
+        macro_calories = round(
+            self.protein_per_100g * 4
+            + self.carbs_per_100g * 4
+            + self.fat_per_100g * 9,
+            1,
+        )
+        self.calories_per_100g = macro_calories
+        return self
+
+
+class FoodItemUpdate(FoodItemCreate):
+    pass
 
 
 class NutritionEntryCreate(BaseModel):

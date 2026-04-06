@@ -2,8 +2,9 @@
   import { onMount } from 'svelte';
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import type { DashboardWidget } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, saveSettings } from '$lib/api';
-  import type { DailySummary, Insight, WorkoutPlan, PlannedDay, WorkoutSession } from '$lib/api';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, getNextWorkout, getProgress, getExercises } from '$lib/api';
+  import { daysAgoLocalDateString, localDateString } from '$lib/date';
+  import type { DailySummary, Exercise, Insight, NextWorkoutResolution, ProgressMetric, WorkoutSession } from '$lib/api';
 
   const KG_TO_LBS = 2.20462;
   function volDisplay(kg: number): number {
@@ -12,13 +13,10 @@
   function volUnit(): string {
     return $settings.weightUnit === 'lbs' ? 'lbs' : 'kg';
   }
-
-  interface NextWorkout {
-    plan: WorkoutPlan;
-    day: PlannedDay;
-    weekNumber: number;
-    dayNumber: number;
-    isComplete: boolean;
+  function weightDisplay(kg: number): number {
+    return $settings.weightUnit === 'lbs'
+      ? Math.round(kg * KG_TO_LBS * 10) / 10
+      : Math.round(kg * 10) / 10;
   }
 
   let allSessions    = $state<WorkoutSession[]>([]);
@@ -26,17 +24,32 @@
   let archiving      = $state(false);
   let nutritionSummary = $state<DailySummary | null>(null);
   let insights = $state<Insight[]>([]);
+  let progressMetrics = $state<ProgressMetric[]>([]);
+  let allExercises = $state<Exercise[]>([]);
+  let nextWorkout = $state<NextWorkoutResolution | null>(null);
+  let showNextWorkoutInspector = $state(false);
 
-  let nextWorkout = $derived(
-    loading ? null : resolveNextWorkout(allSessions, $workoutPlans)
+  let hasActiveCurrentSession = $derived(
+    !!$currentSession && ($currentSession.status === 'in_progress' || !!$currentSession.started_at)
   );
+
+  function reconcileCurrentSession(sessions: WorkoutSession[]) {
+    if (!$currentSession) return;
+    const fresh = sessions.find((session) => session.id === $currentSession?.id) ?? null;
+    const isActive = !!fresh && (fresh.status === 'in_progress' || (!!fresh.started_at && !fresh.completed_at));
+    if (!isActive) {
+      currentSession.set(null);
+      return;
+    }
+    currentSession.set(fresh);
+  }
 
   // Keep the global nextWorkoutUrl store in sync so the bottom nav Workout
   // tab deep-links straight to the right plan + day.
   $effect(() => {
-    if ($currentSession) {
+    if (hasActiveCurrentSession) {
       nextWorkoutUrl.set('/workout/active');
-    } else if (nextWorkout && !nextWorkout.isComplete) {
+    } else if (nextWorkout && !nextWorkout.is_complete) {
       nextWorkoutUrl.set(`/workout/active?plan=${nextWorkout.plan.id}&day=${nextWorkout.day.day_number}`);
     } else {
       nextWorkoutUrl.set('/workout/active');
@@ -49,21 +62,28 @@
   let calMonth     = $state(today.getMonth());
   let selectedDay  = $state<string | null>(null);
 
-  const todayStr   = isoDate(today);
+  const todayStr   = localDateString(today);
   const DAYS = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
 
   onMount(async () => {
     try {
-      const [sessions, plans, nutrition, insightData] = await Promise.all([
+      const [sessions, plans, next, nutrition, insightData, progress, exercises] = await Promise.all([
         getSessions({ limit: 200 }),
         getPlans(),
-        getDailySummary(new Date().toISOString().slice(0, 10)).catch(() => null),
+        getNextWorkout().catch(() => null),
+        getDailySummary(localDateString()).catch(() => null),
         getInsights().catch(() => []),
+        getProgress({ start_date: daysAgoLocalDateString(90), end_date: localDateString() }).catch(() => []),
+        getExercises().catch(() => []),
       ]);
       allSessions = sessions;
+      reconcileCurrentSession(sessions);
       workoutPlans.set(plans);
+      nextWorkout = next;
       nutritionSummary = nutrition;
       insights = insightData;
+      progressMetrics = progress;
+      allExercises = exercises;
     } catch (e) {
       console.error('Failed to load dashboard:', e);
     } finally {
@@ -71,52 +91,21 @@
     }
   });
 
-  function resolveNextWorkout(sessions: WorkoutSession[], plans: WorkoutPlan[]): NextWorkout | null {
-    const activePlans = plans.filter(p => !p.is_archived);
-    if (!activePlans.length) return null;
-
-    function sessionsForPlan(plan: WorkoutPlan) {
-      return sessions.filter(s =>
-        s.status !== 'skipped' &&
-        (s.total_sets > 0 || s.total_reps > 0) &&
-        (s.workout_plan_id === plan.id || (s.name && s.name.startsWith(plan.name + ' - ')))
-      );
-    }
-
-    let plan: WorkoutPlan;
-    const recentWithPlan = sessions.find(s =>
-      s.status !== 'skipped' && (
-        activePlans.some(p => p.id === s.workout_plan_id) ||
-        activePlans.some(p => s.name?.startsWith(p.name + ' - '))
-      )
-    );
-    if (recentWithPlan) {
-      plan = activePlans.find(p =>
-        p.id === recentWithPlan.workout_plan_id ||
-        recentWithPlan.name?.startsWith(p.name + ' - ')
-      ) ?? activePlans[0];
-    } else {
-      plan = activePlans[0];
-    }
-
-    if (!plan.days.length) return null;
-
-    const doneCount   = sessionsForPlan(plan).length;
-    const totalNeeded = plan.duration_weeks * plan.days.length;
-    const isComplete  = doneCount >= totalNeeded;
-    const nextDayIdx  = isComplete ? 0 : doneCount % plan.days.length;
-    const weekNumber  = isComplete ? plan.duration_weeks : Math.floor(doneCount / plan.days.length) + 1;
-    const dayNumber   = nextDayIdx + 1;
-    return { plan, day: plan.days[nextDayIdx], weekNumber, dayNumber, isComplete };
-  }
-
   async function handleArchive(planId: number) {
     archiving = true;
     try {
       await archivePlan(planId);
-      const [sessions, plans] = await Promise.all([getSessions({ limit: 200 }), getPlans()]);
+      const [sessions, plans, next, progress] = await Promise.all([
+        getSessions({ limit: 200 }),
+        getPlans(),
+        getNextWorkout().catch(() => null),
+        getProgress({ start_date: daysAgoLocalDateString(90), end_date: localDateString() }).catch(() => []),
+      ]);
       allSessions = sessions;
+      reconcileCurrentSession(sessions);
       workoutPlans.set(plans);
+      nextWorkout = next;
+      progressMetrics = progress;
     } catch (e) {
       console.error('Failed to archive plan:', e);
     } finally {
@@ -125,7 +114,6 @@
   }
 
   // ── Calendar helpers ───────────────────────────────────────────────────
-  function isoDate(d: Date) { return d.toISOString().split('T')[0]; }
   function pad2(n: number) { return String(n).padStart(2, '0'); }
   function dayKey(y: number, m: number, d: number) {
     return `${y}-${pad2(m + 1)}-${pad2(d)}`;
@@ -145,7 +133,7 @@
       const d = new Date();
       d.setDate(d.getDate() - i);
       days.push({
-        key: isoDate(d),
+        key: localDateString(d),
         label: d.toLocaleDateString('en-US', { weekday: 'short' }),
         dayNum: d.getDate(),
         isToday: i === 0,
@@ -173,10 +161,15 @@
     return new Date(iso + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
+  function workoutHistoryHref(name: string | null): string | null {
+    if (!name?.trim()) return null;
+    return `/calendar/workout/${encodeURIComponent(name.trim())}`;
+  }
+
   // ── Quick stats ────────────────────────────────────────────────────────
   let weeklyVolume = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekStr = isoDate(weekAgo);
+    const weekStr = localDateString(weekAgo);
     return allSessions
       .filter(s => s.date >= weekStr && s.status === 'completed')
       .reduce((sum, s) => sum + volDisplay(s.total_volume_kg ?? 0), 0);
@@ -184,7 +177,7 @@
 
   let weeklyWorkouts = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    return allSessions.filter(s => s.date >= isoDate(weekAgo) && s.status === 'completed').length;
+    return allSessions.filter(s => s.date >= localDateString(weekAgo) && s.status === 'completed').length;
   })());
 
   // Streak: consecutive completed sessions without a skip/miss
@@ -203,7 +196,7 @@
 
   let weeklySets = $derived((() => {
     const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
-    const weekStr = isoDate(weekAgo);
+    const weekStr = localDateString(weekAgo);
     const weekSessions = allSessions.filter(s => s.date >= weekStr && s.status === 'completed');
     const planned = weekSessions.reduce((sum, s) => sum + (s.total_sets || 0), 0);
     const completed = weekSessions.reduce((sum, s) =>
@@ -211,7 +204,132 @@
     return { planned, completed };
   })());
 
-  let recentSessions = $derived(allSessions.filter(s => s.status === 'completed').slice(0, 5));
+  // ── Recent Workouts pagination ─────────────────────────────────────────
+  const PAGE_SIZE_OPTIONS = [5, 10, 20];
+  let recentPage     = $state(0);
+  let recentPageSize = $state(
+    parseInt(typeof localStorage !== 'undefined' ? (localStorage.getItem('recent_page_size') ?? '5') : '5') || 5
+  );
+  let recentSessionsList = $state<WorkoutSession[]>([]);
+  let recentHasMore      = $state(false);
+  let recentLoading      = $state(false);
+
+  async function loadRecentSessions() {
+    recentLoading = true;
+    try {
+      const sessions = await getSessions({
+        limit: recentPageSize + 1,   // fetch one extra to detect whether there's a next page
+        offset: recentPage * recentPageSize,
+        status_filter: 'completed',
+      });
+      recentHasMore = sessions.length > recentPageSize;
+      recentSessionsList = sessions.slice(0, recentPageSize);
+    } catch (e) {
+      console.error('Failed to load recent sessions:', e);
+    } finally {
+      recentLoading = false;
+    }
+  }
+
+  $effect(() => {
+    // Re-run whenever page or page size changes (after mount)
+    recentPage; recentPageSize;
+    loadRecentSessions();
+  });
+
+  function setRecentPageSize(n: number) {
+    recentPageSize = n;
+    recentPage = 0;
+    if (typeof localStorage !== 'undefined') localStorage.setItem('recent_page_size', String(n));
+  }
+  let quickChartCards = $derived.by(() => {
+    const grouped = new Map<string, ProgressMetric[]>();
+    for (const metric of progressMetrics) {
+      if (!metric.estimated_1rm || metric.estimated_1rm <= 0) continue;
+      if (!grouped.has(metric.exercise_name)) grouped.set(metric.exercise_name, []);
+      grouped.get(metric.exercise_name)!.push(metric);
+    }
+
+    return [...grouped.entries()]
+      .map(([exerciseName, points]) => {
+        const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+        if (sorted.length < 2) return null;
+        const values = sorted.map((point) => point.estimated_1rm ?? 0);
+        const min = Math.min(...values);
+        const max = Math.max(...values);
+        const range = Math.max(max - min, 1);
+        const width = 96;
+        const height = 32;
+        const path = sorted
+          .map((point, index) => {
+            const x = sorted.length === 1 ? width / 2 : (index / (sorted.length - 1)) * width;
+            const y = height - (((point.estimated_1rm ?? min) - min) / range) * height;
+            return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(' ');
+        const latest = sorted[sorted.length - 1].estimated_1rm ?? 0;
+        const first = sorted[0].estimated_1rm ?? 0;
+        return {
+          exerciseName,
+          latest,
+          change: latest - first,
+          points: sorted.length,
+          path,
+        };
+      })
+      .filter((card): card is NonNullable<typeof card> => !!card)
+      .sort((a, b) => b.points - a.points || b.latest - a.latest)
+      .slice(0, $settings.quickChartCount ?? 4);
+  });
+  let progressMetricsByExerciseId = $derived.by(() => {
+    const grouped = new Map<number, ProgressMetric[]>();
+    for (const metric of progressMetrics) {
+      if (!metric.estimated_1rm || metric.estimated_1rm <= 0) continue;
+      if (!grouped.has(metric.exercise_id)) grouped.set(metric.exercise_id, []);
+      grouped.get(metric.exercise_id)!.push(metric);
+    }
+    return grouped;
+  });
+
+  function buildMiniGraphCard(widget: DashboardWidget) {
+    if (widget.exerciseId == null) return null;
+    const points = progressMetricsByExerciseId.get(widget.exerciseId);
+    if (!points || points.length < 2) return null;
+    const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+    const values = sorted.map((point) => point.estimated_1rm ?? 0);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const range = Math.max(max - min, 1);
+    const width = 96;
+    const height = 32;
+    const path = sorted
+      .map((point, index) => {
+        const x = sorted.length === 1 ? width / 2 : (index / (sorted.length - 1)) * width;
+        const y = height - (((point.estimated_1rm ?? min) - min) / range) * height;
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
+      })
+      .join(' ');
+    const latest = sorted[sorted.length - 1].estimated_1rm ?? 0;
+    const first = sorted[0].estimated_1rm ?? 0;
+    return {
+      exerciseName: widget.exerciseName ?? sorted[sorted.length - 1].exercise_name,
+      latest,
+      change: latest - first,
+      path,
+    };
+  }
+  let nextWorkoutInspectorSessions = $derived(
+    (() => {
+      const activeNextWorkout = nextWorkout;
+      if (!activeNextWorkout) return [];
+      return allSessions
+        .filter(s =>
+          s.workout_plan_id === activeNextWorkout.plan.id ||
+          (s.name && s.name.startsWith(`${activeNextWorkout.plan.name} - `))
+        )
+        .slice(0, 6);
+    })()
+  );
 
   // Last completed session with a plan — for "Repeat Last" button
   // ── Dashboard customization (Apple-style widget editing) ─────────────
@@ -223,6 +341,7 @@
   const WIDGET_LABELS: Record<string, string> = {
     stats: 'Quick Stats',
     nextWorkout: 'Next Workout',
+    nextWorkoutInspector: 'Workout Inspector',
     nutrition: 'Nutrition',
     insights: 'Insights',
     calendar: 'Calendar',
@@ -238,6 +357,8 @@
   // ── Inline calculator state ────────────────────────────────────────
   let calcWeight = $state<number | null>(null);
   let calcReps = $state<number | null>(null);
+  let addPanelType = $state<'widget' | 'miniGraph'>('widget');
+  let miniGraphSearch = $state('');
   let calcResult = $derived(
     calcWeight && calcReps && calcReps > 0
       ? Math.round(calcWeight * (1 + calcReps / 30))
@@ -264,8 +385,52 @@
     showAddPanel = false;
   }
 
+  function createMiniGraphWidget(exercise: Exercise) {
+    const widgets = [...($settings.dashboardWidgets ?? [])];
+    const idx = widgets.findIndex(
+      (widget) => widget.type === 'miniGraph' && widget.exerciseId === exercise.id
+    );
+    if (idx >= 0) {
+      widgets[idx] = { ...widgets[idx], enabled: true };
+    } else {
+      widgets.push({
+        id: `miniGraph:${exercise.id}`,
+        enabled: true,
+        type: 'miniGraph',
+        exerciseId: exercise.id,
+        exerciseName: exercise.display_name || exercise.name,
+      });
+    }
+    settings.update(s => ({ ...s, dashboardWidgets: widgets }));
+    miniGraphSearch = '';
+    showAddPanel = false;
+  }
+
   let orderedWidgets = $derived($settings.dashboardWidgets ?? []);
-  let hiddenWidgets = $derived(orderedWidgets.filter(w => !w.enabled && !REQUIRED_WIDGETS.has(w.id)));
+  let hiddenWidgets = $derived(
+    orderedWidgets.filter(w => w.type !== 'miniGraph' && !w.enabled && !REQUIRED_WIDGETS.has(w.id))
+  );
+  let filteredMiniGraphExercises = $derived.by(() => {
+    const query = miniGraphSearch.trim().toLowerCase();
+    const selectedExerciseIds = new Set(
+      orderedWidgets
+        .filter((widget) => widget.type === 'miniGraph' && widget.enabled && widget.exerciseId != null)
+        .map((widget) => widget.exerciseId)
+    );
+    return allExercises
+      .filter((exercise) => !selectedExerciseIds.has(exercise.id))
+      .filter((exercise) => {
+        if (!query) return true;
+        const searchValues = [
+          exercise.display_name,
+          exercise.name,
+          ...exercise.primary_muscles,
+          ...exercise.secondary_muscles,
+        ].map((value) => value.toLowerCase());
+        return searchValues.some((value) => value.includes(query));
+      })
+      .slice(0, 8);
+  });
 
   // Long-press to enter edit mode
   let longPressTimer: ReturnType<typeof setTimeout> | null = null;
@@ -430,7 +595,7 @@
     <div class="flex items-center justify-between sticky top-0 z-40 bg-zinc-950/95 backdrop-blur-sm py-2 -mx-4 px-4 border-b border-zinc-800">
       <span class="text-sm font-semibold text-zinc-300">Editing Dashboard</span>
       <div class="flex items-center gap-3">
-        {#if hiddenWidgets.length > 0}
+        {#if hiddenWidgets.length > 0 || allExercises.length > 0}
           <button onclick={() => showAddPanel = !showAddPanel}
                   class="w-8 h-8 rounded-full bg-primary-600 text-white flex items-center justify-center text-lg font-bold hover:bg-primary-500 transition-colors">+</button>
         {/if}
@@ -440,18 +605,57 @@
     </div>
 
     <!-- Add widget panel -->
-    {#if showAddPanel && hiddenWidgets.length > 0}
+    {#if showAddPanel}
       <div class="card border border-zinc-700 add-widget-panel">
         <p class="text-xs text-zinc-500 mb-2">Add widgets</p>
-        <div class="space-y-1">
-          {#each hiddenWidgets as widget}
-            <button onclick={() => addWidget(widget.id)}
-                    class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
-              <span class="text-green-400 text-lg">+</span>
-              <span class="text-sm text-zinc-300">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
-            </button>
-          {/each}
+        <div class="flex gap-2 mb-3">
+          <select bind:value={addPanelType} class="input !py-2 text-sm flex-1">
+            <option value="widget">Widgets</option>
+            <option value="miniGraph">Mini Graphs</option>
+          </select>
+          <input
+            type="text"
+            bind:value={miniGraphSearch}
+            placeholder={addPanelType === 'miniGraph' ? 'Search movements…' : 'Select mini graphs'}
+            class="input !py-2 text-sm flex-[2]"
+            disabled={addPanelType !== 'miniGraph'}
+          />
         </div>
+
+        {#if addPanelType === 'widget'}
+          <div class="space-y-1">
+            {#if hiddenWidgets.length > 0}
+              {#each hiddenWidgets as widget}
+                <button onclick={() => addWidget(widget.id)}
+                        class="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
+                  <span class="text-green-400 text-lg">+</span>
+                  <span class="text-sm text-zinc-300">{WIDGET_LABELS[widget.id] ?? widget.id}</span>
+                </button>
+              {/each}
+            {:else}
+              <p class="text-sm text-zinc-500 px-1 py-2">No hidden standard widgets.</p>
+            {/if}
+          </div>
+        {:else}
+          <div class="space-y-1">
+            {#if filteredMiniGraphExercises.length > 0}
+              {#each filteredMiniGraphExercises as exercise}
+                <button onclick={() => createMiniGraphWidget(exercise)}
+                        class="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg bg-zinc-800/50 hover:bg-zinc-700 transition-colors text-left">
+                  <div class="min-w-0">
+                    <p class="text-sm text-zinc-300 truncate">{exercise.display_name || exercise.name}</p>
+                    <p class="text-xs text-zinc-500 truncate">{exercise.primary_muscles.join(', ')}</p>
+                  </div>
+                  <span class="text-green-400 text-lg shrink-0">+</span>
+                </button>
+              {/each}
+            {:else}
+              <p class="text-sm text-zinc-500 px-1 py-2">
+                {miniGraphSearch ? 'No matching movements.' : 'All movements are already added.'}
+              </p>
+            {/if}
+          </div>
+        {/if}
       </div>
     {/if}
   {/if}
@@ -581,15 +785,15 @@
 
   {:else if widget.id === 'nextWorkout'}
   <!-- ── Next / Active workout hero ─────────────────────────────────── -->
-  {#if $currentSession}
+  {#if hasActiveCurrentSession}
     <a href="/workout/active"
        class="block rounded-2xl overflow-hidden border border-primary-500/40 hover:border-primary-400/60 transition-all group"
        style="background: linear-gradient(135deg, rgba(37,99,235,0.2), rgba(139,92,246,0.1));">
       <div class="p-5 flex items-center justify-between gap-4">
         <div>
-          <p class="text-xs font-bold uppercase tracking-widest text-primary-400 mb-1">▶ In Progress</p>
-          <h3 class="text-xl font-bold text-white">{$currentSession.name ?? 'Active Workout'}</h3>
-          <p class="text-sm text-zinc-400 mt-1">Tap to continue</p>
+          <p class="text-xs font-bold uppercase tracking-widest text-primary-400 mb-1">▶ Continue Workout</p>
+          <h3 class="text-xl font-bold text-white">{$currentSession?.name ?? 'Workout'}</h3>
+          <p class="text-sm text-zinc-400 mt-1">Resume where you left off</p>
         </div>
         <div class="w-14 h-14 rounded-2xl bg-primary-600/30 border border-primary-500/40
                     flex items-center justify-center text-2xl shrink-0
@@ -600,7 +804,7 @@
   {:else if loading}
     <div class="card h-28 animate-pulse bg-zinc-800/50"></div>
 
-  {:else if nextWorkout?.isComplete}
+  {:else if nextWorkout?.is_complete}
     <div class="card border border-amber-500/30"
          style="background: linear-gradient(135deg, rgba(217,119,6,0.15), rgba(0,0,0,0));">
       <div class="flex items-start justify-between gap-4">
@@ -635,8 +839,8 @@
     </div>
 
   {:else if nextWorkout}
-    <a href="/workout/active?plan={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
-       class="block rounded-2xl overflow-hidden border border-primary-600/30 hover:border-primary-500/50 transition-all group"
+    <div
+       class="rounded-2xl overflow-hidden border border-primary-600/30 transition-all group"
        style="background: linear-gradient(135deg, rgba(37,99,235,0.15), rgba(0,0,0,0));">
       <div class="p-5 flex items-center justify-between gap-4">
         <div class="min-w-0">
@@ -646,10 +850,10 @@
           <h3 class="text-2xl font-bold truncate">{nextWorkout.day.day_name}</h3>
           <div class="flex items-center gap-2 mt-2 flex-wrap">
             <span class="badge bg-primary-900/60 text-primary-300 border border-primary-700/50">
-              Week {nextWorkout.weekNumber}
+              Week {nextWorkout.week_number}
             </span>
             <span class="badge bg-zinc-800 text-zinc-300">
-              Day {nextWorkout.dayNumber}
+              Day {nextWorkout.day_number}
             </span>
             <span class="text-xs text-zinc-500">
               {nextWorkout.day.exercises.length} exercise{nextWorkout.day.exercises.length !== 1 ? 's' : ''}
@@ -658,9 +862,23 @@
         </div>
         <div class="w-14 h-14 rounded-2xl bg-primary-600/20 border border-primary-600/30
                     flex items-center justify-center text-2xl shrink-0
-                    group-hover:bg-primary-600/40 transition-colors">🏋️</div>
+                    transition-colors">🏋️</div>
       </div>
-    </a>
+      <div class="px-5 pb-5 flex gap-2">
+        <a
+          href="/workout/active?plan={nextWorkout.plan.id}&day={nextWorkout.day.day_number}"
+          class="btn-primary text-sm flex-1 text-center"
+        >
+          Start Workout
+        </a>
+        <a
+          href="/plans/upcoming"
+          class="btn-secondary text-sm flex-1 text-center"
+        >
+          Edit Upcoming Day
+        </a>
+      </div>
+    </div>
 
   {/if}
 
@@ -669,6 +887,80 @@
       <p class="text-4xl mb-3">💪</p>
       <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
       <a href="/plans/create" class="btn-primary">Create a Plan</a>
+    </div>
+  {/if}
+
+  {:else if widget.id === 'nextWorkoutInspector'}
+  {#if nextWorkout}
+    <div class="card !py-3">
+      <button
+        onclick={() => showNextWorkoutInspector = !showNextWorkoutInspector}
+        class="w-full flex items-center justify-between text-left"
+      >
+        <div>
+          <p class="text-xs font-bold uppercase tracking-widest text-zinc-500">Inspector</p>
+          <p class="text-sm text-zinc-300">Why this workout was selected</p>
+        </div>
+        <span class="text-zinc-500 text-sm">{showNextWorkoutInspector ? 'Hide' : 'Show'}</span>
+      </button>
+
+      {#if showNextWorkoutInspector}
+        <div class="mt-3 space-y-3">
+          <div class="grid grid-cols-2 gap-2 text-sm">
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Selected plan</p>
+              <p class="text-white font-medium">{nextWorkout.plan.name}</p>
+              <p class="text-xs text-zinc-500 mt-1">Plan #{nextWorkout.debug.selected_plan_id}</p>
+            </div>
+            <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+              <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-1">Rule path</p>
+              <p class="text-white font-medium">
+                {#if nextWorkout.is_complete}
+                  Plan complete
+                {:else}
+                  Completed sessions modulo plan days
+                {/if}
+              </p>
+              <p class="text-xs text-zinc-500 mt-1">
+                {nextWorkout.debug.completed_session_count} / {nextWorkout.debug.total_sessions_needed} completed
+              </p>
+            </div>
+          </div>
+
+          <div class="rounded-xl border border-zinc-800 bg-zinc-900/60 p-3">
+            <p class="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">Recent sessions considered</p>
+            {#if nextWorkoutInspectorSessions.length > 0}
+              <div class="space-y-2">
+                {#each nextWorkoutInspectorSessions as s}
+                  <div class="flex items-center justify-between gap-3 text-sm">
+                    <div class="min-w-0">
+                      <p class="text-zinc-200 truncate">{s.name ?? 'Workout'}</p>
+                      <p class="text-xs text-zinc-500">
+                        {fmtDate(s.date)} · {s.status}
+                        {#if nextWorkout.debug.recent_session_id === s.id}
+                          · most recent matching session
+                        {/if}
+                      </p>
+                    </div>
+                    <span class="text-xs text-zinc-500 shrink-0">#{s.id}</span>
+                  </div>
+                {/each}
+              </div>
+            {:else}
+              <p class="text-sm text-zinc-500">No sessions matched this plan yet.</p>
+            {/if}
+          </div>
+
+          <div class="flex justify-end">
+            <a
+              href="/plans/upcoming"
+              class="text-sm text-primary-400 hover:text-primary-300"
+            >
+              Edit upcoming day
+            </a>
+          </div>
+        </div>
+      {/if}
     </div>
   {/if}
 
@@ -818,37 +1110,107 @@
   <!-- ── Pinned Charts ─────────────────────────────────────────────── -->
   <div class="card">
     <div class="flex items-center justify-between mb-3">
-      <h3 class="font-semibold text-zinc-200">Quick Charts</h3>
+      <div class="flex items-center gap-2">
+        <h3 class="font-semibold text-zinc-200">Quick Charts</h3>
+        <select
+          value={$settings.quickChartCount ?? 4}
+          onchange={(e) => settings.update(s => ({ ...s, quickChartCount: Number((e.target as HTMLSelectElement).value) }))}
+          class="bg-zinc-800 text-zinc-400 text-xs rounded px-1.5 py-0.5 border border-zinc-700 cursor-pointer"
+        >
+          {#each [2, 4, 6, 8, 10, 12] as n}
+            <option value={n}>{n}</option>
+          {/each}
+        </select>
+      </div>
       <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">
         Full Progress →
       </a>
     </div>
-    <div class="grid grid-cols-2 gap-3">
-      <a href="/body" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
-        <p class="text-xs text-zinc-500">Body Weight</p>
-        <p class="text-sm font-semibold text-primary-400 mt-0.5">Trend →</p>
-      </a>
-      <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
-        <p class="text-xs text-zinc-500">Est. 1RM</p>
-        <p class="text-sm font-semibold text-green-400 mt-0.5">All Lifts →</p>
-      </a>
-      <a href="/volume" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
-        <p class="text-xs text-zinc-500">Volume</p>
-        <p class="text-sm font-semibold text-amber-400 mt-0.5">Weekly →</p>
-      </a>
-      <a href="/records" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
-        <p class="text-xs text-zinc-500">Records</p>
-        <p class="text-sm font-semibold text-purple-400 mt-0.5">PRs →</p>
-      </a>
-      <a href="/compare" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
-        <p class="text-xs text-zinc-500">Compare</p>
-        <p class="text-sm font-semibold text-cyan-400 mt-0.5">Side by Side →</p>
-      </a>
-      <a href="/calculator" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
-        <p class="text-xs text-zinc-500">Calculator</p>
-        <p class="text-sm font-semibold text-rose-400 mt-0.5">1RM →</p>
+    {#if quickChartCards.length > 0}
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {#each quickChartCards as card}
+          <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+            <div class="flex items-start justify-between gap-3">
+              <div class="min-w-0">
+                <p class="text-xs text-zinc-500 truncate">{card.exerciseName}</p>
+                <p class="text-lg font-semibold text-green-400 mt-0.5">
+                  {weightDisplay(card.latest)} {$settings.weightUnit}
+                </p>
+                <p class="text-[10px] {card.change >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+                  {card.change >= 0 ? '+' : ''}{weightDisplay(card.change)} {$settings.weightUnit}
+                </p>
+              </div>
+              <svg viewBox="0 0 96 32" class="w-24 h-8 shrink-0">
+                <path d={card.path} fill="none" stroke="currentColor" stroke-width="2" class="text-primary-400" stroke-linecap="round" />
+              </svg>
+            </div>
+          </a>
+        {/each}
+      </div>
+    {:else}
+      <div class="grid grid-cols-2 gap-3">
+        <a href="/body" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+          <p class="text-xs text-zinc-500">Body Weight</p>
+          <p class="text-sm font-semibold text-primary-400 mt-0.5">Trend →</p>
+        </a>
+        <a href="/progress" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+          <p class="text-xs text-zinc-500">Est. 1RM</p>
+          <p class="text-sm font-semibold text-green-400 mt-0.5">All Lifts →</p>
+        </a>
+        <a href="/volume" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+          <p class="text-xs text-zinc-500">Volume</p>
+          <p class="text-sm font-semibold text-amber-400 mt-0.5">Weekly →</p>
+        </a>
+        <a href="/records" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+          <p class="text-xs text-zinc-500">Records</p>
+          <p class="text-sm font-semibold text-purple-400 mt-0.5">PRs →</p>
+        </a>
+        <a href="/compare" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+          <p class="text-xs text-zinc-500">Compare</p>
+          <p class="text-sm font-semibold text-cyan-400 mt-0.5">Side by Side →</p>
+        </a>
+        <a href="/calculator" class="bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+          <p class="text-xs text-zinc-500">Calculator</p>
+          <p class="text-sm font-semibold text-rose-400 mt-0.5">1RM →</p>
+        </a>
+      </div>
+    {/if}
+  </div>
+
+  {:else if widget.type === 'miniGraph'}
+  {@const miniGraphCard = buildMiniGraphCard(widget)}
+  <div class="card">
+    <div class="flex items-center justify-between mb-3 gap-3">
+      <div class="min-w-0">
+        <p class="text-xs text-zinc-500 uppercase tracking-wide">Mini Graph</p>
+        <h3 class="font-semibold text-zinc-200 truncate">{widget.exerciseName ?? 'Exercise'}</h3>
+      </div>
+      <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors shrink-0">
+        Full Progress →
       </a>
     </div>
+    {#if miniGraphCard}
+      <a href="/progress" class="block bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs text-zinc-500 truncate">Estimated 1RM</p>
+            <p class="text-lg font-semibold text-green-400 mt-0.5">
+              {weightDisplay(miniGraphCard.latest)} {$settings.weightUnit}
+            </p>
+            <p class="text-[10px] {miniGraphCard.change >= 0 ? 'text-emerald-400' : 'text-red-400'}">
+              {miniGraphCard.change >= 0 ? '+' : ''}{weightDisplay(miniGraphCard.change)} {$settings.weightUnit}
+            </p>
+          </div>
+          <svg viewBox="0 0 96 32" class="w-24 h-8 shrink-0">
+            <path d={miniGraphCard.path} fill="none" stroke="currentColor" stroke-width="2" class="text-primary-400" stroke-linecap="round" />
+          </svg>
+        </div>
+      </a>
+    {:else}
+      <a href="/progress" class="block bg-zinc-800/60 rounded-xl px-3 py-3 hover:bg-zinc-800 transition-colors">
+        <p class="text-sm text-zinc-400">Not enough progress data yet for this movement.</p>
+      </a>
+    {/if}
   </div>
 
   {:else if widget.id === 'trainingLog'}
@@ -875,14 +1237,23 @@
           <p class="text-[10px] text-zinc-500">{volUnit()} this wk</p>
         </div>
       </div>
-      <!-- Last 5 workouts compact list -->
-      {#if recentSessions.length > 0}
+      <!-- Last 3 workouts compact list -->
+      {#if recentSessionsList.length > 0}
         <div class="space-y-1">
-          {#each recentSessions.slice(0, 3) as s}
-            <div class="flex items-center justify-between py-1.5 text-sm">
-              <span class="text-zinc-300 truncate">{s.name ?? 'Workout'}</span>
-              <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
-            </div>
+          {#each recentSessionsList.slice(0, 3) as s}
+            {@const historyHref = workoutHistoryHref(s.name)}
+            {#if historyHref}
+              <a href={historyHref}
+                 class="flex items-center justify-between py-1.5 text-sm rounded-lg hover:bg-zinc-800/60 px-2 -mx-2 transition-colors">
+                <span class="text-zinc-300 truncate hover:text-white">{s.name ?? 'Workout'}</span>
+                <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
+              </a>
+            {:else}
+              <div class="flex items-center justify-between py-1.5 text-sm">
+                <span class="text-zinc-300 truncate">{s.name ?? 'Workout'}</span>
+                <span class="text-xs text-zinc-500 shrink-0 ml-2">{fmtDate(s.date)}</span>
+              </div>
+            {/if}
           {/each}
         </div>
       {/if}
@@ -891,30 +1262,83 @@
 
   {:else if widget.id === 'recentSessions'}
   <!-- ── Recent sessions ─────────────────────────────────────────────── -->
-  {#if recentSessions.length > 0}
-    <div class="card">
-      <div class="flex items-center justify-between mb-3">
-        <h3 class="font-semibold text-zinc-200">Recent Workouts</h3>
+  <div class="card">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="font-semibold text-zinc-200">Recent Workouts</h3>
+      <div class="flex items-center gap-2">
+        <!-- Page size selector -->
+        <select
+          value={recentPageSize}
+          onchange={(e) => setRecentPageSize(parseInt((e.target as HTMLSelectElement).value))}
+          class="text-xs bg-zinc-800 border border-zinc-700 text-zinc-400 rounded px-1.5 py-0.5 focus:outline-none focus:border-primary-500"
+        >
+          {#each PAGE_SIZE_OPTIONS as n}
+            <option value={n}>{n} / page</option>
+          {/each}
+        </select>
         <a href="/progress" class="text-xs text-primary-400 hover:text-primary-300 transition-colors">
-          View Progress →
+          Progress →
         </a>
       </div>
+    </div>
+
+    {#if recentLoading}
+      <div class="text-xs text-zinc-500 text-center py-4">Loading…</div>
+    {:else if recentSessionsList.length > 0}
       <div class="space-y-1">
-        {#each recentSessions as s}
-          <div class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0">
-            <div>
-              <p class="text-sm font-medium text-zinc-200">{s.name ?? 'Workout'}</p>
-              <p class="text-xs text-zinc-500 mt-0.5">{fmtDate(s.date)}</p>
+        {#each recentSessionsList as s}
+          {@const historyHref = workoutHistoryHref(s.name)}
+          {#if historyHref}
+            <a href={historyHref}
+               class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0 rounded-lg hover:bg-zinc-800/40 px-2 -mx-2 transition-colors">
+              <div>
+                <p class="text-sm font-medium text-zinc-200 hover:text-white">{s.name ?? 'Workout'}</p>
+                <p class="text-xs text-zinc-500 mt-0.5">{fmtDate(s.date)}</p>
+              </div>
+              <div class="text-right shrink-0 ml-4">
+                <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
+                <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
+              </div>
+            </a>
+          {:else}
+            <div class="flex items-center justify-between py-3 border-b border-zinc-800/60 last:border-0">
+              <div>
+                <p class="text-sm font-medium text-zinc-200">{s.name ?? 'Workout'}</p>
+                <p class="text-xs text-zinc-500 mt-0.5">{fmtDate(s.date)}</p>
+              </div>
+              <div class="text-right shrink-0 ml-4">
+                <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
+                <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
+              </div>
             </div>
-            <div class="text-right shrink-0 ml-4">
-              <p class="text-sm font-semibold text-primary-400">{s.total_sets} sets</p>
-              <p class="text-xs text-zinc-500">{volDisplay(s.total_volume_kg ?? 0).toFixed(0)} {volUnit()}</p>
-            </div>
-          </div>
+          {/if}
         {/each}
       </div>
-    </div>
-  {/if}
+
+      <!-- Prev / Next navigation -->
+      {#if recentPage > 0 || recentHasMore}
+        <div class="flex items-center justify-between mt-3 pt-2 border-t border-zinc-800/60">
+          <button
+            onclick={() => { recentPage = Math.max(0, recentPage - 1); }}
+            disabled={recentPage === 0}
+            class="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            ← Prev
+          </button>
+          <span class="text-xs text-zinc-500">Page {recentPage + 1}</span>
+          <button
+            onclick={() => { recentPage += 1; }}
+            disabled={!recentHasMore}
+            class="text-xs px-3 py-1.5 rounded-lg border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-600 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+          >
+            Next →
+          </button>
+        </div>
+      {/if}
+    {:else}
+      <p class="text-xs text-zinc-500 text-center py-4">No workouts yet</p>
+    {/if}
+  </div>
 
   {/if}
   </div>

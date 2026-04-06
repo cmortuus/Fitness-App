@@ -140,7 +140,9 @@ export async function getSettings(): Promise<Record<string, any>> {
 }
 
 export async function saveSettings(settings: Record<string, any>): Promise<void> {
-  await api.put('/auth/settings', settings);
+  await api.put('/auth/settings', settings, {
+    headers: { 'X-Client-Name': 'web' },
+  });
 }
 
 export function getStoredUser(): AuthUser | null {
@@ -159,11 +161,15 @@ export interface Exercise {
   id: number;
   name: string;
   display_name: string;
+  user_id: number | null;
+  source_exercise_id: number | null;
+  is_custom: boolean;
   movement_type: 'compound' | 'isolation';
   body_region: 'upper' | 'lower' | 'full_body';
   equipment_type: 'barbell' | 'dumbbell' | 'cable' | 'machine' | 'plate_loaded' | 'bodyweight' | 'band' | 'kettlebell' | 'other';
   is_unilateral: boolean;
   is_assisted: boolean;
+  is_prime: boolean;
   description: string | null;
   primary_muscles: string[];
   secondary_muscles: string[];
@@ -177,7 +183,11 @@ export interface RecentExercise extends Exercise {
 export interface Set {
   id: number;
   exercise_id: number;
+  exercise_block_id?: string | null;
   exercise_name: string | null;
+  movement_type?: string | null;
+  body_region?: string | null;
+  equipment_type?: string | null;
   set_number: number;
   planned_reps: number | null;
   planned_reps_left: number | null;
@@ -193,6 +203,7 @@ export interface Set {
   skipped_at: string | null;
   set_type: string | null;
   sub_sets: { weight_kg: number; reps: number; type?: string }[] | null;
+  peg_weights?: { peg1?: number; peg2?: number; peg3?: number } | null;
   // Draft fields populated by the server for in-progress sets
   draft_weight_kg: number | null;
   draft_reps: number | null;
@@ -206,6 +217,7 @@ export interface WorkoutSession {
   date: string;
   status: 'planned' | 'in_progress' | 'completed' | 'skipped';
   workout_plan_id: number | null;
+  plan_day_number: number | null;
   total_volume_kg: number;
   total_sets: number;
   total_reps: number;
@@ -215,10 +227,24 @@ export interface WorkoutSession {
   sets: Set[];
 }
 
+export interface WorkoutSessionAuditEntry {
+  id: number;
+  workout_session_id: number;
+  from_status: string | null;
+  to_status: string | null;
+  reason: string;
+  endpoint: string;
+  actor_username: string | null;
+  source_device: string | null;
+  created_at: string;
+}
+
 export interface PlannedExercise {
+  block_id?: string | null;
   exercise_id: number;
   sets: number;
   reps: number;
+  rep_range_top?: number;
   starting_weight_kg: number;
   progression_type: string;
   rest_seconds?: number;
@@ -227,6 +253,13 @@ export interface PlannedExercise {
   drops?: number | null;
   group_id?: string | null;
   group_type?: 'superset' | 'circuit' | null;
+  max_weight_kg?: number | null;
+}
+
+export interface PlanRirOverrides {
+  plan: number | null;
+  muscles: Record<string, number>;
+  exercises: Record<string, number>;
 }
 
 export interface PlannedDay {
@@ -244,15 +277,48 @@ export interface WorkoutPlan {
   current_week: number;
   number_of_days: number;
   days: PlannedDay[];
+  rir_overrides: PlanRirOverrides;
   auto_progression: boolean;
   min_technique_score: number;
   is_draft: boolean;
   is_archived: boolean;
 }
 
+export interface NextWorkoutResolution {
+  plan: WorkoutPlan;
+  day: PlannedDay;
+  week_number: number;
+  day_number: number;
+  is_complete: boolean;
+  debug: {
+    selected_plan_id: number;
+    completed_session_count: number;
+    total_sessions_needed: number;
+    recent_session_id: number | null;
+  };
+}
+
+export interface PlanRecommendation {
+  type: 'backoff_rir';
+  exercise_id: number;
+  exercise_name: string;
+  muscle_group: string | null;
+  current_rir: number;
+  recovery_rating: string | null;
+  recommended_rir: number;
+  add_set: boolean;
+  set_delta: number;
+  weekly_sets: number;
+  mav_sets: number;
+  reason: string;
+  detail: string;
+  source_session_id: number;
+}
+
 export interface ProgressMetric {
   exercise_id: number;
   exercise_name: string;
+  is_assisted: boolean;
   date: string;
   estimated_1rm: number | null;
   volume_load: number;
@@ -271,7 +337,7 @@ export interface ProgressionRecommendation {
 // API Functions
 
 // Sessions
-export async function getSessions(params?: { limit?: number; offset?: number }): Promise<WorkoutSession[]> {
+export async function getSessions(params?: { limit?: number; offset?: number; status_filter?: string }): Promise<WorkoutSession[]> {
   const response = await api.get('/sessions/', { params });
   return response.data;
 }
@@ -288,7 +354,7 @@ export async function createSession(data: {
 export async function createSessionFromPlan(
   planId: number,
   dayNumber: number = 1,
-  overloadStyle: 'rep' | 'weight' = 'rep',
+  overloadStyle: 'rep' | 'weight' | 'double' = 'double',
   bodyWeightKg: number = 0
 ): Promise<WorkoutSession> {
   const response = await api.post(
@@ -312,13 +378,33 @@ export async function completeSession(sessionId: number): Promise<WorkoutSession
   return response.data;
 }
 
+export async function resetSessionToPlanned(sessionId: number): Promise<WorkoutSession> {
+  const response = await api.post(`/sessions/${sessionId}/reset-to-planned`);
+  return response.data;
+}
+
+export async function getSessionAudit(sessionId: number): Promise<WorkoutSessionAuditEntry[]> {
+  const response = await api.get(`/sessions/${sessionId}/audit`);
+  return response.data;
+}
+
 export async function patchSession(sessionId: number, data: { notes?: string; name?: string }): Promise<WorkoutSession> {
   const response = await api.patch(`/sessions/${sessionId}`, data);
   return response.data;
 }
 
-export async function syncSessionToPlan(sessionId: number): Promise<{ updated: number }> {
-  const response = await api.post(`/sessions/${sessionId}/sync-to-plan`);
+export async function syncSessionToPlan(
+  sessionId: number,
+  data?: {
+    exercises: Array<{
+      exercise_id: number;
+      exercise_block_id?: string | null;
+      group_id?: string | null;
+      group_type?: 'superset' | 'circuit' | null;
+    }>;
+  }
+): Promise<{ updated: number; structural_changes?: number }> {
+  const response = await api.post(`/sessions/${sessionId}/sync-to-plan`, data ?? null);
   return response.data;
 }
 
@@ -326,6 +412,7 @@ export async function addSet(
   sessionId: number,
   data: {
     exercise_id: number;
+    exercise_block_id?: string | null;
     set_number: number;
     planned_reps?: number;
     planned_weight_kg?: number;
@@ -368,11 +455,28 @@ export async function createExercise(data: {
   display_name: string;
   movement_type?: 'compound' | 'isolation';
   body_region?: 'upper' | 'lower' | 'full_body';
+  equipment_type?: string;
+  is_prime?: boolean;
   description?: string;
   primary_muscles?: string[];
   secondary_muscles?: string[];
 }): Promise<Exercise> {
   const response = await api.post('/exercises/', data);
+  return response.data;
+}
+
+export async function updateExercise(exerciseId: number, data: {
+  display_name: string;
+  movement_type: 'compound' | 'isolation';
+  body_region: 'upper' | 'lower' | 'full_body';
+  is_unilateral: boolean;
+  is_assisted: boolean;
+  description?: string | null;
+  primary_muscles: string[];
+  secondary_muscles: string[];
+  apply_mode: 'future_only' | 'retroactive';
+}): Promise<Exercise> {
+  const response = await api.put(`/exercises/${exerciseId}`, data);
   return response.data;
 }
 
@@ -422,7 +526,21 @@ export async function recalculateWeights(pattern: string, oldBaseKg: number, new
 }
 
 // Personal records
-export async function getPersonalRecords(): Promise<any[]> {
+export interface PersonalRecord {
+  exercise_id: number;
+  display_name: string;
+  name: string;
+  max_weight_kg: number;
+  max_weight_date: string | null;
+  max_reps: number;
+  max_reps_date: string | null;
+  best_1rm_kg: number;
+  best_1rm_date: string | null;
+  best_set_weight_kg: number;
+  best_set_reps: number;
+}
+
+export async function getPersonalRecords(): Promise<PersonalRecord[]> {
   const response = await api.get('/progress/records');
   return response.data;
 }
@@ -460,8 +578,18 @@ export async function getPlans(): Promise<WorkoutPlan[]> {
   return response.data;
 }
 
+export async function getNextWorkout(): Promise<NextWorkoutResolution | null> {
+  const response = await api.get('/plans/next-workout');
+  return response.data;
+}
+
 export async function getPlan(planId: number): Promise<WorkoutPlan> {
   const response = await api.get(`/plans/${planId}`);
+  return response.data;
+}
+
+export async function getPlanRecommendations(planId: number): Promise<PlanRecommendation[]> {
+  const response = await api.get(`/plans/${planId}/recommendations`);
   return response.data;
 }
 
@@ -512,8 +640,14 @@ export async function updatePlan(planId: number, data: {
   number_of_days?: number;
   days?: PlannedDay[];
   auto_progression?: boolean;
+  is_draft?: boolean;
 }): Promise<WorkoutPlan> {
   const response = await api.put(`/plans/${planId}`, data);
+  return response.data;
+}
+
+export async function updatePlanRirOverrides(planId: number, overrides: PlanRirOverrides): Promise<WorkoutPlan> {
+  const response = await api.put(`/plans/${planId}/rir-overrides`, overrides);
   return response.data;
 }
 
@@ -578,7 +712,7 @@ export const MICRO_META: Record<string, { label: string; unit: string; rda: numb
 export interface FoodSearchResult {
   name: string;
   brand: string | null;
-  source: 'openfoodfacts' | 'usda' | 'custom' | 'pending' | 'community' | 'calorieninjas';
+  source: 'openfoodfacts' | 'usda' | 'custom' | 'pending' | 'community' | 'calorieninjas' | 'recipe';
   source_id: string | null;
   barcode: string | null;
   calories_per_100g: number | null;
@@ -683,6 +817,21 @@ export async function createCustomFood(data: {
   return response.data;
 }
 
+export async function updateCustomFood(id: number, data: {
+  name: string;
+  brand?: string;
+  barcode?: string;
+  calories_per_100g: number;
+  protein_per_100g: number;
+  carbs_per_100g: number;
+  fat_per_100g: number;
+  serving_size_g?: number;
+  serving_label?: string;
+}): Promise<FoodItem> {
+  const response = await api.put(`/nutrition/foods/${id}`, data);
+  return response.data;
+}
+
 export async function deleteCustomFood(id: number): Promise<void> {
   await api.delete(`/nutrition/foods/${id}`);
 }
@@ -705,6 +854,18 @@ export async function addNutritionEntry(data: {
   fat: number;
 }): Promise<NutritionEntry> {
   const response = await api.post('/nutrition/entries', data);
+  return response.data;
+}
+
+export async function updateNutritionEntry(id: number, data: {
+  quantity_g?: number;
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  meal?: string;
+}): Promise<NutritionEntry> {
+  const response = await api.patch(`/nutrition/entries/${id}`, data);
   return response.data;
 }
 

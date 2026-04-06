@@ -14,11 +14,13 @@ class AuthService {
     private(set) var accessToken: String?
     private var refreshToken: String?
 
-    private let accessTokenKey = "dev.lethal.gymtracker.access_token"
-    private let refreshTokenKey = "dev.lethal.gymtracker.refresh_token"
+    private let accessTokenKey = "gymtracker.access_token"
+    private let refreshTokenKey = "gymtracker.refresh_token"
+    private let legacyAccessTokenKey = "dev.lethal.gymtracker.access_token"
+    private let legacyRefreshTokenKey = "dev.lethal.gymtracker.refresh_token"
 
     private init() {
-        // Load tokens from Keychain
+        migrateLegacyTokensIfNeeded()
         accessToken = KeychainHelper.load(key: accessTokenKey)
         refreshToken = KeychainHelper.load(key: refreshTokenKey)
         isAuthenticated = accessToken != nil
@@ -131,6 +133,27 @@ class AuthService {
         refreshToken = refresh
         KeychainHelper.save(key: accessTokenKey, value: access)
         KeychainHelper.save(key: refreshTokenKey, value: refresh)
+        KeychainHelper.delete(key: legacyAccessTokenKey)
+        KeychainHelper.delete(key: legacyRefreshTokenKey)
+    }
+
+    private func migrateLegacyTokensIfNeeded() {
+        if KeychainHelper.load(key: accessTokenKey) == nil,
+           let legacyAccess = KeychainHelper.load(key: legacyAccessTokenKey) {
+            KeychainHelper.save(key: accessTokenKey, value: legacyAccess)
+        }
+
+        if KeychainHelper.load(key: refreshTokenKey) == nil,
+           let legacyRefresh = KeychainHelper.load(key: legacyRefreshTokenKey) {
+            KeychainHelper.save(key: refreshTokenKey, value: legacyRefresh)
+        }
+
+        if KeychainHelper.load(key: accessTokenKey) != nil {
+            KeychainHelper.delete(key: legacyAccessTokenKey)
+        }
+        if KeychainHelper.load(key: refreshTokenKey) != nil {
+            KeychainHelper.delete(key: legacyRefreshTokenKey)
+        }
     }
 }
 

@@ -147,12 +147,23 @@ def _normalize_calorieninjas(item: dict) -> dict | None:
 
 
 def _parse_serving(s: str | None) -> float:
-    """Try to extract grams from a serving string like '100 g' or '1 cup (240ml)'."""
+    """Extract serving size in grams/mL from strings like '100 g', '16 fl oz', '473 mL'."""
     if not s:
         return 100.0
     import re
-    m = re.search(r"(\d+\.?\d*)\s*g", s, re.IGNORECASE)
-    return float(m.group(1)) if m else 100.0
+    # Grams: "100g", "100 g" — but not "gal"
+    m = re.search(r"(\d+\.?\d*)\s*g(?!al)", s, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    # Milliliters: "473 ml", "473mL"
+    m = re.search(r"(\d+\.?\d*)\s*ml", s, re.IGNORECASE)
+    if m:
+        return float(m.group(1))
+    # Fluid ounces: "16 fl oz", "16fl oz", "16 fl. oz"
+    m = re.search(r"(\d+\.?\d*)\s*fl\.?\s*oz", s, re.IGNORECASE)
+    if m:
+        return round(float(m.group(1)) * 29.5735, 1)
+    return 100.0
 
 
 def _completeness(item: dict) -> int:
@@ -161,11 +172,36 @@ def _completeness(item: dict) -> int:
                if item.get(k) is not None)
 
 
+def _relevance_score(name: str, query: str) -> tuple[int, int]:
+    """Return (tier, name_length) for sort key — lower is better.
+
+    Tier 0 — exact match: "Bread" for query "bread"
+    Tier 1 — starts with query: "Breadcrumbs", "Bread, White"
+    Tier 2 — query appears as a whole word: "White Bread", "Gluten Free Bread"
+    Tier 3 — generic substring: "Cornbread Stuffing Mix"
+    Within each tier shorter names rank first (simpler = more generic).
+    """
+    name_lo = name.lower().strip()
+    q_lo = query.lower().strip()
+    if not q_lo:
+        return (3, len(name))
+    if name_lo == q_lo:
+        return (0, len(name))
+    if name_lo.startswith(q_lo):
+        return (1, len(name))
+    # Whole-word boundary: preceded by space/start OR followed by space/comma/end
+    words = name_lo.split()
+    if q_lo in words:
+        return (2, len(name))
+    return (3, len(name))
+
+
 async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[dict]:
     """Search both Open Food Facts and USDA in parallel, merge and deduplicate."""
     settings = get_settings()
 
     async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+        task_names = ["openfoodfacts", "usda"]
         tasks = [
             client.get(
                 "https://world.openfoodfacts.org/cgi/search.pl",
@@ -179,6 +215,7 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
         # Add CalorieNinjas if API key is configured
         cn_key = settings.calorieninjas_api_key
         if cn_key:
+            task_names.append("calorieninjas")
             tasks.append(
                 client.get(
                     "https://api.calorieninjas.com/v1/nutrition",
@@ -186,11 +223,13 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
                     headers={"X-Api-Key": cn_key},
                 )
             )
-        responses = await asyncio.gather(*tasks, return_exceptions=True)
+        gathered = await asyncio.gather(*tasks, return_exceptions=True)
 
-    off_resp = responses[0]
-    usda_resp = responses[1]
-    cn_resp = responses[2] if len(responses) > 2 else None
+    responses = {name: response for name, response in zip(task_names, gathered)}
+
+    off_resp = responses.get("openfoodfacts")
+    usda_resp = responses.get("usda")
+    cn_resp = responses.get("calorieninjas")
 
     results: list[dict] = []
 
@@ -222,7 +261,11 @@ async def search_foods(query: str, page: int = 1, page_size: int = 15) -> list[d
         existing = seen.get(key)
         if not existing or _completeness(item) > _completeness(existing):
             seen[key] = item
-    return list(seen.values())
+
+    # Sort by relevance: exact/prefix/word-boundary matches first, then by name length
+    deduped = list(seen.values())
+    deduped.sort(key=lambda x: _relevance_score(x.get("name", ""), query))
+    return deduped
 
 
 async def lookup_barcode(barcode: str) -> dict | None:

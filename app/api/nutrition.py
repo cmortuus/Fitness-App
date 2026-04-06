@@ -1,6 +1,7 @@
 """Nutrition tracking API endpoints — food log, custom foods, goals, and search."""
 
 import json
+from difflib import SequenceMatcher
 from datetime import date, datetime, timedelta
 from typing import Annotated
 
@@ -12,9 +13,9 @@ from app.api.auth import get_current_user
 from app.api.food_search import lookup_barcode, search_foods
 from app.database import get_db
 from app.models.body_weight import BodyWeightEntry
-from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, TDEEHistory, WaterEntry
+from app.models.nutrition import COMMUNITY_THRESHOLD, FoodItem, FoodSubmission, MacroGoal, NutritionEntry, Recipe, TDEEHistory, WaterEntry
 from app.models.user import User
-from app.schemas.requests import FoodItemCreate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
+from app.schemas.requests import FoodItemCreate, FoodItemUpdate, MacroGoalsUpdate, NutritionEntryCreate, NutritionEntryUpdate, WaterEntryCreate
 from app.services.expenditure import compute_adaptive_tdee
 
 router = APIRouter()
@@ -42,6 +43,27 @@ def serialize_food_item(item: FoodItem, submission_count: int | None = None) -> 
     if submission_count is not None:
         d["submission_count"] = submission_count
     return d
+
+
+def serialize_recipe_search_result(recipe: Recipe) -> dict:
+    servings = recipe.servings if recipe.servings > 0 else 1.0
+    return {
+        "name": recipe.name,
+        "brand": None,
+        "barcode": None,
+        "source": "recipe",
+        "source_id": str(recipe.id),
+        "calories_per_100g": recipe.total_calories / servings,
+        "protein_per_100g": recipe.total_protein / servings,
+        "carbs_per_100g": recipe.total_carbs / servings,
+        "fat_per_100g": recipe.total_fat / servings,
+        # Search UIs already treat serving_size_g as the default quantity to log.
+        # Using 100 keeps the existing quantity math equivalent to 1 serving.
+        "serving_size_g": 100,
+        "serving_label": "1 serving",
+        "is_custom": False,
+        "micronutrients": None,
+    }
 
 
 def serialize_entry(entry: NutritionEntry) -> dict:
@@ -74,6 +96,39 @@ def serialize_goal(goal: MacroGoal) -> dict:
     }
 
 
+def _search_match_score(name: str, query: str) -> float:
+    candidate = " ".join(name.lower().split())
+    needle = " ".join(query.lower().split())
+    if not candidate or not needle:
+        return 0.0
+    if candidate == needle:
+        return 1000.0
+
+    score = 0.0
+    if candidate.startswith(needle):
+        score = max(score, 900.0 - max(len(candidate) - len(needle), 0))
+    if f" {needle}" in candidate:
+        score = max(score, 825.0)
+    if needle in candidate:
+        score = max(score, 700.0)
+
+    candidate_words = candidate.split()
+    query_words = needle.split()
+    if query_words:
+        matched_words = sum(1 for word in query_words if word in candidate)
+        prefix_matches = sum(
+            1 for word in query_words if any(part.startswith(word) for part in candidate_words)
+        )
+        if matched_words:
+            score = max(score, 520.0 + matched_words * 70.0 + prefix_matches * 20.0)
+
+    similarity = SequenceMatcher(None, needle, candidate).ratio()
+    if similarity >= 0.55:
+        score = max(score, similarity * 600.0)
+
+    return score
+
+
 # ── Food search (proxy) ──────────────────────────────────────────────────────
 
 @router.get("/search")
@@ -90,7 +145,25 @@ async def search(
     query = q.strip()
     results: list[dict] = []
 
-    # Search local DB first (imported + community + custom foods)
+    # Promote the user's own recipes whenever they are a close match.
+    if db and user:
+        recipe_result = await db.execute(
+            select(Recipe)
+            .where(Recipe.user_id == user.id)
+            .order_by(desc(Recipe.created_at))
+            .limit(200)
+        )
+        recipe_matches = [
+            (recipe, _search_match_score(recipe.name, query))
+            for recipe in recipe_result.scalars().all()
+        ]
+        recipe_matches = [item for item in recipe_matches if item[1] >= 520]
+        recipe_matches.sort(key=lambda item: (item[1], item[0].created_at), reverse=True)
+        results.extend([serialize_recipe_search_result(recipe) for recipe, _ in recipe_matches[:8]])
+
+    # Search local DB next (imported + community + custom foods).
+    # Fetch a larger candidate set then rerank in Python so exact/prefix matches
+    # always float to the top regardless of insertion order.
     if db and user:
         local_result = await db.execute(
             select(FoodItem)
@@ -98,21 +171,37 @@ async def search(
                 FoodItem.name.ilike(f"%{query}%"),
                 (FoodItem.source != "pending") | (FoodItem.user_id == user.id),
             )
-            .order_by(
-                desc(FoodItem.source == "custom"),
-                desc(FoodItem.source == "community"),
-            )
-            .limit(15)
+            # Pull 60 candidates so we have enough to rerank properly
+            .limit(60)
         )
         local_foods = local_result.scalars().all()
-        results.extend([serialize_food_item(f) for f in local_foods])
 
-    # Only hit external APIs if local results are sparse
-    if len(results) < 5:
+        # Score and sort: custom/community items get a bonus so they still
+        # appear above generic imports when relevance is similar.
+        def _local_sort_key(item: FoodItem) -> float:
+            score = _search_match_score(item.name, query)
+            if item.source == "custom":
+                score += 200
+            elif item.source == "community":
+                score += 100
+            return -score  # negate for ascending sort
+
+        local_foods_sorted = sorted(local_foods, key=_local_sort_key)
+        results.extend([serialize_food_item(f) for f in local_foods_sorted[:20]])
+
+    # Hit external APIs when local results are sparse (fewer distinct food types).
+    # Also always try external when very few DB results so common foods aren't
+    # missed just because the local DB is sparse for that category.
+    if len(results) < 8:
         external = await search_foods(query, page=page)
-        # Deduplicate against local results by name
+        # Sort external results by relevance too
+        external_scored = sorted(
+            external,
+            key=lambda x: -_search_match_score(x.get("name", ""), query),
+        )
+        # Deduplicate against local results by name (exact lowercase)
         local_names = {r["name"].lower() for r in results}
-        for item in external:
+        for item in external_scored:
             if item["name"].lower() not in local_names:
                 results.append(item)
 
@@ -344,6 +433,35 @@ async def delete_food(
     await db.flush()
 
 
+@router.put("/foods/{food_id}")
+async def update_food(
+    food_id: int,
+    data: FoodItemUpdate,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Update a saved food owned by the current user."""
+    result = await db.execute(select(FoodItem).where(FoodItem.id == food_id, FoodItem.user_id == user.id))
+    food = result.scalar_one_or_none()
+    if not food:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Food not found")
+
+    food.name = data.name
+    food.brand = data.brand
+    food.barcode = data.barcode
+    food.calories_per_100g = data.calories_per_100g
+    food.protein_per_100g = data.protein_per_100g
+    food.carbs_per_100g = data.carbs_per_100g
+    food.fat_per_100g = data.fat_per_100g
+    food.serving_size_g = data.serving_size_g
+    food.serving_label = data.serving_label
+    food.micronutrients = json.dumps(data.micronutrients) if data.micronutrients else None
+
+    await db.flush()
+    await db.refresh(food)
+    return serialize_food_item(food)
+
+
 # ── Nutrition entries (daily log) ─────────────────────────────────────────────
 
 @router.get("/entries")
@@ -357,7 +475,7 @@ async def list_entries(
     result = await db.execute(
         select(NutritionEntry)
         .where(NutritionEntry.date == target_date, NutritionEntry.user_id == user.id)
-        .order_by(NutritionEntry.logged_at)
+        .order_by(desc(NutritionEntry.logged_at), desc(NutritionEntry.id))
     )
     entries = result.scalars().all()
 

@@ -25,11 +25,22 @@ def rep_bracket(reps: int) -> int:
     return 1
 
 
+def _bracket_floor(bracket: int) -> int:
+    """Return the lowest rep count in a bracket (for resetting after weight-up)."""
+    if bracket >= 3:
+        return 15
+    if bracket == 2:
+        return 10
+    return 5  # don't go below 5 for bracket 1
+
+
 def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> float:
     """Estimate the weight needed to achieve *target_reps* given that
     *weight* was lifted for *done_reps*, using the Epley 1RM formula.
 
-    Result is rounded to the nearest 2.5 kg (~5 lb plate increment).
+    Returns the raw calculated value rounded to 2 decimal places (kg).
+    Display-layer rounding (nearest 0.5 lbs / 0.25 kg) is handled by the
+    frontend so users see a precise suggestion they can adjust as needed.
     """
     # Guard: Epley is invalid for non-positive reps or dangerous target values
     if done_reps <= 0:
@@ -38,7 +49,40 @@ def epley_weight_for_reps(weight: float, done_reps: int, target_reps: int) -> fl
         target_reps = 1
     one_rm = weight * (1 + done_reps / 30)
     new_w = one_rm / (1 + target_reps / 30)
-    return round(new_w / 2.5) * 2.5
+    return round(new_w, 2)
+
+
+def adjust_load_for_target_rir(
+    prior_weight: float | None,
+    prior_reps: int | None,
+    target_reps: int,
+    target_rir: int | None,
+    *,
+    is_assisted: bool = False,
+    body_weight_kg: float = 0.0,
+) -> float | None:
+    """Return an easier next-session load for the same target reps at the requested RIR."""
+    if (
+        target_rir is None
+        or target_rir <= 0
+        or prior_weight is None
+        or prior_weight <= 0
+        or prior_reps is None
+        or prior_reps <= 0
+        or target_reps <= 0
+    ):
+        return prior_weight
+
+    if is_assisted:
+        if body_weight_kg <= 0:
+            return prior_weight
+        prior_net = body_weight_kg - prior_weight
+        if prior_net <= 0:
+            return prior_weight
+        easier_net = epley_weight_for_reps(prior_net, prior_reps, target_reps + target_rir)
+        return max(0.0, round(body_weight_kg - easier_net, 2))
+
+    return epley_weight_for_reps(prior_weight, prior_reps, target_reps + target_rir)
 
 
 def compute_overload(
@@ -50,6 +94,8 @@ def compute_overload(
     is_assisted: bool = False,
     is_bodyweight: bool = False,
     body_weight_kg: float = 0.0,
+    plan_target_reps: int = 0,
+    rep_range_top: int = 0,
 ) -> tuple[float | None, int | None]:
     """Return ``(suggested_weight_kg, suggested_reps)`` for the next session.
 
@@ -68,6 +114,14 @@ def compute_overload(
         is_bodyweight:  True for pure bodyweight moves (weight == 0 / not tracked).
         body_weight_kg: User body weight, used for Epley on net load when
                         overload_style="weight" and is_assisted=True.
+        plan_target_reps: The original plan template rep count.  Used by
+                        weight-first to decide whether to add a rep or bump
+                        weight: reps accumulate until Epley says the weight
+                        increase would be ≥ MIN_WEIGHT_STEP_KG, then the
+                        weight jumps and reps reset to plan_target_reps.
+        rep_range_top:  Upper bound of the rep range.  When weight-first
+                        would exceed this, force a weight bump even if the
+                        Epley increment is below MIN_WEIGHT_STEP_KG.
 
     Returns:
         A ``(weight, reps)`` tuple.  Either component may be ``None`` when
@@ -92,7 +146,7 @@ def compute_overload(
             # then convert back to assist amount.
             prior_net = body_weight_kg - prior_weight
             new_net = epley_weight_for_reps(prior_net, prior_reps + 1, prior_reps)
-            new_assist = max(0.0, round((body_weight_kg - new_net) / 2.5) * 2.5)
+            new_assist = max(0.0, round(body_weight_kg - new_net, 2))
             return new_assist, prior_reps
 
         # Rep-style (default): add a rep; reduce assist at bracket boundary
@@ -101,7 +155,7 @@ def compute_overload(
             return prior_weight, projected          # same assist, more reps
         else:
             # Bracket boundary — reduce assist by 2.5 kg (≈5 lbs) and hold reps
-            new_assist = max(0.0, round((prior_weight - 2.5) / 2.5) * 2.5)
+            new_assist = max(0.0, round(prior_weight - 2.5, 2))
             return new_assist, prior_reps
 
     # ── Pure bodyweight ────────────────────────────────────────────────────
@@ -121,18 +175,53 @@ def compute_overload(
         weight_for_min = epley_weight_for_reps(prior_weight, prior_reps, MIN_REPS)
         return weight_for_min, MIN_REPS
 
-    # Didn't hit planned reps (but ≥ floor) → retry same weight, re-attempt planned target
+    # Didn't hit planned reps (but ≥ floor) → retry same weight
     if prior_reps < planned_reps:
+        # Weight-first: show the reps the user actually achieved so the suggestion
+        # is realistic (they can aim for more reps themselves).
+        # Rep/double: re-attempt the planned target to encourage reaching it.
+        if overload_style == "weight":
+            # Return the exact prior weight without rounding — rounding to the
+            # nearest 2.5 kg can round *down* when the stored weight came from
+            # an imperial input (e.g. 183.32 kg from 405 lbs → rounds to 182.5
+            # kg → displays as 400 lbs, regressing below what was actually used).
+            return prior_weight, prior_reps
         return prior_weight, planned_reps
 
     # Hit target: apply progression
     if overload_style == "weight":
-        new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-        return new_weight, prior_reps
+        # Weight-first accumulates reps until a meaningful weight bump is
+        # achievable, then jumps weight and resets reps to the plan target.
+        # This avoids sub-plate increments (e.g. +0.9 lbs) that the user
+        # can't actually load.
+        MIN_WEIGHT_STEP_KG = 1.25  # ≈ 2.75 lbs — smallest standard plate
+        reset_reps = plan_target_reps if plan_target_reps > 0 else planned_reps
+        new_weight = epley_weight_for_reps(
+            prior_weight, prior_reps + 1, reset_reps,
+        )
+        if new_weight - prior_weight >= MIN_WEIGHT_STEP_KG:
+            return new_weight, reset_reps
+        # Not enough for a real plate bump — add a rep instead,
+        # BUT force the weight bump if reps would exceed rep_range_top.
+        next_reps = prior_reps + 1
+        if rep_range_top > 0 and next_reps > rep_range_top:
+            # At the rep ceiling — force weight bump even if small
+            return new_weight, reset_reps
+        return prior_weight, next_reps
+    elif overload_style == "double":
+        # Double progression: add 1 rep per set. Weight increase is handled
+        # at the caller level when ALL sets hit rep_range_top.
+        return prior_weight, prior_reps + 1
     else:
         projected_reps = prior_reps + 1
         if rep_bracket(projected_reps) <= rep_bracket(prior_reps):
             return prior_weight, projected_reps
         else:
+            # Bracket boundary crossed — increase weight, reset reps to bracket floor
             new_weight = epley_weight_for_reps(prior_weight, prior_reps + 1, prior_reps)
-            return new_weight, prior_reps
+            # Ensure at least one minimum increment (2.5 kg) when crossing a bracket
+            if new_weight <= prior_weight:
+                new_weight = round(prior_weight + 2.5, 2)
+            # Reset reps to bottom of current bracket (e.g., 14→10 for bracket 2)
+            reset_reps = _bracket_floor(rep_bracket(prior_reps))
+            return new_weight, reset_reps

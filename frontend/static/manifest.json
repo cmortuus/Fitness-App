@@ -1,19 +1,15 @@
 {
-  "name": "GymTracker",
-  "short_name": "GymTracker",
+  "name": "Onyx Expenditure",
+  "short_name": "Onyx Expenditure",
   "description": "Track workouts, nutrition, and progress with science-based programming",
+  "short_name": "Onyx",
+  "description": "Track workouts and progress with science-based programming",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#09090b",
-  "theme_color": "#0f172a",
+  "background_color": "#0f0f0f",
+  "theme_color": "#0170B9",
   "icons": [
-    {
-      "src": "/icons/icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
     {
       "src": "/icons/icon-192.png",
       "sizes": "192x192",

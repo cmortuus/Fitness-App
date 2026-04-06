@@ -40,6 +40,7 @@ class ExerciseSet(Base):
     exercise_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("exercises.id"), nullable=False
     )
+    exercise_block_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     set_number: Mapped[int] = mapped_column(Integer, nullable=False)
 
     # Planned values
@@ -61,12 +62,18 @@ class ExerciseSet(Base):
     # Set type and sub-sets (for drop sets)
     set_type: Mapped[str] = mapped_column(String(20), nullable=False, default="standard")
     sub_sets: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON for drop set entries
+    peg_weights: Mapped[str | None] = mapped_column(Text, nullable=True)  # JSON: {"peg1":kg,"peg2":kg,"peg3":kg} per side
 
     # Draft values — in-progress inputs not yet completed (for cross-device sync)
     draft_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
     draft_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     draft_reps_left: Mapped[int | None] = mapped_column(Integer, nullable=True)
     draft_reps_right: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Fatigue-adjusted prefill flag: True when the planned weight was adjusted
+    # because the exercise moved to a more/less fatigued position vs last session.
+    # Shown as a visual indicator so the user knows it's an estimate.
+    is_extrapolated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # Notes and timestamps
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -97,6 +104,7 @@ class WorkoutSession(Base):
     workout_plan_id: Mapped[int | None] = mapped_column(
         Integer, ForeignKey("workout_plans.id"), nullable=True
     )
+    plan_day_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     date: Mapped[date] = mapped_column(Date, nullable=False)
@@ -130,6 +138,38 @@ class WorkoutSession(Base):
     )
     sets: Mapped[list["ExerciseSet"]] = relationship(
         "ExerciseSet", back_populates="workout_session", cascade="all, delete-orphan"
+    )
+    audit_entries: Mapped[list["WorkoutSessionAudit"]] = relationship(
+        "WorkoutSessionAudit", back_populates="workout_session", cascade="all, delete-orphan"
+    )
+
+
+class WorkoutSessionAudit(Base):
+    """Audit trail for workout session lifecycle transitions."""
+
+    __tablename__ = "workout_session_audit"
+    __table_args__ = (
+        Index("ix_workout_session_audit_session", "workout_session_id"),
+        Index("ix_workout_session_audit_created_at", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workout_session_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("workout_sessions.id"), nullable=False
+    )
+    user_id: Mapped[int] = mapped_column(Integer, ForeignKey("users.id"), nullable=False)
+    from_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    to_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    reason: Mapped[str] = mapped_column(String(100), nullable=False)
+    endpoint: Mapped[str] = mapped_column(String(100), nullable=False)
+    actor_username: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    source_device: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.utcnow(), nullable=False
+    )
+
+    workout_session: Mapped["WorkoutSession"] = relationship(
+        "WorkoutSession", back_populates="audit_entries"
     )
 
 

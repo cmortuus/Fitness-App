@@ -12,7 +12,7 @@ from app.models.nutrition import FoodItem
 
 
 def get_engine():
-    url = os.environ.get("DATABASE_SYNC_URL", "sqlite:///./homegym.db")
+    url = os.environ.get("DATABASE_SYNC_URL", "postgresql://homegym:homegym_secret@localhost:5432/homegym")
     return create_engine(url, echo=False)
 
 

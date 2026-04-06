@@ -1,8 +1,8 @@
-<script lang="ts">  import { onMount, untrack } from 'svelte';
+<script lang="ts">  import { onMount, tick, untrack } from 'svelte';
   import { goto } from '$app/navigation';
-  import { exercises } from '$lib/stores';
-  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise } from '$lib/api';
-  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutTemplate } from '$lib/api';
+  import { exercises, settings } from '$lib/stores';
+  import { getExercises, getRecentExercises, getExercisesGrouped, getTemplates, createPlan, createExercise, deleteExercise, getPlan, updatePlan } from '$lib/api';
+  import type { Exercise, RecentExercise, PlannedDay, PlannedExercise, WorkoutPlan, WorkoutTemplate } from '$lib/api';
 
   // Plan basic info
   let newPlanName = $state('');
@@ -27,6 +27,11 @@
   let initialized = $state(false);
   let currentStep = $state(1); // 0: Choose method, 1: Basic Info, 2: Configure Days
   let createMode = $state<'choose' | 'template' | 'custom'>('choose');
+  let editingPlanId = $state<number | null>(null);
+  let loadingExistingPlan = $state(false);
+  let savingPlan = $state(false);
+  let focusedDayNumber = $state<number | null>(null);
+  let focusDayHint = $state('');
 
   // Template browser state
   let templates = $state<WorkoutTemplate[]>([]);
@@ -81,14 +86,39 @@
     exercise: Exercise | null;
   } | null>(null);
 
-  // Config values for the exercise being added (sets only — weight/reps set during workout)
+  function getDefaultDoubleProgressionRange() {
+    const min = Math.max(1, Number($settings.progression?.minRepsForIncrease ?? 8) || 8);
+    const max = Math.max(min, Number($settings.progression?.maxRepsForIncrease ?? 12) || 12);
+    return { min, max };
+  }
+
+  // Config values for the exercise being added
   let configSets = $state(3);
+  let configRepsMin = $state(getDefaultDoubleProgressionRange().min);
+  let configRepsMax = $state(getDefaultDoubleProgressionRange().max);
   let configSetType = $state('standard');
   let configDrops = $state<number | null>(null);
+  let configMaxWeightKg = $state<number | null>(null);
 
   // Drag and drop state
   let draggedExercise = $state<{ dayNum: number; index: number; exercise: PlannedExercise } | null>(null);
   let dragOverDay = $state<number | null>(null);
+
+  // Unique ID counter for exercise DOM keying — ensures Svelte moves DOM nodes
+  // (preserving input state) rather than reusing them by position when exercises
+  // are reordered via ▲▼ or drag-and-drop.
+  let _exUiCounter = 0;
+  function nextExUiId(): string { return `ex-${++_exUiCounter}`; }
+
+  /** Attach a stable _uiId to every PlannedExercise that doesn't have one yet. */
+  function ensureUiIds(days: PlannedDay[]): PlannedDay[] {
+    return days.map(day => ({
+      ...day,
+      exercises: day.exercises.map(ex =>
+        (ex as any)._uiId ? ex : { ...ex, _uiId: nextExUiId() }
+      ),
+    }));
+  }
 
   // Weight conversion helpers
   const LBS_TO_KG = 0.453592;
@@ -100,6 +130,53 @@
 
   function kgToLbs(kg: number): number {
     return Math.round(kg * KG_TO_LBS * 10) / 10;
+  }
+
+  function cloneDays(sourceDays: PlannedDay[]): PlannedDay[] {
+    return sourceDays.map((day, index) => ({
+      day_number: index + 1,
+      day_name: day.day_name,
+      exercises: day.exercises.map((exercise) => ({ ...exercise }))
+    }));
+  }
+
+  function updateDayExercises(dayNum: number, updater: (exercises: PlannedExercise[]) => PlannedExercise[]) {
+    days = cloneDays(days).map((day) =>
+      day.day_number === dayNum
+        ? { ...day, exercises: updater(day.exercises) }
+        : day
+    );
+  }
+
+  function moveExerciseWithinDay(dayNum: number, fromIndex: number, toIndex: number) {
+    updateDayExercises(dayNum, (exercises) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= exercises.length || toIndex >= exercises.length) {
+        return exercises;
+      }
+      const reordered = [...exercises];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      return reordered;
+    });
+  }
+
+  function hydratePlan(plan: WorkoutPlan) {
+    editingPlanId = plan.id;
+    newPlanName = plan.name;
+    newPlanDescription = plan.description ?? '';
+    numberOfDays = plan.number_of_days;
+    durationWeeks = plan.duration_weeks;
+    blockType = plan.block_type;
+    days = ensureUiIds(cloneDays(plan.days));
+    createMode = 'custom';
+    currentStep = 2;
+  }
+
+  async function focusDay(dayNumber: number | null, behavior: ScrollBehavior = 'smooth') {
+    focusedDayNumber = dayNumber;
+    if (dayNumber == null) return;
+    await tick();
+    document.getElementById(`plan-day-${dayNumber}`)?.scrollIntoView({ behavior, block: 'start', inline: 'nearest' });
   }
 
   onMount(() => {
@@ -117,10 +194,35 @@
         recentExercises = recentData;
         groupedExercises = groupedData;
 
-        // Check for saved draft in localStorage
-        const restored = restoreDraftFromStorage();
-        if (!restored) {
-          initializeDays();
+        const params = new URLSearchParams(window.location.search);
+        const editId = Number.parseInt(params.get('edit') ?? '', 10);
+        const requestedDay = Number.parseInt(params.get('day') ?? '', 10);
+
+        if (Number.isInteger(editId) && editId > 0) {
+          loadingExistingPlan = true;
+          try {
+            const plan = await getPlan(editId);
+            hydratePlan(plan);
+            if (Number.isInteger(requestedDay) && requestedDay > 0) {
+              const hasDay = plan.days.some((day) => day.day_number === requestedDay);
+              if (hasDay) {
+                focusDayHint = `Editing ${plan.days.find((day) => day.day_number === requestedDay)?.day_name ?? `Day ${requestedDay}`} so you can adjust future programming ahead of time.`;
+                await focusDay(requestedDay, 'auto');
+              }
+            }
+          } catch (error) {
+            console.error('Failed to load existing plan:', error);
+            alert('Failed to load the selected plan for editing.');
+            goto('/plans');
+            return;
+          } finally {
+            loadingExistingPlan = false;
+          }
+        } else {
+          const restored = restoreDraftFromStorage();
+          if (!restored) {
+            initializeDays();
+          }
         }
         initialized = true;
 
@@ -202,13 +304,17 @@
   }
 
   function selectExercise(exercise: Exercise) {
+    const defaultRange = getDefaultDoubleProgressionRange();
     configuringExercise = {
       exercise_id: exercise.id,
       exercise: exercise
     };
     configSets = 3;
+    configRepsMin = defaultRange.min;
+    configRepsMax = defaultRange.max;
     configSetType = 'standard';
     configDrops = null;
+    configMaxWeightKg = null;
   }
 
   function addExerciseToDay() {
@@ -217,16 +323,19 @@
     const dayIndex = days.findIndex(d => d.day_number === selectingForDay);
     if (dayIndex === -1) return;
 
-    const newExercise: PlannedExercise = {
+    const newExercise: PlannedExercise & { _uiId: string } = {
       exercise_id: configuringExercise.exercise_id,
       sets: configSets,
-      reps: 0,
+      reps: configRepsMin,
+      rep_range_top: configRepsMax,
       starting_weight_kg: 0,
       progression_type: 'linear',
       rest_seconds: 90,
       notes: null,
       set_type: configSetType,
-      drops: configSetType === 'drop_set' ? configDrops : null
+      drops: configSetType === 'drop_set' ? configDrops : null,
+      max_weight_kg: configMaxWeightKg,
+      _uiId: nextExUiId(),
     };
 
     days[dayIndex].exercises = [...days[dayIndex].exercises, newExercise];
@@ -235,19 +344,13 @@
   }
 
   function removeExerciseFromDay(dayNum: number, exerciseIndex: number) {
-    const dayIndex = days.findIndex(d => d.day_number === dayNum);
-    if (dayIndex === -1) return;
-
-    days[dayIndex].exercises = days[dayIndex].exercises.filter((_, i) => i !== exerciseIndex);
-    days = [...days];
+    updateDayExercises(dayNum, (exercises) => exercises.filter((_, i) => i !== exerciseIndex));
   }
 
   function updateDayName(dayNum: number, newName: string) {
-    const dayIndex = days.findIndex(d => d.day_number === dayNum);
-    if (dayIndex !== -1) {
-      days[dayIndex].day_name = newName;
-      days = [...days];
-    }
+    days = cloneDays(days).map((day) =>
+      day.day_number === dayNum ? { ...day, day_name: newName } : day
+    );
   }
 
   // Drag and drop handlers
@@ -276,15 +379,16 @@
 
     if (sourceDayIndex === -1 || targetDayIndex === -1) return;
 
-    // Remove from source
-    days[sourceDayIndex].exercises = days[sourceDayIndex].exercises.filter(
-      (_, i) => i !== draggedExercise!.index
-    );
+    const sourceDay = days[sourceDayIndex];
+    const targetDay = days[targetDayIndex];
+    const nextSourceExercises = sourceDay.exercises.filter((_, i) => i !== draggedExercise!.index);
+    const nextTargetExercises = [...targetDay.exercises, { ...draggedExercise.exercise }];
 
-    // Add to target
-    days[targetDayIndex].exercises = [...days[targetDayIndex].exercises, draggedExercise.exercise];
-
-    days = [...days];
+    days = cloneDays(days).map((day) => {
+      if (day.day_number === sourceDay.day_number) return { ...day, exercises: nextSourceExercises };
+      if (day.day_number === targetDay.day_number) return { ...day, exercises: nextTargetExercises };
+      return day;
+    });
     draggedExercise = null;
   }
 
@@ -351,30 +455,46 @@
   }
 
   function buildPlanData(isDraft: boolean = false) {
+    // Strip frontend-only _uiId before sending to backend
+    const cleanDays = days.map(day => ({
+      ...day,
+      exercises: day.exercises.map(ex => {
+        const { _uiId, ...rest } = ex as any;
+        return rest as PlannedExercise;
+      }),
+    }));
     return {
       name: newPlanName || (isDraft ? 'Untitled Draft' : ''),
       description: newPlanDescription,
       block_type: blockType,
       duration_weeks: durationWeeks,
       number_of_days: numberOfDays,
-      days: days,
+      days: cleanDays,
       auto_progression: true,
       is_draft: isDraft,
     };
   }
 
-  async function handleCreatePlan() {
+  async function handleSubmitPlan() {
+    savingPlan = true;
     try {
-      await createPlan(buildPlanData(false));
+      if (editingPlanId !== null) {
+        await updatePlan(editingPlanId, buildPlanData(false));
+      } else {
+        await createPlan(buildPlanData(false));
+      }
       clearDraftFromStorage();
       goto('/plans');
     } catch (error) {
-      console.error('Failed to create plan:', error);
-      alert('Failed to create plan: ' + (error instanceof Error ? error.message : String(error)));
+      console.error('Failed to save plan:', error);
+      alert('Failed to save plan: ' + (error instanceof Error ? error.message : String(error)));
+    } finally {
+      savingPlan = false;
     }
   }
 
   async function handleSaveDraft() {
+    if (editingPlanId !== null) return;
     try {
       await createPlan(buildPlanData(true));
       clearDraftFromStorage();
@@ -389,10 +509,11 @@
   const DRAFT_KEY = 'hgt_plan_draft';
 
   function saveDraftToStorage() {
+    if (editingPlanId !== null) return;
     if (typeof localStorage === 'undefined') return;
     const draft = {
       name: newPlanName, description: newPlanDescription, blockType, durationWeeks,
-      numberOfDays, days, currentStep, savedAt: Date.now(),
+      numberOfDays, days, currentStep, createMode, savedAt: Date.now(),
     };
     localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
   }
@@ -402,6 +523,7 @@
   }
 
   function restoreDraftFromStorage(): boolean {
+    if (editingPlanId !== null) return false;
     if (typeof localStorage === 'undefined') return false;
     const raw = localStorage.getItem(DRAFT_KEY);
     if (!raw) return false;
@@ -416,8 +538,9 @@
       blockType = draft.blockType || 'other';
       durationWeeks = draft.durationWeeks || 4;
       numberOfDays = draft.numberOfDays || 3;
-      days = draft.days || [];
+      days = ensureUiIds(draft.days || []);
       currentStep = draft.currentStep || 1;
+      createMode = draft.createMode || (currentStep > 1 ? 'scratch' : 'choose');
       return true;
     } catch { return false; }
   }
@@ -437,6 +560,25 @@
 
   function cancel() {
     goto('/plans');
+  }
+
+  function editSpecificDay(dayNumber: number) {
+    focusDayHint = `Editing ${days.find((day) => day.day_number === dayNumber)?.day_name ?? `Day ${dayNumber}`} so you can adjust future programming ahead of time.`;
+    focusDay(dayNumber);
+  }
+
+  function moveDay(dayNum: number, direction: -1 | 1) {
+    const index = days.findIndex((d) => d.day_number === dayNum);
+    const targetIndex = index + direction;
+    if (index === -1 || targetIndex < 0 || targetIndex >= days.length) return;
+
+    const reordered = [...days];
+    [reordered[index], reordered[targetIndex]] = [reordered[targetIndex], reordered[index]];
+    days = ensureUiIds(cloneDays(reordered));
+  }
+
+  function clearDay(dayNum: number) {
+    updateDayExercises(dayNum, () => []);
   }
 
   async function loadTemplates() {
@@ -484,7 +626,6 @@
     upper_back: 'Upper Back',
     mid_back: 'Mid Back',
     lower_back: 'Lower Back',
-    shoulders: 'Shoulders',
     biceps: 'Biceps',
     triceps: 'Triceps',
     core: 'Core',
@@ -506,7 +647,6 @@
     { value: 'upper_back', label: 'Upper Back' },
     { value: 'mid_back', label: 'Mid Back' },
     { value: 'lower_back', label: 'Lower Back' },
-    { value: 'shoulders', label: 'Shoulders' },
     { value: 'traps', label: 'Traps' },
     { value: 'biceps', label: 'Biceps' },
     { value: 'triceps', label: 'Triceps' },
@@ -543,25 +683,54 @@
     <div class="max-w-7xl mx-auto flex items-center justify-between">
       <div class="flex items-center gap-4">
         <button onclick={() => {
-          if (createMode === 'template' || createMode === 'custom') { createMode = 'choose'; }
-          else if (currentStep === 2) { goBackToStep1(); }
+          if (currentStep === 2) { goBackToStep1(); }
+          else if (createMode === 'template') { createMode = 'choose'; }
+          else if (createMode === 'custom' && editingPlanId === null) { createMode = 'choose'; }
           else { cancel(); }
         }} class="text-zinc-400 hover:text-white">
           ← {createMode === 'choose' ? 'Back to Plans' : 'Back'}
         </button>
         <h1 class="text-xl font-bold">
-          {createMode === 'choose' ? 'New Plan' : createMode === 'template' ? 'Choose Template' : 'Build Custom Plan'}
+          {editingPlanId !== null
+            ? 'Edit Weekly Plan'
+            : createMode === 'choose'
+              ? 'New Plan'
+              : createMode === 'template'
+                ? 'Choose Template'
+                : 'Build Custom Plan'}
         </h1>
       </div>
 
       {#if currentStep === 2 && createMode === 'custom'}
-        <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
-        <button onclick={handleCreatePlan} class="btn-primary">Create Plan</button>
+        {#if editingPlanId === null}
+          <button onclick={handleSaveDraft} class="btn-ghost">Save Draft</button>
+        {/if}
+        <button onclick={handleSubmitPlan} class="btn-primary" disabled={savingPlan}>
+          {savingPlan
+            ? (editingPlanId !== null ? 'Saving...' : 'Creating...')
+            : (editingPlanId !== null ? 'Save Changes' : 'Create Plan')}
+        </button>
       {/if}
     </div>
   </div>
 
   <div class="p-6 max-w-7xl mx-auto space-y-6">
+    {#if currentStep === 2 && focusedDayNumber !== null}
+      <div class="rounded-xl border border-primary-500/30 bg-primary-500/10 px-4 py-3 flex items-start justify-between gap-3">
+        <div>
+          <p class="text-sm font-medium text-primary-200">
+            Focused on {days.find((day) => day.day_number === focusedDayNumber)?.day_name ?? `Day ${focusedDayNumber}`}
+          </p>
+          <p class="text-xs text-zinc-300 mt-1">{focusDayHint || 'Changes here update future programming only. Completed workout history stays untouched.'}</p>
+        </div>
+        <button
+          onclick={() => focusDay(null)}
+          class="text-xs text-primary-200 hover:text-white shrink-0"
+        >
+          Clear Focus
+        </button>
+      </div>
+    {/if}
 
     <!-- Step 0: Choose method -->
     {#if createMode === 'choose'}
@@ -652,7 +821,7 @@
                   {#each day.exercises as ex}
                     <div class="flex items-center justify-between text-sm px-2 py-1 rounded bg-zinc-800/50">
                       <span class="text-zinc-300">{getExName(ex.exercise_id)}</span>
-                      <span class="text-xs text-zinc-500">{ex.sets}×{ex.reps}</span>
+                      <span class="text-xs text-zinc-500">{ex.sets}×{ex.reps}{ex.rep_range_top ? `-${ex.rep_range_top}` : ''}</span>
                     </div>
                   {/each}
                 </div>
@@ -670,10 +839,10 @@
 
     <!-- Custom plan builder: Step 1 -->
     {:else if currentStep === 1}
-      {#if !initialized}
+      {#if !initialized || loadingExistingPlan}
         <div class="card max-w-2xl mx-auto text-center py-12">
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary-500 mx-auto mb-4"></div>
-          <p class="text-zinc-400 mb-4">Loading exercises...</p>
+          <p class="text-zinc-400 mb-4">{loadingExistingPlan ? 'Loading weekly plan...' : 'Loading exercises...'}</p>
           <button
             class="px-4 py-2 bg-primary-600 text-white rounded hover:bg-primary-500"
             onclick={async () => {
@@ -748,7 +917,7 @@
 
         <div class="flex justify-end gap-3 mt-8">
           <button onclick={cancel} class="btn-secondary">Cancel</button>
-          <button onclick={goToStep2} class="btn-primary">Next Step</button>
+          <button onclick={goToStep2} class="btn-primary">{editingPlanId !== null ? 'Edit Week' : 'Next Step'}</button>
         </div>
       </div>
       {/if}
@@ -759,14 +928,15 @@
       <div class="space-y-4">
         <div class="flex items-center justify-between">
           <h2 class="text-lg font-semibold">Configure Days</h2>
-          <p class="text-sm text-zinc-400">Drag and drop exercises between days to reorganize</p>
+          <p class="text-sm text-zinc-400">Drag exercises between days, clear a day to skip it, and reorder the week.</p>
         </div>
 
         <!-- Days grid - responsive columns -->
         <div class="grid gap-4" style="grid-template-columns: repeat({Math.min(numberOfDays, 7)}, minmax(280px, 1fr));">
           {#each days as day}
             <div
-              class="border border-zinc-800 rounded-lg p-4 min-h-[400px] transition-colors {dragOverDay === day.day_number ? 'border-primary-500 bg-zinc-800/30' : 'bg-zinc-900'}"
+              id={"plan-day-" + day.day_number}
+              class="border rounded-lg p-4 min-h-[400px] transition-colors {focusedDayNumber === day.day_number ? 'border-primary-500 bg-primary-500/5' : dragOverDay === day.day_number ? 'border-primary-500 bg-zinc-800/30' : 'border-zinc-800 bg-zinc-900'}"
               ondragover={(e) => handleDragOver(day.day_number, e)}
               ondragleave={handleDragLeave}
               ondrop={(e) => handleDrop(day.day_number, e)}
@@ -774,14 +944,47 @@
               aria-label="Day {day.day_number}"
             >
               <!-- Day header -->
-              <div class="mb-4">
-                <input
-                  type="text"
-                  value={day.day_name}
-                  oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
-                  class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
-                  placeholder="Day name..."
-                />
+              <div class="mb-4 space-y-3">
+                <div class="flex items-start justify-between gap-3">
+                  <input
+                    type="text"
+                    value={day.day_name}
+                    oninput={(e) => updateDayName(day.day_number, (e.target as HTMLInputElement).value)}
+                    class="input text-sm font-medium bg-transparent border-0 px-0 py-1 focus:bg-zinc-800"
+                    placeholder="Day name..."
+                  />
+                  <div class="flex items-center gap-1 shrink-0">
+                    <button
+                      onclick={() => moveDay(day.day_number, -1)}
+                      disabled={day.day_number === 1}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                    >
+                      ←
+                    </button>
+                    <button
+                      onclick={() => moveDay(day.day_number, 1)}
+                      disabled={day.day_number === days.length}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 disabled:opacity-30 disabled:cursor-not-allowed text-xs"
+                    >
+                      →
+                    </button>
+                    <button
+                      onclick={() => clearDay(day.day_number)}
+                      class="px-2 py-1 rounded bg-zinc-800 text-zinc-300 hover:bg-zinc-700 text-xs"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+                <div class="flex items-center justify-between gap-2">
+                  <p class="text-xs text-zinc-500">Day {day.day_number}</p>
+                  <button
+                    onclick={() => editSpecificDay(day.day_number)}
+                    class="text-[11px] text-primary-400 hover:text-primary-300"
+                  >
+                    Focus Day
+                  </button>
+                </div>
               </div>
 
               <!-- Add exercise button -->
@@ -794,7 +997,7 @@
 
               <!-- Exercises list -->
               <div class="space-y-2">
-                {#each day.exercises as ex, idx}
+                {#each day.exercises as ex, idx ((ex as any)._uiId ?? ex.exercise_id + '-' + idx)}
                   <div
                     class="bg-zinc-800 rounded-lg p-3 cursor-move hover:bg-gray-600 transition-colors"
                     draggable="true"
@@ -807,10 +1010,10 @@
                       <div class="flex-1 min-w-0">
                         <div class="flex items-center gap-2 mb-1.5">
                           <div class="flex flex-col shrink-0">
-                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) { const arr = day.exercises; [arr[idx-1], arr[idx]] = [arr[idx], arr[idx-1]]; days = [...days]; } }}
+                            <button onclick={(e) => { e.stopPropagation(); if (idx > 0) moveExerciseWithinDay(day.day_number, idx, idx - 1); }}
                                     disabled={idx === 0}
                                     class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▲</button>
-                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) { const arr = day.exercises; [arr[idx], arr[idx+1]] = [arr[idx+1], arr[idx]]; days = [...days]; } }}
+                            <button onclick={(e) => { e.stopPropagation(); if (idx < day.exercises.length - 1) moveExerciseWithinDay(day.day_number, idx, idx + 1); }}
                                     disabled={idx === day.exercises.length - 1}
                                     class="text-[10px] text-zinc-500 hover:text-white disabled:opacity-20 leading-none">▼</button>
                           </div>
@@ -825,8 +1028,11 @@
                             oninput={(e) => {
                               const v = parseInt((e.target as HTMLInputElement).value);
                               if (!isNaN(v) && v > 0) {
-                                days[days.findIndex(d => d.day_number === day.day_number)].exercises[idx].sets = v;
-                                days = [...days];
+                                updateDayExercises(day.day_number, (exercises) =>
+                                  exercises.map((exercise, exerciseIndex) =>
+                                    exerciseIndex === idx ? { ...exercise, sets: v } : exercise
+                                  )
+                                );
                               }
                             }}
                             min="1" max="20"
@@ -879,7 +1085,6 @@
             <p class="text-sm text-zinc-400">{configuringExercise.exercise?.primary_muscles.join(', ')}</p>
           </div>
 
-          <!-- Sets only — weight & reps are set during the workout -->
           <div>
             <label class="label">Number of Sets</label>
             <input
@@ -889,7 +1094,16 @@
               max="20"
               class="input max-w-[120px]"
             />
-            <p class="text-xs text-zinc-500 mt-1">Weight and reps are logged during the workout.</p>
+          </div>
+
+          <div>
+            <label class="label">Rep Range</label>
+            <div class="flex items-center gap-2">
+              <input type="number" bind:value={configRepsMin} min="1" max="30" class="input max-w-[80px]" />
+              <span class="text-zinc-500">to</span>
+              <input type="number" bind:value={configRepsMax} min={configRepsMin} max="30" class="input max-w-[80px]" />
+            </div>
+            <p class="text-xs text-zinc-500 mt-1">With double progression, weight increases when all sets hit the top of the range.</p>
           </div>
 
           <div>
@@ -908,6 +1122,23 @@
               <input type="number" bind:value={configDrops} min="1" max="5" placeholder="On-the-fly" class="input !py-1 text-sm w-20" />
             </div>
           {/if}
+
+          <div>
+            <label class="text-xs text-zinc-500">Max Weight Cap (kg)</label>
+            <input
+              type="number"
+              min="0"
+              step="2.5"
+              placeholder="No cap"
+              value={configMaxWeightKg ?? ''}
+              oninput={(event) => {
+                const raw = (event.target as HTMLInputElement).value;
+                configMaxWeightKg = raw === '' ? null : (Number.parseFloat(raw) || null);
+              }}
+              class="input !py-1 text-sm w-28"
+            />
+            <p class="text-xs text-zinc-600 mt-0.5">Overload will never suggest above this weight.</p>
+          </div>
 
           <div class="flex justify-between gap-3">
             <button
