@@ -1628,9 +1628,13 @@ async def create_session_from_plan(
                         planned_right = set1_right
             elif double_weight_up:
                 # Double progression: all sets hit ceiling → weight up, reps reset
-                prior_sets_for_ex = prior_set_data.get(exercise_id, {})
+                # Filter to same set types that triggered the weight-up decision
+                standard_prior_sets = {
+                    k: v for k, v in prior_set_data.get(exercise_id, {}).items()
+                    if v.get("set_type", "standard") in ("standard", "myo_rep", "myo_rep_match")
+                }
                 prior_weight = next(
-                    (s["weight"] for s in prior_sets_for_ex.values()), None
+                    (s["weight"] for s in standard_prior_sets.values() if s.get("weight")), None
                 )
                 if prior_weight and prior_weight > 0:
                     weight_kg = round(prior_weight + 2.5, 2)
