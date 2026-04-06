@@ -830,12 +830,12 @@ class TestMultiWeekChain:
         assert w2["sets"][0]["planned_reps"] == 11, "Week 2 should suggest 11 reps"
         await log_set(client, w2["id"], w2["sets"][0]["id"], 40.0, 8)  # miss!
 
-        # Week 3: should hold — retry at planned target (11), not progress further
+        # Week 3: missed 11, got 8 → progress +1 from actual → 9
         w3 = await start_session_from_plan(client, plan["id"])
         w3_reps = w3["sets"][0]["planned_reps"]
         w3_weight = w3["sets"][0]["planned_weight_kg"]
         assert w3_weight == 40.0, f"Weight should hold at 40 after miss, got {w3_weight}"
-        assert w3_reps == 11, f"Should retry 11 reps after missing, got {w3_reps}"
+        assert w3_reps == 9, f"Should progress +1 from actual (8→9), got {w3_reps}"
 
 
 class TestDoubleProgression:
