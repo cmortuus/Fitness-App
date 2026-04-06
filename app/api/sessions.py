@@ -1375,6 +1375,7 @@ async def create_session_from_plan(
         target_reps: int,
         ex_model,
         target_rir: int | None = None,
+        ex_rep_range_top: int = 0,
     ) -> tuple[float | None, int | None]:
         """Compute overload for one side (or a bilateral set) given prior values."""
         if prior_reps is None or prior_reps <= 0:
@@ -1402,6 +1403,7 @@ async def create_session_from_plan(
             is_bodyweight=(not is_assisted) and (prior_weight is None or prior_weight <= 0),
             body_weight_kg=body_weight_kg,
             plan_target_reps=target_reps if target_reps and target_reps > 0 else 0,
+            rep_range_top=ex_rep_range_top,
         )
         if target_rir is not None and target_rir > 0:
             suggested_weight = adjust_load_for_target_rir(
@@ -1503,17 +1505,17 @@ async def create_session_from_plan(
             weight_kg, _ = _overload_for_side(
                 prior_weight, ref_reps,
                 prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
-                target_reps, ex_model, target_rir,
+                target_reps, ex_model, target_rir, ex_rep_range_top=rep_range_top,
             )
             _, new_reps_left = _overload_for_side(
                 prior_weight, left_reps,
                 prior_set.get("planned_reps_left") or prior_set.get("planned_reps"),
-                target_reps, ex_model,
+                target_reps, ex_model, ex_rep_range_top=rep_range_top,
             )
             _, new_reps_right = _overload_for_side(
                 prior_weight, right_reps,
                 prior_set.get("planned_reps_right") or prior_set.get("planned_reps"),
-                target_reps, ex_model,
+                target_reps, ex_model, ex_rep_range_top=rep_range_top,
             )
             # planned_reps = weaker side (conservative display)
             if new_reps_left is not None and new_reps_right is not None:
@@ -1526,6 +1528,7 @@ async def create_session_from_plan(
         weight_kg, planned_reps = _overload_for_side(
             prior_set["weight"], prior_set["reps"],
             prior_set.get("planned_reps"), target_reps, ex_model, target_rir,
+            ex_rep_range_top=rep_range_top,
         )
         return weight_kg, planned_reps, None, None
 
@@ -1625,12 +1628,21 @@ async def create_session_from_plan(
                         planned_right = set1_right
             elif double_weight_up:
                 # Double progression: all sets hit ceiling → weight up, reps reset
-                prior_sets_for_ex = prior_set_data.get(exercise_id, {})
+                # Filter to same set types that triggered the weight-up decision
+                standard_prior_sets = {
+                    k: v for k, v in prior_set_data.get(exercise_id, {}).items()
+                    if v.get("set_type", "standard") in ("standard", "myo_rep", "myo_rep_match")
+                }
                 prior_weight = next(
-                    (s["weight"] for s in prior_sets_for_ex.values()), None
+                    (s["weight"] for s in standard_prior_sets.values() if s.get("weight")), None
                 )
                 if prior_weight and prior_weight > 0:
-                    weight_kg = round(prior_weight + 2.5, 2)
+                    # Bump by one minimum plate step.  The user already
+                    # accumulated reps (e.g. 8→12) so a small weight jump
+                    # + rep reset is appropriate.  Epley across the full
+                    # rep range would overshoot (e.g. +13% for 12→8).
+                    MIN_WEIGHT_STEP_KG = 1.25  # ≈ 2.75 lbs
+                    weight_kg = round(prior_weight + MIN_WEIGHT_STEP_KG, 2)
                 else:
                     weight_kg = None
                 suggested_reps = reps  # reset to bottom of range

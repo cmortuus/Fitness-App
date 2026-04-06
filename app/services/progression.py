@@ -95,6 +95,7 @@ def compute_overload(
     is_bodyweight: bool = False,
     body_weight_kg: float = 0.0,
     plan_target_reps: int = 0,
+    rep_range_top: int = 0,
 ) -> tuple[float | None, int | None]:
     """Return ``(suggested_weight_kg, suggested_reps)`` for the next session.
 
@@ -118,6 +119,9 @@ def compute_overload(
                         weight: reps accumulate until Epley says the weight
                         increase would be ≥ MIN_WEIGHT_STEP_KG, then the
                         weight jumps and reps reset to plan_target_reps.
+        rep_range_top:  Upper bound of the rep range.  When weight-first
+                        would exceed this, force a weight bump even if the
+                        Epley increment is below MIN_WEIGHT_STEP_KG.
 
     Returns:
         A ``(weight, reps)`` tuple.  Either component may be ``None`` when
@@ -197,8 +201,13 @@ def compute_overload(
         )
         if new_weight - prior_weight >= MIN_WEIGHT_STEP_KG:
             return new_weight, reset_reps
-        # Not enough for a real plate bump — add a rep instead
-        return prior_weight, prior_reps + 1
+        # Not enough for a real plate bump — add a rep instead,
+        # BUT force the weight bump if reps would exceed rep_range_top.
+        next_reps = prior_reps + 1
+        if rep_range_top > 0 and next_reps > rep_range_top:
+            # At the rep ceiling — force weight bump even if small
+            return new_weight, reset_reps
+        return prior_weight, next_reps
     elif overload_style == "double":
         # Double progression: add 1 rep per set. Weight increase is handled
         # at the caller level when ALL sets hit rep_range_top.

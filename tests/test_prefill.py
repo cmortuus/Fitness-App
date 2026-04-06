@@ -883,7 +883,7 @@ class TestDoubleProgression:
         # Week 2: all sets hit ceiling → weight up, reps reset to 8
         w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
         for s in w2["sets"]:
-            assert s["planned_weight_kg"] == 42.5, f"Weight should increase to 42.5, got {s['planned_weight_kg']}"
+            assert s["planned_weight_kg"] == 41.25, f"Weight should increase to 42.5, got {s['planned_weight_kg']}"
             assert s["planned_reps"] == 8, f"Reps should reset to 8, got {s['planned_reps']}"
 
     async def test_double_no_weight_up_if_one_set_below_ceiling(self, client: AsyncClient):
@@ -916,7 +916,7 @@ class TestDoubleProgression:
 
         w2 = await start_session_from_plan(client, plan["id"], overload_style="double")
         for s in w2["sets"]:
-            assert s["planned_weight_kg"] == 42.5, f"Weight should increase to 42.5, got {s['planned_weight_kg']}"
+            assert s["planned_weight_kg"] == 41.25, f"Weight should increase to 42.5, got {s['planned_weight_kg']}"
             assert s["planned_reps"] == 8, f"Reps should reset to 8, got {s['planned_reps']}"
 
     async def test_double_full_cycle(self, client: AsyncClient):
@@ -944,7 +944,7 @@ class TestDoubleProgression:
         # Week 4: all sets hit ceiling → 42.5 × 8,8
         w4 = await start_session_from_plan(client, plan["id"], overload_style="double")
         for s in w4["sets"]:
-            assert s["planned_weight_kg"] == 42.5, f"Expected 42.5, got {s['planned_weight_kg']}"
+            assert s["planned_weight_kg"] == 41.25, f"Expected 42.5, got {s['planned_weight_kg']}"
             assert s["planned_reps"] == 8, f"Expected reset to 8, got {s['planned_reps']}"
 
 

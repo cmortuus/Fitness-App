@@ -1969,12 +1969,23 @@
     const byBlockId = new Map<string, PlannedExercise>(
       day.exercises.filter(e => e.block_id).map(e => [e.block_id!, e])
     );
+    // Also index by exercise_id for exercises without block_id (legacy sessions)
+    const byExerciseId = new Map<number, PlannedExercise>(
+      day.exercises.map(e => [e.exercise_id, e])
+    );
     const newOrder = uiExercises
-      .map(ue => (ue.blockId ? byBlockId.get(ue.blockId) : undefined))
+      .map(ue => {
+        if (ue.blockId) return byBlockId.get(ue.blockId);
+        // Fallback: match by exercise_id for legacy exercises without block_id
+        return byExerciseId.get(ue.exerciseId);
+      })
       .filter((e): e is PlannedExercise => e != null);
     // Append any plan exercises not represented in uiExercises
-    const included = new Set(newOrder.map(e => e.block_id));
-    const missing = day.exercises.filter(e => !included.has(e.block_id ?? ''));
+    const includedBlockIds = new Set(newOrder.map(e => e.block_id).filter(Boolean));
+    const includedExIds = new Set(newOrder.map(e => e.exercise_id));
+    const missing = day.exercises.filter(e =>
+      (e.block_id ? !includedBlockIds.has(e.block_id) : !includedExIds.has(e.exercise_id))
+    );
     const reordered = [...newOrder, ...missing];
     const updatedDays = activePlan.days.map(d =>
       d.day_number === activePlanDayNumber ? { ...d, exercises: reordered } : d
