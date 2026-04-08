@@ -3225,6 +3225,10 @@
                             value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
                             oninput={(e) => {
                               const raw = (e.target as HTMLInputElement).value;
+                              // Don't update state while user is mid-decimal (e.g. "125.")
+                              // — parseFloat strips the trailing dot, causing a re-render
+                              // that resets the cursor position.
+                              if (raw.endsWith('.')) return;
                               const val = raw === '' ? null : Math.abs(parseFloat(raw));
                               const oldWeight = set.weightLbs;
                               set.weightLbs = val;
@@ -3398,6 +3402,10 @@
                         value={isAssistedEx && set.weightLbs != null ? -set.weightLbs : (set.weightLbs ?? '')}
                         oninput={(e) => {
                           const raw = (e.target as HTMLInputElement).value;
+                          // Don't update state while user is mid-decimal (e.g. "125.")
+                          // — parseFloat strips the trailing dot, causing a re-render
+                          // that resets the cursor position.
+                          if (raw.endsWith('.')) return;
                           const val = raw === '' ? null : Math.abs(parseFloat(raw));
                           const oldWeight = set.weightLbs;
                           set.weightLbs = val;
