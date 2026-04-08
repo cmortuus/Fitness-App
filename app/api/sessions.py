@@ -375,6 +375,40 @@ async def complete_session(
     return serialize_session(workout_session)
 
 
+@router.post("/{session_id}/skip", response_model=WorkoutSessionResponse)
+async def skip_session(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> dict:
+    """Skip a workout session.  Skipped sessions are excluded from
+    progressive overload — the next session will use the most recent
+    completed session as its baseline instead."""
+    workout_session = await _get_session_with_sets(db, session_id, user_id=user.id)
+    if not workout_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+
+    prior_status = workout_session.status
+    workout_session.status = WorkoutStatus.SKIPPED
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=prior_status,
+        to_status=workout_session.status,
+        reason="session_skipped",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
+    await db.flush()
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
+    return serialize_session(workout_session)
+
+
 @router.post("/{session_id}/reset-to-planned", response_model=WorkoutSessionResponse)
 async def reset_session_to_planned(
     session_id: int,

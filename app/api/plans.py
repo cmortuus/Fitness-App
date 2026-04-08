@@ -96,6 +96,14 @@ def resolve_next_workout(sessions: list[WorkoutSession], plans: list[dict]) -> d
             and session_matches_plan(s, plan)
         ]
 
+    def done_or_skipped_sessions_for_plan(plan: dict) -> list[WorkoutSession]:
+        """Completed + skipped sessions — both advance the day counter."""
+        return [
+            s for s in sessions
+            if s.status in ("completed", "skipped")
+            and session_matches_plan(s, plan)
+        ]
+
     recent_with_plan = next(
         (
             s for s in sessions
@@ -116,11 +124,15 @@ def resolve_next_workout(sessions: list[WorkoutSession], plans: list[dict]) -> d
         return None
 
     completed_sessions = completed_sessions_for_plan(plan)
+    # Count both completed and skipped sessions for day advancement —
+    # skipping a day should move the plan forward, not repeat the same day.
+    advanced_sessions = done_or_skipped_sessions_for_plan(plan)
+    advanced_count = len(advanced_sessions)
     done_count = len(completed_sessions)
     total_needed = plan["duration_weeks"] * len(plan["days"])
     is_complete = done_count >= total_needed
-    next_day_idx = 0 if is_complete else done_count % len(plan["days"])
-    week_number = plan["duration_weeks"] if is_complete else (done_count // len(plan["days"])) + 1
+    next_day_idx = 0 if is_complete else advanced_count % len(plan["days"])
+    week_number = plan["duration_weeks"] if is_complete else (advanced_count // len(plan["days"])) + 1
     day_number = next_day_idx + 1
 
     return {
