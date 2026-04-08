@@ -1109,6 +1109,73 @@ class TestReorderFatigueAdjustment:
             "Non-overlapping muscles: no fatigue adjustment, is_extrapolated must be False"
 
 
+class TestExerciseOrderPreservation:
+    """Exercise order from the prior session should be preserved week to week."""
+
+    async def test_prior_session_order_preserved(self, client: AsyncClient):
+        """If the user reorders during a workout, next week should use that order."""
+        ex_a = await create_exercise(client, name="ex_a", display_name="Exercise A")
+        ex_b = await create_exercise(client, name="ex_b", display_name="Exercise B")
+        ex_c = await create_exercise(client, name="ex_c", display_name="Exercise C")
+
+        plan_body = {
+            "name": "Order Test",
+            "block_type": "hypertrophy",
+            "duration_weeks": 4,
+            "number_of_days": 1,
+            "days": [{
+                "day_number": 1,
+                "day_name": "Day 1",
+                "exercises": [
+                    {"exercise_id": ex_a["id"], "sets": 2, "reps": 8,
+                     "starting_weight_kg": 0, "progression_type": "linear"},
+                    {"exercise_id": ex_b["id"], "sets": 2, "reps": 8,
+                     "starting_weight_kg": 0, "progression_type": "linear"},
+                    {"exercise_id": ex_c["id"], "sets": 2, "reps": 8,
+                     "starting_weight_kg": 0, "progression_type": "linear"},
+                ],
+            }],
+        }
+        r = await client.post("/api/plans/", json=plan_body)
+        plan = r.json()
+
+        # Week 1: plan order is A, B, C
+        w1 = await start_session_from_plan(client, plan["id"])
+        w1_order = [s["exercise_id"] for s in w1["sets"] if s["set_number"] == 1]
+        assert w1_order == [ex_a["id"], ex_b["id"], ex_c["id"]], \
+            f"Week 1 should be A, B, C — got {w1_order}"
+
+        # Log sets — user performs them in DB-id order (A, B, C) but imagine
+        # they reordered to C, A, B during the session. We simulate this by
+        # logging C first so its sets have earlier completed_at. But the real
+        # reorder signal is the set ID order — so instead, let's just log
+        # normally and then update the plan to C, A, B to simulate the
+        # persistReorderToPlan that the frontend does.
+        for s in w1["sets"]:
+            await log_set(client, w1["id"], s["id"], 50.0, 8)
+
+        # Simulate user reorder: update plan to C, A, B
+        reordered_days = [{
+            "day_number": 1,
+            "day_name": "Day 1",
+            "exercises": [
+                {"exercise_id": ex_c["id"], "sets": 2, "reps": 8,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+                {"exercise_id": ex_a["id"], "sets": 2, "reps": 8,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+                {"exercise_id": ex_b["id"], "sets": 2, "reps": 8,
+                 "starting_weight_kg": 0, "progression_type": "linear"},
+            ],
+        }]
+        await client.put(f"/api/plans/{plan['id']}", json={"days": reordered_days})
+
+        # Week 2: should use the updated plan order C, A, B
+        w2 = await start_session_from_plan(client, plan["id"])
+        w2_order = [s["exercise_id"] for s in w2["sets"] if s["set_number"] == 1]
+        assert w2_order == [ex_c["id"], ex_a["id"], ex_b["id"]], \
+            f"Week 2 should be C, A, B (from updated plan) — got {w2_order}"
+
+
 # ── Weight-first cross-day fallback ──────────────────────────────────────────
 
 class TestWeightFirstCrossDay:
