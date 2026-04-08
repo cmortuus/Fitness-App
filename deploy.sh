@@ -66,9 +66,17 @@ git_heal() {
   git merge --abort 2>/dev/null || true
   git cherry-pick --abort 2>/dev/null || true
 
-  # Discard all local changes and untracked files
+  # Discard all local changes and untracked files, but preserve runtime
+  # state files that are created outside of git (deploy markers, .env, etc.)
   git reset --hard HEAD 2>/dev/null || true
-  git clean -fd 2>/dev/null || true
+  git clean -fd \
+    -e .docker-mode \
+    -e .env \
+    -e .last-deployed-main \
+    -e .last-deployed-dev \
+    -e .failed-deploys \
+    -e backups/ \
+    2>/dev/null || true
 }
 
 # ── Failed deploy tracking ───────────────────────────────────────────────────
