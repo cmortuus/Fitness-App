@@ -378,6 +378,11 @@ export async function completeSession(sessionId: number): Promise<WorkoutSession
   return response.data;
 }
 
+export async function skipSession(sessionId: number): Promise<WorkoutSession> {
+  const response = await api.post(`/sessions/${sessionId}/skip`);
+  return response.data;
+}
+
 export async function resetSessionToPlanned(sessionId: number): Promise<WorkoutSession> {
   const response = await api.post(`/sessions/${sessionId}/reset-to-planned`);
   return response.data;

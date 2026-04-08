@@ -375,6 +375,40 @@ async def complete_session(
     return serialize_session(workout_session)
 
 
+@router.post("/{session_id}/skip", response_model=WorkoutSessionResponse)
+async def skip_session(
+    session_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: Request,
+) -> dict:
+    """Skip a workout session.  Skipped sessions are excluded from
+    progressive overload — the next session will use the most recent
+    completed session as its baseline instead."""
+    workout_session = await _get_session_with_sets(db, session_id, user_id=user.id)
+    if not workout_session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout session {session_id} not found",
+        )
+
+    prior_status = workout_session.status
+    workout_session.status = WorkoutStatus.SKIPPED
+    await record_session_audit(
+        db,
+        workout_session,
+        from_status=prior_status,
+        to_status=workout_session.status,
+        reason="session_skipped",
+        endpoint=request.url.path,
+        actor_username=user.username,
+        source_device=request.headers.get("X-Client-Name") or "web",
+    )
+    await db.flush()
+    workout_session = await _get_session_with_sets(db, workout_session.id, user_id=user.id)
+    return serialize_session(workout_session)
+
+
 @router.post("/{session_id}/reset-to-planned", response_model=WorkoutSessionResponse)
 async def reset_session_to_planned(
     session_id: int,
@@ -1558,6 +1592,73 @@ async def create_session_from_plan(
         actor_username=user.username,
         source_device=request.headers.get("X-Client-Name") or "web",
     )
+
+    # ── Preserve prior session's exercise order ─────────────────────────────
+    # If the user reordered exercises during their last workout, honour that
+    # order so the next week feels the same.  Only applies when the plan
+    # template hasn't been edited since the prior session (detected by
+    # matching block_ids: if the prior session's block_ids are a subset of
+    # the plan's block_ids, the plan wasn't re-edited).
+    if prior_exercise_order and prior_session:
+        # Collect block_ids from the prior session's sets
+        _prior_block_ids: set[str] = set()
+        for _ex_sets in prior_set_data.values():
+            for _sd in _ex_sets.values():
+                # block_ids are stored on the ExerciseSet, not in prior_set_data
+                pass
+        # Re-query: check prior session sets for block_ids
+        _prior_blocks_q = await db.execute(
+            select(ExerciseSet.exercise_block_id)
+            .where(
+                ExerciseSet.workout_session_id == prior_session.id,
+                ExerciseSet.exercise_block_id.is_not(None),
+            )
+            .distinct()
+        )
+        _prior_block_ids = {r[0] for r in _prior_blocks_q.all()}
+        _plan_block_ids = {ex.get("block_id") for ex in day_exercises if ex.get("block_id")}
+
+        # If the prior session's block_ids are a subset of the plan's current
+        # block_ids, the plan template hasn't been re-edited — safe to reorder.
+        _plan_unchanged = bool(_prior_block_ids) and _prior_block_ids <= _plan_block_ids
+        # Also allow reorder for legacy sessions without block_ids if the
+        # exercise sets match (same exercises, no adds/removes).
+        _legacy_match = (
+            not _prior_block_ids
+            and set(prior_exercise_order) == set(new_exercise_order)
+        )
+
+        if _plan_unchanged or _legacy_match:
+            _plan_ex_by_id: dict[int, list[dict]] = {}
+            for _pe in day_exercises:
+                _plan_ex_by_id.setdefault(_pe.get("exercise_id"), []).append(_pe)
+            _used_block_ids: set[str] = set()
+
+            ordered_day_exercises: list[dict] = []
+            for _prior_eid in prior_exercise_order:
+                candidates = _plan_ex_by_id.get(_prior_eid, [])
+                for _c in candidates:
+                    _bid = _c.get("block_id", "")
+                    if _bid not in _used_block_ids:
+                        ordered_day_exercises.append(_c)
+                        _used_block_ids.add(_bid)
+                        break
+
+            # Append any plan exercises not in prior session
+            for _pe in day_exercises:
+                _bid = _pe.get("block_id", "")
+                if _bid not in _used_block_ids:
+                    ordered_day_exercises.append(_pe)
+                    _used_block_ids.add(_bid)
+
+            day_exercises = ordered_day_exercises
+
+            # Rebuild new_exercise_order to reflect the reordered list
+            new_exercise_order = [
+                ex.get("exercise_id")
+                for ex in day_exercises
+                if ex.get("exercise_id")
+            ]
 
     # Create sets for each exercise
     for exercise_data in day_exercises:

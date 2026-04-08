@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import { activeDietPhase, currentSession, settings, workoutPlans, nextWorkoutUrl } from '$lib/stores';
   import type { DashboardWidget } from '$lib/stores';
-  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, getNextWorkout, getProgress, getExercises } from '$lib/api';
+  import { getSessions, archivePlan, getPlans, getDailySummary, getInsights, getNextWorkout, getProgress, getExercises, createSessionFromPlan, skipSession } from '$lib/api';
   import { daysAgoLocalDateString, localDateString } from '$lib/date';
   import type { DailySummary, Exercise, Insight, NextWorkoutResolution, ProgressMetric, WorkoutSession } from '$lib/api';
 
@@ -22,6 +22,7 @@
   let allSessions    = $state<WorkoutSession[]>([]);
   let loading        = $state(true);
   let archiving      = $state(false);
+  let skipping       = $state(false);
   let nutritionSummary = $state<DailySummary | null>(null);
   let insights = $state<Insight[]>([]);
   let progressMetrics = $state<ProgressMetric[]>([]);
@@ -110,6 +111,31 @@
       console.error('Failed to archive plan:', e);
     } finally {
       archiving = false;
+    }
+  }
+
+  async function handleSkipWorkout() {
+    if (!nextWorkout || skipping) return;
+    skipping = true;
+    try {
+      const overloadStyle = $settings.overloadStyle || 'weight';
+      const bwKg = 0; // body weight not needed for skip
+      const sess = await createSessionFromPlan(
+        nextWorkout.plan.id, nextWorkout.day.day_number, overloadStyle, bwKg
+      );
+      await skipSession(sess.id);
+      // Refresh dashboard
+      const [sessions, next] = await Promise.all([
+        getSessions({ limit: 200 }),
+        getNextWorkout().catch(() => null),
+      ]);
+      allSessions = sessions;
+      reconcileCurrentSession(sessions);
+      nextWorkout = next;
+    } catch (e) {
+      console.error('Failed to skip workout:', e);
+    } finally {
+      skipping = false;
     }
   }
 
@@ -871,12 +897,14 @@
         >
           Start Workout
         </a>
-        <a
-          href="/plans/upcoming"
-          class="btn-secondary text-sm flex-1 text-center"
+        <button
+          onclick={handleSkipWorkout}
+          disabled={skipping}
+          class="btn-secondary text-sm px-3 text-center"
+          title="Skip this workout and move to the next day"
         >
-          Edit Upcoming Day
-        </a>
+          {skipping ? '...' : 'Skip'}
+        </button>
       </div>
     </div>
 
