@@ -13,6 +13,9 @@
 #   Auto-reload:       ./deploy.sh --watch [interval]
 #                      Polls for changes every [interval] seconds (default 60).
 #                      Only rebuilds the container(s) whose branch changed.
+#   Install service:   ./deploy.sh --install
+#                      Installs a systemd service that runs --watch automatically.
+#   Uninstall service: ./deploy.sh --uninstall
 #
 # Both main and dev branches run simultaneously as Docker containers.
 # Users switch between them via Settings → Developer → "Use dev version".
@@ -30,6 +33,7 @@ LOG_TZ="${DEPLOY_LOG_TZ:-America/New_York}"
 # not from the current remote HEAD at the moment the script opens.
 LAST_DEPLOYED_MAIN="$APP_DIR/.last-deployed-main"
 LAST_DEPLOYED_DEV="$APP_DIR/.last-deployed-dev"
+FAILED_DEPLOYS="$APP_DIR/.failed-deploys"
 
 fresh_timestamp() { date +%Y%m%d_%H%M%S; }
 
@@ -51,6 +55,40 @@ log()  { echo -e "${GREEN}[deploy $(log_timestamp)]${NC} $*"; }
 warn() { echo -e "${YELLOW}[warn $(short_log_timestamp)]${NC} $*"; }
 err()  { echo -e "${RED}[error $(short_log_timestamp)]${NC} $*" >&2; }
 info() { echo -e "${CYAN}[info]${NC} $*"; }
+
+# ── Git auto-healing ─────────────────────────────────────────────────────────
+# Cleans dirty worktree state so git pull / reset never fails due to local
+# modifications, untracked files, or interrupted rebases.
+
+git_heal() {
+  # Abort any in-progress rebase/merge/cherry-pick
+  git rebase --abort 2>/dev/null || true
+  git merge --abort 2>/dev/null || true
+  git cherry-pick --abort 2>/dev/null || true
+
+  # Discard all local changes and untracked files
+  git reset --hard HEAD 2>/dev/null || true
+  git clean -fd 2>/dev/null || true
+}
+
+# ── Failed deploy tracking ───────────────────────────────────────────────────
+# Remembers SHAs that failed health checks so watch doesn't retry them
+# until a NEW commit lands on that branch.
+
+is_failed_sha() {
+  local sha="$1"
+  [ -f "$FAILED_DEPLOYS" ] && grep -q "^${sha}$" "$FAILED_DEPLOYS" 2>/dev/null
+}
+
+mark_failed_sha() {
+  local sha="$1"
+  echo "$sha" >> "$FAILED_DEPLOYS"
+}
+
+clear_failed_sha() {
+  local sha="$1"
+  [ -f "$FAILED_DEPLOYS" ] && sed -i "/^${sha}$/d" "$FAILED_DEPLOYS" 2>/dev/null || true
+}
 
 # ── Check if Docker is running ────────────────────────────────────────────────
 
@@ -186,16 +224,22 @@ docker_deploy() {
   log "Starting Docker deployment at $ts"
   mkdir -p "$BACKUP_DIR"
 
+  # Heal any dirty git state before touching the worktree
+  git_heal
+
   # 1. Pull latest code
   log "Pulling latest code..."
-  git fetch origin
+  git fetch origin || { warn "git fetch failed"; return 1; }
 
   if [ "$target" = "dev" ]; then
     log "Updating dev branch only..."
-    git fetch origin dev
 
-    local deployed_dev
+    local deployed_dev pre_dev
     deployed_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
+
+    # Save pre-deploy SHA for rollback
+    pre_dev=""
+    [ -f "$LAST_DEPLOYED_DEV" ] && pre_dev=$(cat "$LAST_DEPLOYED_DEV")
 
     log "Rebuilding dev container..."
     local tmpdir
@@ -207,34 +251,76 @@ docker_deploy() {
     # Stop old container, then recreate with the freshly built image
     docker compose stop dev
     docker compose up -d --no-build --force-recreate dev
-    docker_health_check_async dev
 
-    # Record what we just deployed so --watch restarts use this as baseline
-    echo "$deployed_dev" > "$LAST_DEPLOYED_DEV"
+    # Blocking health check — rollback if it fails
+    if docker_health_check dev; then
+      echo "$deployed_dev" > "$LAST_DEPLOYED_DEV"
+      clear_failed_sha "$deployed_dev"
+      log "Dev deploy successful: ${deployed_dev:0:7}"
+    else
+      err "Dev health check FAILED for ${deployed_dev:0:7} — rolling back"
+      mark_failed_sha "$deployed_dev"
+      if [ -n "$pre_dev" ] && [ "$pre_dev" != "none" ]; then
+        log "Reverting dev to ${pre_dev:0:7}..."
+        tmpdir=$(mktemp -d)
+        git archive "$pre_dev" | tar -x -C "$tmpdir"
+        docker build -t fitness-app-dev "$tmpdir"
+        rm -rf "$tmpdir"
+        docker compose stop dev
+        docker compose up -d --no-build --force-recreate dev
+        docker_health_check dev || warn "Rollback health check also failed — manual intervention needed"
+      fi
+    fi
     return
+
   elif [ "$target" = "main" ]; then
     log "Updating main branch only..."
-    git fetch origin main
-    git reset --hard origin/main
 
-    local deployed_main
+    local deployed_main pre_main
     deployed_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
+
+    # Save pre-deploy SHA for rollback
+    pre_main=$(git rev-parse HEAD 2>/dev/null || echo "none")
+
+    git reset --hard origin/main || {
+      err "git reset failed, force-checking out"
+      git checkout -f origin/main
+    }
 
     log "Rebuilding main container..."
     docker compose build main
     docker compose up -d main
-    docker_health_check_async main
 
-    echo "$deployed_main" > "$LAST_DEPLOYED_MAIN"
+    if docker_health_check main; then
+      echo "$deployed_main" > "$LAST_DEPLOYED_MAIN"
+      clear_failed_sha "$deployed_main"
+      log "Main deploy successful: ${deployed_main:0:7}"
+    else
+      err "Main health check FAILED for ${deployed_main:0:7} — rolling back"
+      mark_failed_sha "$deployed_main"
+      if [ "$pre_main" != "none" ]; then
+        log "Reverting main to ${pre_main:0:7}..."
+        git reset --hard "$pre_main"
+        docker compose build main
+        docker compose up -d main
+        docker_health_check main || warn "Rollback health check also failed — manual intervention needed"
+      fi
+    fi
     return
+
   else
     log "Updating all branches..."
     git fetch origin
-    git reset --hard origin/main
 
-    local deployed_main deployed_dev
+    local deployed_main deployed_dev pre_main
     deployed_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
     deployed_dev=$(git rev-parse origin/dev 2>/dev/null || echo "none")
+    pre_main=$(git rev-parse HEAD 2>/dev/null || echo "none")
+
+    git reset --hard origin/main || {
+      err "git reset failed, force-checking out"
+      git checkout -f origin/main
+    }
 
     log "Rebuilding main container..."
     docker compose build main
@@ -252,11 +338,11 @@ docker_deploy() {
     echo "$deployed_dev"  > "$LAST_DEPLOYED_DEV"
   fi
 
-  docker_health_check_async all
+  docker_health_check all
 
   log ""
   log "========================================="
-  log " Docker deployment complete — health check running in background"
+  log " Docker deployment complete"
   log " Commit (main): $(git log --oneline -1 origin/main)"
   if git rev-parse --verify origin/dev &>/dev/null; then
     log " Commit (dev):  $(git log --oneline -1 origin/dev)"
@@ -428,14 +514,17 @@ watch_and_reload() {
     exit 1
   fi
 
-  log "Watching for changes every ${interval}s (Ctrl+C to stop)..."
+  log "Watching for changes every ${interval}s ..."
+
+  # Heal any dirty state from a previous crash
+  git_heal
 
   # Use the SHA that was last *deployed* as the baseline, not the current
   # remote HEAD.  This means if --watch is restarted after pushes happened
   # while it was stopped, those commits will be picked up and deployed on
   # the very first poll — rather than silently skipped because the remote
   # already shows those SHAs when the script opens.
-  git fetch origin --quiet
+  git fetch origin --quiet 2>/dev/null || true
   local last_main last_dev
   if [ -f "$LAST_DEPLOYED_MAIN" ]; then
     last_main=$(cat "$LAST_DEPLOYED_MAIN")
@@ -452,7 +541,8 @@ watch_and_reload() {
 
   while true; do
     sleep "$interval"
-    git fetch origin --quiet 2>/dev/null || { warn "git fetch failed, retrying..."; continue; }
+    git_heal
+    git fetch origin --quiet 2>/dev/null || { warn "git fetch failed, retrying next cycle..."; continue; }
 
     local cur_main cur_dev
     cur_main=$(git rev-parse origin/main 2>/dev/null || echo "none")
@@ -461,13 +551,21 @@ watch_and_reload() {
     local changed_main=false changed_dev=false
 
     if [ "$cur_main" != "$last_main" ]; then
-      changed_main=true
-      log "main branch changed: ${last_main:0:7} → ${cur_main:0:7}"
+      if is_failed_sha "$cur_main"; then
+        warn "Skipping main ${cur_main:0:7} — previously failed health check"
+      else
+        changed_main=true
+        log "main branch changed: ${last_main:0:7} → ${cur_main:0:7}"
+      fi
     fi
 
     if [ "$cur_dev" != "$last_dev" ]; then
-      changed_dev=true
-      log "dev branch changed: ${last_dev:0:7} → ${cur_dev:0:7}"
+      if is_failed_sha "$cur_dev"; then
+        warn "Skipping dev ${cur_dev:0:7} — previously failed health check"
+      else
+        changed_dev=true
+        log "dev branch changed: ${last_dev:0:7} → ${cur_dev:0:7}"
+      fi
     fi
 
     # Rebuild only what changed
@@ -487,12 +585,49 @@ watch_and_reload() {
   done
 }
 
+# ── Service install / uninstall ───────────────────────────────────────────────
+
+SERVICE_NAME="fitness-app-watch"
+SERVICE_FILE="$APP_DIR/fitness-app-watch.service"
+
+install_service() {
+  if [ ! -f "$SERVICE_FILE" ]; then
+    err "Service file not found: $SERVICE_FILE"
+    exit 1
+  fi
+
+  log "Installing $SERVICE_NAME systemd service..."
+  cp "$SERVICE_FILE" "/etc/systemd/system/${SERVICE_NAME}.service"
+  systemctl daemon-reload
+  systemctl enable "$SERVICE_NAME"
+  systemctl start "$SERVICE_NAME"
+  log "Service installed and started."
+  log "  Status:  systemctl status $SERVICE_NAME"
+  log "  Logs:    journalctl -u $SERVICE_NAME -f"
+  log "  Stop:    systemctl stop $SERVICE_NAME"
+}
+
+uninstall_service() {
+  log "Uninstalling $SERVICE_NAME systemd service..."
+  systemctl stop "$SERVICE_NAME" 2>/dev/null || true
+  systemctl disable "$SERVICE_NAME" 2>/dev/null || true
+  rm -f "/etc/systemd/system/${SERVICE_NAME}.service"
+  systemctl daemon-reload
+  log "Service uninstalled."
+}
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 main() {
   case "${1:-}" in
     --watch)
       watch_and_reload "${2:-60}"
+      ;;
+    --install)
+      install_service
+      ;;
+    --uninstall)
+      uninstall_service
       ;;
     --rollback)
       if is_docker_mode; then
