@@ -1605,32 +1605,17 @@ async def create_session_from_plan(
                 planned_left = set1_left
                 planned_right = set1_right
             elif overload_style == "weight" and set_num > 1 and set1_weight_kg is not None:
-                # Weight-first: all sets normally use set 1's weight (one bar load).
-                # Exception: if the prior session used progressive loading (different
-                # weights across sets, e.g. 405/455/495 on leg press), each set
-                # overloads independently so the progression pattern is preserved.
-                prior_weights = {
-                    sn: sd.get("weight")
-                    for sn, sd in prior_sets.items()
-                    if sd.get("weight") is not None
-                }
-                is_progressive = len(prior_weights) > 1 and any(
-                    abs(w - list(prior_weights.values())[0]) > 2.5
-                    for w in list(prior_weights.values())[1:]
-                )
-                if is_progressive:
-                    # Per-set independent overload — preserve progressive weight pattern
-                    weight_kg, suggested_reps, planned_left, planned_right = \
-                        _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
-                else:
-                    # Uniform weight — all sets use set 1's weight, reps per-set
-                    _, suggested_reps, planned_left, planned_right = \
-                        _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                # Weight-first: each set progresses independently from its own
+                # prior performance via Epley.  This produces the correct est-1RM
+                # progression per set without double-bumping (weight up + reps up).
+                weight_kg, suggested_reps, planned_left, planned_right = \
+                    _overload_for_set(exercise_id, set_num, reps, ex_model, current_set_type=effective_set_type)
+                if suggested_reps is None:
+                    suggested_reps = set1_reps
+                    planned_left = set1_left
+                    planned_right = set1_right
+                if weight_kg is None:
                     weight_kg = set1_weight_kg
-                    if suggested_reps is None:
-                        suggested_reps = set1_reps
-                        planned_left = set1_left
-                        planned_right = set1_right
             elif double_weight_up:
                 # Double progression: all sets hit ceiling → weight up, reps reset
                 # Filter to same set types that triggered the weight-up decision
