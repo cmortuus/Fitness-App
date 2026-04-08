@@ -2,11 +2,13 @@
 Description=Fitness App Auto-Deploy Watcher
 After=docker.service
 Wants=docker.service
+# Don't rate-limit restarts — the script handles its own backoff
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
-WorkingDirectory=/root/Fitness-App
-ExecStart=/root/Fitness-App/deploy.sh --watch 60
+WorkingDirectory=/etc/Fitness-App
+ExecStart=/etc/Fitness-App/deploy.sh --watch 60
 Restart=always
 RestartSec=10
 StandardOutput=journal
@@ -15,9 +17,6 @@ SyslogIdentifier=fitness-app-watch
 
 # Give deploys time to finish before killing
 TimeoutStopSec=120
-
-# Don't rate-limit restarts — the script handles its own backoff
-StartLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target
