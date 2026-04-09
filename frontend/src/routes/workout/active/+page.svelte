@@ -3937,29 +3937,42 @@
         </div>
 
       {:else}
-        <!-- Set count -->
-        <div class="p-6 flex-1 flex flex-col items-center justify-center">
-          <p class="text-sm text-zinc-400 mb-6 capitalize">
-            {pickingExercise.primary_muscles?.slice(0,2).map(m => m.replace(/_/g,' ')).join(', ')}
-          </p>
-          <label class="label mb-2">Number of sets</label>
-          <div class="flex items-center gap-6 mt-2">
-            <button
-              onclick={() => pendingSets = Math.max(1, pendingSets - 1)}
-              class="w-12 h-12 rounded-full bg-zinc-800 hover:bg-zinc-700 text-2xl font-bold"
-            >−</button>
-            <span class="text-4xl font-bold w-14 text-center">{pendingSets}</span>
-            <button
-              onclick={() => pendingSets = Math.min(10, pendingSets + 1)}
-              class="w-12 h-12 rounded-full bg-zinc-800 hover:bg-zinc-700 text-2xl font-bold"
-            >+</button>
+        {#if swapTargetUiId}
+          <!-- Swap mode: skip set count, just confirm -->
+          <div class="p-6 flex-1 flex flex-col items-center justify-center">
+            <p class="text-sm text-zinc-400 mb-2 capitalize">
+              {pickingExercise.primary_muscles?.slice(0,2).map(m => m.replace(/_/g,' ')).join(', ')}
+            </p>
+            <p class="text-zinc-500 text-xs">Keeps the same number of sets</p>
           </div>
-        </div>
-
-        <div class="px-4 pb-5 flex gap-3 shrink-0">
-          <button onclick={() => pickingExercise = null} class="btn-secondary flex-1">← Back</button>
-          <button onclick={confirmAdd} class="btn-primary flex-1">{swapTargetUiId ? 'Swap Exercise' : 'Add to Workout'}</button>
-        </div>
+          <div class="px-4 pb-5 flex gap-3 shrink-0">
+            <button onclick={() => pickingExercise = null} class="btn-secondary flex-1">← Back</button>
+            <button onclick={confirmAdd} class="btn-primary flex-1">Swap Exercise</button>
+          </div>
+        {:else}
+          <!-- Add mode: pick set count -->
+          <div class="p-6 flex-1 flex flex-col items-center justify-center">
+            <p class="text-sm text-zinc-400 mb-6 capitalize">
+              {pickingExercise.primary_muscles?.slice(0,2).map(m => m.replace(/_/g,' ')).join(', ')}
+            </p>
+            <label class="label mb-2">Number of sets</label>
+            <div class="flex items-center gap-6 mt-2">
+              <button
+                onclick={() => pendingSets = Math.max(1, pendingSets - 1)}
+                class="w-12 h-12 rounded-full bg-zinc-800 hover:bg-zinc-700 text-2xl font-bold"
+              >−</button>
+              <span class="text-4xl font-bold w-14 text-center">{pendingSets}</span>
+              <button
+                onclick={() => pendingSets = Math.min(10, pendingSets + 1)}
+                class="w-12 h-12 rounded-full bg-zinc-800 hover:bg-zinc-700 text-2xl font-bold"
+              >+</button>
+            </div>
+          </div>
+          <div class="px-4 pb-5 flex gap-3 shrink-0">
+            <button onclick={() => pickingExercise = null} class="btn-secondary flex-1">← Back</button>
+            <button onclick={confirmAdd} class="btn-primary flex-1">Add to Workout</button>
+          </div>
+        {/if}
       {/if}
     </div>
   </div>
