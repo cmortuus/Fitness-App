@@ -843,6 +843,7 @@
   let customExerciseDisplayName = $state('');
   let customMovementType = $state<'compound' | 'isolation'>('compound');
   let customBodyRegion = $state<'upper' | 'lower' | 'full_body'>('upper');
+  let customIsUnilateral = $state(false);
   let customPrimaryMuscles = $state<string[]>([]);
   let customSecondaryMuscles = $state<string[]>([]);
 
@@ -2254,6 +2255,7 @@
     customExerciseDisplayName = prefill;
     customMovementType = 'compound';
     customBodyRegion = 'upper';
+    customIsUnilateral = false;
     customPrimaryMuscles = [];
     customSecondaryMuscles = [];
   }
@@ -2301,6 +2303,7 @@
         display_name: capitalizedDisplayName,
         movement_type: customMovementType,
         body_region: customBodyRegion,
+        is_unilateral: customIsUnilateral,
         ...(equipmentType && { equipment_type: equipmentType }),
         ...(isPrime && { is_prime: true }),
         primary_muscles: customPrimaryMuscles,
@@ -3977,6 +3980,11 @@
             </select>
           </div>
         </div>
+
+        <label class="flex items-center justify-between rounded-xl border border-zinc-800 px-4 py-3">
+          <span class="text-sm text-zinc-200">Unilateral (single arm/leg)</span>
+          <input type="checkbox" bind:checked={customIsUnilateral} class="toggle" />
+        </label>
 
         <div>
           <label class="label">Primary Muscle Groups *</label>
