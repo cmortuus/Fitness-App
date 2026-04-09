@@ -839,6 +839,9 @@
   let recentExercises = $state<Exercise[]>([]);
   // Swap mode: when set, the modal replaces this exercise instead of adding
   let swapTargetUiId = $state<string | null>(null);
+  // Cache swapped-out exercises so swap-back restores overload data.
+  // Key = exerciseId, Value = the UIExercise that was swapped out.
+  const swapCache = new Map<number, UIExercise>();
   let showCustomExerciseModal = $state(false);
   let customExerciseDisplayName = $state('');
   let customMovementType = $state<'compound' | 'isolation'>('compound');
@@ -2322,23 +2325,45 @@
       const idx = uiExercises.findIndex(e => e.uiId === swapTargetUiId);
       if (idx >= 0) {
         const oldEx = uiExercises[idx];
-        const numSets = Math.max(oldEx.sets.length, 1);
-        const newSets: UISet[] = Array.from({ length: numSets }, (_, i) => ({
-          localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
-          backendId: null,
-          setNumber: i + 1,
-          weightLbs: null,
-          reps: null, repsLeft: null, repsRight: null,
-          done: false,
-          skipped: false,
-          doneLeft: false,
-          doneRight: false,
-          saving: false,
-          oneRM: null, initWeight: null, initReps: null,
-          setType: 'standard' as string,
-          partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
-        }));
-        // Delete old backend sets
+
+        // Cache the old exercise so swap-back restores its overload data
+        swapCache.set(oldEx.exerciseId, { ...oldEx, sets: oldEx.sets.map(s => ({ ...s })) });
+
+        // Check if the incoming exercise has cached data from a previous swap
+        const cached = swapCache.get(pickingExercise!.id);
+        let newSets: UISet[];
+        let isUni: boolean;
+
+        if (cached && cached.sets.length > 0) {
+          // Restore cached sets (with their overload suggestions intact).
+          // Clear backendId since the DB records were deleted on swap-out —
+          // they'll be re-created when the user completes the set.
+          newSets = cached.sets.map(s => ({ ...s, backendId: null, done: false, skipped: false, saving: false }));
+          isUni = cached.isUnilateral;
+          swapCache.delete(pickingExercise!.id);
+        } else {
+          // No cache — create blank sets
+          const numSets = Math.max(oldEx.sets.length, 1);
+          newSets = Array.from({ length: numSets }, (_, i) => ({
+            localId: `${pickingExercise!.id}-${i + 1}-${Date.now()}`,
+            backendId: null,
+            setNumber: i + 1,
+            weightLbs: null,
+            reps: null, repsLeft: null, repsRight: null,
+            done: false,
+            skipped: false,
+            doneLeft: false,
+            doneRight: false,
+            saving: false,
+            oneRM: null, initWeight: null, initReps: null,
+            setType: 'standard' as string,
+            partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
+          }));
+          isUni = pickingExercise!.is_unilateral;
+        }
+
+        // Delete old backend sets (only the ones not in the cache — cached
+        // sets keep their backend IDs so they can be re-saved on completion)
         for (const s of oldEx.sets) {
           if (s.backendId && sessionId) {
             deleteSet(sessionId, s.backendId).catch(() => {});
@@ -2346,12 +2371,12 @@
         }
         const preservedBlockId = oldEx.blockId ?? makeBlockId();
         uiExercises[idx] = {
-          uiId: `${pickingExercise.id}-${Date.now()}-${Math.random()}`,
+          uiId: `${pickingExercise!.id}-${Date.now()}-${Math.random()}`,
           blockId: preservedBlockId,
           persistKey: oldEx.persistKey,
-          exerciseId: pickingExercise.id,
+          exerciseId: pickingExercise!.id,
           sets: newSets,
-          isUnilateral: pickingExercise.is_unilateral,
+          isUnilateral: isUni,
           customRestSecs: null,
           groupId: oldEx.groupId,
           groupType: oldEx.groupType,
