@@ -998,8 +998,14 @@
     window.addEventListener('beforeunload', () => {
       if (sessionId) {
         const anyDone = uiExercises.some(ex => ex.sets.some(s => s.done));
-        if (!anyDone) {
-          // No sets completed — silently delete the empty planned session
+        const anyEdited = uiExercises.some(ex => ex.sets.some(s =>
+          !s.done && (
+            (s.weightLbs != null && s.weightLbs !== s.initWeight) ||
+            (s.reps != null && s.reps !== s.initReps)
+          )
+        ));
+        if (!anyDone && !anyEdited) {
+          // No sets completed or edited — silently delete the empty planned session
           const token = localStorage.getItem('hgt_access_token');
           fetch(`/api/sessions/${sessionId}`, {
             method: 'DELETE',
