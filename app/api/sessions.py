@@ -974,6 +974,13 @@ async def delete_session(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Workout session {session_id} not found",
         )
+    # Never delete a completed session — this guards against race conditions
+    # where beforeunload fires after the session was already completed.
+    if workout_session.status == WorkoutStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete a completed session",
+        )
     # Delete exercise_feedback entries first (FK references this session)
     feedback_result = await db.execute(
         select(ExerciseFeedback).where(ExerciseFeedback.session_id == session_id)

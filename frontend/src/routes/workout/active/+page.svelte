@@ -999,7 +999,7 @@
       }
     });
     window.addEventListener('beforeunload', () => {
-      if (sessionId) {
+      if (sessionId && !finished) {
         const anyDone = uiExercises.some(ex => ex.sets.some(s => s.done));
         if (!anyDone) {
           // No sets completed — silently delete the empty planned session
