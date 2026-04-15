@@ -5,7 +5,7 @@
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
   import {
     getExercises, getPlan, getPlans, getNextWorkout, getRecentExercises, getSession, getSessions,
-    createSessionFromPlan, createSession,
+    createSessionFromPlan, createSession, startSession,
     addSet, updateSet, deleteSet, completeSession, deleteSession,
     getExerciseHistory, getAllExerciseNotes, setExerciseNote, getPersonalRecords,
     saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
@@ -211,6 +211,8 @@
   let finishing = $state(false);
   let syncToPlan = $state(true);
   let hasLinkedPlan = $state(false);
+  // Free-flow mode: session created without a plan, recommendations disabled.
+  let isFreeFlow = $derived(!hasLinkedPlan && sessionId !== null);
   let activePlan = $state<WorkoutPlan | null>(null);
   let activePlanDayNumber = $state<number | null>(null);
   let syncCount = $state<number | null>(null);
@@ -892,6 +894,7 @@
       const planId = params.get('plan');
       const dayNumber = parseInt(params.get('day') || '1');
       const isDeload = params.get('deload') === 'true';
+      const isFreeFlowParam = params.get('free_flow') === '1';
 
       const [exData, notesData, recordData] = await Promise.all([
         getExercises(),
@@ -912,7 +915,10 @@
         recentExercises = recent;
       } catch { /* first use – no history yet */ }
 
-      if (planId) {
+      if (isFreeFlowParam && !$currentSession) {
+        // ── Free-flow mode — empty session, no recommendations ─────────
+        await startFreeSession();
+      } else if (planId) {
         // ── Plan-based mode ──────────────────────────────────────────────
         await startFromPlan(parseInt(planId), dayNumber);
         // Apply deload reductions using settings
@@ -1228,7 +1234,7 @@
       try {
         raw = await createSession({
           date: new Date().toISOString().split('T')[0],
-          name: `Workout – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+          name: `Free-flow – ${new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
         });
       } catch (e: any) {
         if (e?.response?.status === 409) {
@@ -3065,6 +3071,14 @@
     <div class="flex-1 overflow-y-auto pb-36">
       <div class="max-w-2xl mx-auto px-3 py-4 space-y-3">
 
+        {#if isFreeFlow && uiExercises.length === 0}
+          <div class="text-center py-12 px-4">
+            <p class="text-5xl mb-3">🏋️</p>
+            <p class="text-zinc-400 text-sm mb-1">Free-flow workout</p>
+            <p class="text-zinc-500 text-xs">Tap <span class="text-primary-400">+ Add Exercise</span> below to start logging.</p>
+          </div>
+        {/if}
+
         {#each exerciseGroups as group}
           <div class={group.groupId ? 'border-l-[3px] border-primary-500 rounded-l-lg pl-1 space-y-1' : 'space-y-3'}>
           {#if group.groupId}
@@ -3266,7 +3280,7 @@
                               const val = raw === '' ? null : Math.abs(parseFloat(raw));
                               const oldWeight = set.weightLbs;
                               set.weightLbs = val;
-                              if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
+                              if (!isFreeFlow && !isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                                 const r = epleyReps(set.oneRM, val);
                                 if (r >= 4) { set.repsLeft = r; set.repsRight = r; }
                               }
@@ -3275,7 +3289,7 @@
                                 const s = ex.sets[i];
                                 if (!s.done && s.weightLbs === oldWeight) {
                                   s.weightLbs = val;
-                                  if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
+                                  if (!isFreeFlow && !isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                     const r = epleyReps(s.oneRM, val);
                                     if (r >= 4) { s.repsLeft = r; s.repsRight = r; }
                                   }
@@ -3293,10 +3307,10 @@
                             {#if isAssistedEx && set.weightLbs !== null}
                               <span class="text-xs text-amber-400 text-center">{netDisplay(set.weightLbs)}</span>
                             {/if}
-                            {#if set.isExtrapolated && !set.done}
+                            {#if set.isExtrapolated && !set.done && !isFreeFlow}
                               <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
                             {/if}
-                            {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
+                            {#if !isFreeFlow && focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                               {#if estReps < 5}
                                 <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -3368,7 +3382,7 @@
                   {/if}
                   <!-- Deviation warning (unilateral) -->
                   {@const devWarnUni = deviationWarning(set, set.weightLbs, set.repsLeft ?? set.repsRight, isAssistedEx)}
-                  {#if devWarnUni}
+                  {#if devWarnUni && !isFreeFlow}
                     <div class="px-1 mt-0.5">
                       <p class="text-xs text-amber-400 leading-snug">
                         ⚠ {devWarnUni}
@@ -3443,8 +3457,8 @@
                           const val = raw === '' ? null : Math.abs(parseFloat(raw));
                           const oldWeight = set.weightLbs;
                           set.weightLbs = val;
-                          // Epley: always update rep suggestion for this set
-                          if (!isAssistedEx && val != null && val > 0 && set.oneRM != null) {
+                          // Epley: update rep suggestion for this set (skipped in free-flow)
+                          if (!isFreeFlow && !isAssistedEx && val != null && val > 0 && set.oneRM != null) {
                             const newReps = epleyReps(set.oneRM, val);
                             if (newReps >= 4) set.reps = newReps;
                           }
@@ -3462,7 +3476,7 @@
                               if (isPrimePlateLoaded(exercise) && val != null && val > 0) {
                                 s.pegWeights = distributeToPegs(val / 2);
                               }
-                              if (!isAssistedEx && val != null && val > 0 && s.oneRM != null) {
+                              if (!isFreeFlow && !isAssistedEx && val != null && val > 0 && s.oneRM != null) {
                                 const newReps = epleyReps(s.oneRM, val);
                                 if (newReps >= 4) s.reps = newReps;
                               }
@@ -3482,7 +3496,7 @@
                       {#if set.isExtrapolated && !set.done}
                         <span class="text-[9px] text-violet-400 text-center leading-tight" title="Adjusted for exercise reorder — estimate only">≈ reorder adj.</span>
                       {/if}
-                      {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
+                      {#if !isFreeFlow && focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
                         {#if estReps < 5}
                           <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
@@ -3571,7 +3585,7 @@
                   {/if}
                   <!-- Deviation warning -->
                   {@const devWarnBi = deviationWarning(set, set.weightLbs, set.reps, isAssistedEx)}
-                  {#if devWarnBi}
+                  {#if devWarnBi && !isFreeFlow}
                     <div class="col-span-full px-1 mt-0.5">
                       <p class="text-xs text-amber-400 leading-snug">
                         ⚠ {devWarnBi}

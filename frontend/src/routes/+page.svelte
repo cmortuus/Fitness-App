@@ -914,8 +914,19 @@
     <div class="card border-2 border-dashed border-zinc-700 text-center py-10">
       <p class="text-4xl mb-3">💪</p>
       <p class="text-zinc-400 mb-4">Create a plan to get started.</p>
-      <a href="/plans/create" class="btn-primary">Create a Plan</a>
+      <div class="flex gap-2 justify-center">
+        <a href="/plans/create" class="btn-primary">Create a Plan</a>
+        <a href="/workout/active?free_flow=1" class="btn-secondary">Free-flow</a>
+      </div>
     </div>
+  {/if}
+
+  {#if !$currentSession}
+    <p class="text-center text-xs text-zinc-500 mt-3">
+      <a href="/workout/active?free_flow=1" class="text-primary-400 hover:text-primary-300">
+        Log a free-flow workout →
+      </a>
+    </p>
   {/if}
 
   {:else if widget.id === 'nextWorkoutInspector'}
