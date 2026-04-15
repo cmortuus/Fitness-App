@@ -3298,16 +3298,10 @@
                             {/if}
                             {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                               {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
-                              {#if estReps < 5}
-                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
-                              {:else if estReps > 30}
-                                <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
-                              {:else}
-                                <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
-                              {/if}
+                              <span class="text-[10px] text-center leading-tight truncate {estReps < 5 || estReps > 30 ? 'text-red-400' : 'text-zinc-500'}" title={estReps < 5 ? 'heavy' : estReps > 30 ? 'light' : ''}>~{estReps} reps</span>
                               {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
                               {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
-                              <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
+                              <span class="text-[9px] text-zinc-600 text-center leading-tight truncate">{w30}–{w5} {unit}</span>
                             {/if}
                           {/if}
                         </div>
@@ -3484,16 +3478,10 @@
                       {/if}
                       {#if focusedWeightSetId === set.localId && !isAssistedEx && set.oneRM && set.weightLbs != null && set.weightLbs > 0 && !set.done && withinWeightBounds(set.weightLbs, set.initWeight, exercise?.movement_type === 'compound')}
                         {@const estReps = epleyReps(set.oneRM, set.weightLbs)}
-                        {#if estReps < 5}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (heavy)</span>
-                        {:else if estReps > 30}
-                          <span class="text-[10px] text-red-400 text-center leading-tight">~{estReps} reps (light)</span>
-                        {:else}
-                          <span class="text-[10px] text-zinc-500 text-center leading-tight">~{estReps} reps</span>
-                        {/if}
+                        <span class="text-[10px] text-center leading-tight truncate {estReps < 5 || estReps > 30 ? 'text-red-400' : 'text-zinc-500'}" title={estReps < 5 ? 'heavy' : estReps > 30 ? 'light' : ''}>~{estReps} reps</span>
                         {@const w5 = roundWeight(epleyWeight(set.oneRM, 5))}
                         {@const w30 = roundWeight(epleyWeight(set.oneRM, 30))}
-                        <span class="text-[9px] text-zinc-600 text-center leading-tight">{w30}–{w5} {unit}</span>
+                        <span class="text-[9px] text-zinc-600 text-center leading-tight truncate">{w30}–{w5} {unit}</span>
                       {/if}
                     </div>
 
