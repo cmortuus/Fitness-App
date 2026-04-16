@@ -1,6 +1,7 @@
 <script lang="ts">
   import { authRegister, saveAuthTokens, isAuthenticated } from '$lib/api';
   import { onMount } from 'svelte';
+  import { track, identify } from '$lib/telemetry';
 
   let username = $state('');
   let password = $state('');
@@ -26,6 +27,8 @@
     try {
       const auth = await authRegister({ username, password });
       saveAuthTokens(auth);
+      if (auth?.user?.id) identify(auth.user.id, { username: auth.user.username });
+      track('signup');
       window.location.href = '/';
     } catch (e: any) {
       error = e.response?.data?.detail || 'Registration failed. Please try again.';

@@ -6,6 +6,7 @@
   import { getExercises, getLatestBodyWeight, getPlans, getActivePhase, isAuthenticated, getStoredUser, clearAuthTokens } from '$lib/api';
   import type { AuthUser } from '$lib/api';
   import { initLocale } from '$lib/i18n';
+  import { initSentry, initPostHog, identify, resetAnalyticsIdentity } from '$lib/telemetry';
 
   // Desktop shows all tabs including nutrition; mobile hides nutrition
   const desktopNavItems = [
@@ -28,6 +29,9 @@
 
   onMount(async () => {
     initLocale(); // load saved language preference
+    // Kick off analytics early (no-op if env vars aren't set)
+    void initSentry();
+    void initPostHog();
     // Auth check
     const path = window.location.pathname;
     if (PUBLIC_PATHS.some(p => path.startsWith(p))) {
@@ -40,6 +44,7 @@
     }
     authUser = getStoredUser();
     authChecked = true;
+    if (authUser) identify(authUser.id, { username: authUser.username });
 
     try {
       // Load settings from DB first (syncs across devices)
@@ -170,6 +175,7 @@
   });
 
   function logout() {
+    resetAnalyticsIdentity();
     clearAuthTokens();
     window.location.href = '/login';
   }

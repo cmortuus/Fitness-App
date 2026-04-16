@@ -23,6 +23,7 @@
     "vite": "^5.0.0"
   },
   "dependencies": {
+    "@sentry/sveltekit": "^9.0.0",
     "@sveltejs/adapter-static": "^3.0.10",
     "@tanstack/svelte-query": "^5.17.0",
     "axios": "^1.6.0",
@@ -30,6 +31,7 @@
     "date-fns": "^3.0.0",
     "html2canvas": "^1.4.1",
     "html5-qrcode": "^2.3.8",
+    "posthog-js": "^1.160.0",
     "svelte-chartjs": "^4.0.1",
     "tesseract.js": "^7.0.0"
   }
