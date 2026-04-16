@@ -31,10 +31,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS middleware for frontend
+# CORS middleware for frontend — origins configurable via CORS_ALLOWED_ORIGINS
+# environment variable (comma-separated).  Defaults to localhost for dev.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000"],
+    allow_origins=settings.cors_origins_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
