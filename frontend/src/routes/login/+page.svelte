@@ -1,6 +1,7 @@
 <script lang="ts">
   import { authLogin, saveAuthTokens, isAuthenticated } from '$lib/api';
   import { onMount } from 'svelte';
+  import { track, identify } from '$lib/telemetry';
 
   let username = $state('');
   let password = $state('');
@@ -17,6 +18,8 @@
     try {
       const auth = await authLogin({ username, password });
       saveAuthTokens(auth);
+      if (auth?.user?.id) identify(auth.user.id, { username: auth.user.username });
+      track('login');
       window.location.href = '/';
     } catch (e: any) {
       error = e.response?.data?.detail || 'Login failed. Please try again.';

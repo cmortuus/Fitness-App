@@ -12,6 +12,27 @@ from app.database import init_db
 
 settings = get_settings()
 
+# ── Sentry ──────────────────────────────────────────────────────────────────
+# Initialize at import time so startup errors are captured too.  Only
+# active when SENTRY_DSN is set — a silent no-op in dev/CI.
+if settings.sentry_dsn:
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+
+    sentry_sdk.init(
+        dsn=settings.sentry_dsn,
+        environment=settings.sentry_environment or settings.environment,
+        release=settings.app_version,
+        traces_sample_rate=settings.sentry_traces_sample_rate,
+        profiles_sample_rate=0.0,
+        send_default_pii=False,
+        integrations=[
+            StarletteIntegration(transaction_style="endpoint"),
+            FastApiIntegration(transaction_style="endpoint"),
+        ],
+    )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:

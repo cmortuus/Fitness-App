@@ -12,6 +12,15 @@ from app.api.auth import get_optional_user
 from app.database import Base, get_db
 from app.models.user import User
 
+# Import is_sentry_active once at module scope so we don't pay the cost
+# on every request.  Safe no-op if sentry-sdk isn't installed.
+try:
+    import sentry_sdk  # type: ignore
+    _SENTRY_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    sentry_sdk = None  # type: ignore
+    _SENTRY_AVAILABLE = False
+
 
 class ClientError(Base):
     """Stores client-side errors reported by the frontend."""
@@ -52,6 +61,23 @@ async def report_error(
     )
     db.add(error)
     await db.flush()
+
+    # Mirror to Sentry for alerting + grouping.  No-op if Sentry isn't
+    # configured.  Tagged as `frontend` so we can filter server vs client.
+    if _SENTRY_AVAILABLE and sentry_sdk is not None and sentry_sdk.Hub.current.client is not None:
+        with sentry_sdk.push_scope() as scope:
+            scope.set_tag("source", "frontend")
+            if user:
+                scope.set_user({"id": str(user.id), "username": user.username})
+            if body.url:
+                scope.set_context("page", {"url": body.url})
+            if body.stack:
+                scope.set_context("stack", {"trace": body.stack[:5000]})
+            sentry_sdk.capture_message(
+                body.message[:2000],
+                level="error",
+            )
+
     return {"id": error.id}
 
 

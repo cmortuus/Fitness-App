@@ -3,6 +3,7 @@
   import { goto } from '$app/navigation';
   import { beforeNavigate } from '$app/navigation';
   import { currentSession, exercises as exerciseStore, latestBodyWeight, settings } from '$lib/stores';
+  import { track } from '$lib/telemetry';
   import {
     getExercises, getPlan, getPlans, getNextWorkout, getRecentExercises, getSession, getSessions,
     createSessionFromPlan, createSession,
@@ -1208,6 +1209,9 @@
   function startClockIfNeeded() {
     if (startedAt !== null) return;
     startedAt = Date.now();
+    try {
+      track('workout_started', { session_id: sessionId, linked_plan: hasLinkedPlan });
+    } catch { /* telemetry optional */ }
   }
 
   async function startFreeSession() {
@@ -2404,6 +2408,15 @@
     finishing = true;
     try {
       await completeSession(sessionId);
+      const doneSetCount = uiExercises.reduce((n, ex) => n + ex.sets.filter(s => s.done).length, 0);
+      try {
+        track('workout_completed', {
+          session_id: finishedSessionId,
+          linked_plan: hasLinkedPlan,
+          set_count: doneSetCount,
+          duration_sec: startedAt ? Math.round((Date.now() - startedAt) / 1000) : null,
+        });
+      } catch { /* telemetry optional */ }
       // Clean up any saved exercise order for this session
       const orderKey = exerciseOrderKey(sessionId);
       if (orderKey && typeof localStorage !== 'undefined') localStorage.removeItem(orderKey);
