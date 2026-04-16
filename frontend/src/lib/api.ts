@@ -106,7 +106,7 @@ export interface AuthResponse {
   user: AuthUser;
 }
 
-export async function authRegister(data: { username: string; password: string; email?: string }): Promise<AuthResponse> {
+export async function authRegister(data: { username: string; email: string; password: string }): Promise<AuthResponse> {
   const response = await api.post('/auth/register', data);
   return response.data;
 }
@@ -118,6 +118,26 @@ export async function authLogin(data: { username: string; password: string }): P
 
 export async function authGetMe(): Promise<AuthUser> {
   const response = await api.get('/auth/me');
+  return response.data;
+}
+
+export async function verifyEmail(token: string): Promise<{ verified: boolean; email: string }> {
+  const response = await api.post('/auth/verify-email', { token });
+  return response.data;
+}
+
+export async function resendVerification(): Promise<{ status: string }> {
+  const response = await api.post('/auth/resend-verification');
+  return response.data;
+}
+
+export async function requestPasswordReset(email: string): Promise<{ status: string }> {
+  const response = await api.post('/auth/request-password-reset', { email });
+  return response.data;
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ status: string }> {
+  const response = await api.post('/auth/reset-password', { token, new_password: newPassword });
   return response.data;
 }
 

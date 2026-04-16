@@ -24,7 +24,7 @@
   let authUser = $state<AuthUser | null>(null);
   let authChecked = $state(false);
 
-  const PUBLIC_PATHS = ['/login', '/signup'];
+  const PUBLIC_PATHS = ['/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'];
 
   onMount(async () => {
     initLocale(); // load saved language preference

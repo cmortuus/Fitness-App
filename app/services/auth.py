@@ -50,3 +50,31 @@ def create_refresh_token(user_id: int) -> str:
 def decode_token(token: str) -> dict:
     """Decode and validate a JWT token. Raises jwt.InvalidTokenError on failure."""
     return jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+
+
+# ── Purpose-scoped tokens (email verify, password reset) ────────────────────
+# Separate `type` from access/refresh so a stolen access token can't be
+# reused for verification, and vice versa.
+
+def create_purpose_token(user_id: int, purpose: str, *, expires_hours: int = 24) -> str:
+    """Create a short-lived JWT for an out-of-band action (email verify, password reset)."""
+    payload = {
+        "sub": str(user_id),
+        "type": "purpose",
+        "purpose": purpose,
+        "exp": datetime.now(timezone.utc) + timedelta(hours=expires_hours),
+        "iat": datetime.now(timezone.utc),
+    }
+    return jwt.encode(payload, settings.jwt_secret_key, algorithm=settings.jwt_algorithm)
+
+
+def decode_purpose_token(token: str, expected_purpose: str) -> int:
+    """Decode a purpose token and return the user_id.
+
+    Raises jwt.InvalidTokenError (or a subclass) on any failure, including
+    wrong type or wrong purpose.
+    """
+    payload = jwt.decode(token, settings.jwt_secret_key, algorithms=[settings.jwt_algorithm])
+    if payload.get("type") != "purpose" or payload.get("purpose") != expected_purpose:
+        raise jwt.InvalidTokenError("Token purpose mismatch")
+    return int(payload["sub"])
