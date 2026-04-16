@@ -28,7 +28,7 @@
 <div class="min-h-screen flex items-center justify-center p-4">
   <div class="w-full max-w-sm space-y-6">
     <div class="text-center">
-      <h1 class="text-2xl font-bold text-primary-400">Onyx Expenditure</h1>
+      <h1 class="text-2xl font-bold text-primary-400">Onyx</h1>
       <p class="text-sm text-zinc-500 mt-1">Sign in to your account</p>
     </div>
 
@@ -53,6 +53,10 @@
               class="btn-primary w-full !py-3 disabled:opacity-50">
         {loading ? 'Signing in...' : 'Sign In'}
       </button>
+
+      <p class="text-center text-xs">
+        <a href="/forgot-password" class="text-zinc-500 hover:text-zinc-300">Forgot password?</a>
+      </p>
 
       <p class="text-center text-sm text-zinc-500">
         Don't have an account? <a href="/signup" class="text-primary-400 hover:text-primary-300">Sign up</a>
