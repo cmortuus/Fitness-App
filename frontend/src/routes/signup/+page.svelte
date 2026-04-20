@@ -4,6 +4,7 @@
   import { track, identify } from '$lib/telemetry';
 
   let username = $state('');
+  let email = $state('');
   let password = $state('');
   let confirmPassword = $state('');
   let error = $state('');
@@ -25,7 +26,7 @@
     }
     loading = true;
     try {
-      const auth = await authRegister({ username, password });
+      const auth = await authRegister({ username, email, password });
       saveAuthTokens(auth);
       if (auth?.user?.id) identify(auth.user.id, { username: auth.user.username });
       track('signup');
@@ -40,7 +41,7 @@
 <div class="min-h-screen flex items-center justify-center p-4">
   <div class="w-full max-w-sm space-y-6">
     <div class="text-center">
-      <h1 class="text-2xl font-bold text-primary-400">Onyx Expenditure</h1>
+      <h1 class="text-2xl font-bold text-primary-400">Onyx</h1>
       <p class="text-sm text-zinc-500 mt-1">Create your account</p>
     </div>
 
@@ -53,6 +54,13 @@
         <label for="signup-username" class="text-xs text-zinc-400 block mb-1">Username</label>
         <input id="signup-username" type="text" bind:value={username} required autocomplete="username"
                class="input" placeholder="Choose a username" />
+      </div>
+
+      <div>
+        <label for="signup-email" class="text-xs text-zinc-400 block mb-1">Email</label>
+        <input id="signup-email" type="email" bind:value={email} required autocomplete="email"
+               class="input" placeholder="you@example.com" />
+        <p class="text-xs text-zinc-500 mt-1">We'll send a verification link.</p>
       </div>
 
       <div>
@@ -75,7 +83,7 @@
         <p class="text-xs text-red-400">Passwords do not match</p>
       {/if}
 
-      <button type="submit" disabled={loading || !username || !password || password.length < 6 || !confirmPassword || password !== confirmPassword}
+      <button type="submit" disabled={loading || !username || !email || !password || password.length < 6 || !confirmPassword || password !== confirmPassword}
               class="btn-primary w-full !py-3 disabled:opacity-50">
         {loading ? 'Creating account...' : 'Create Account'}
       </button>
