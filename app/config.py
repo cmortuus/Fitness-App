@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     # Application
-    app_name: str = "Home Gym Tracker"
+    app_name: str = "Onyx"
     app_version: str = "0.1.0"
     debug: bool = False
     environment: Literal["development", "production"] = "development"

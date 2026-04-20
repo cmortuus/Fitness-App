@@ -1,9 +1,7 @@
 {
-  "name": "Onyx Expenditure",
-  "short_name": "Onyx Expenditure",
-  "description": "Track workouts, nutrition, and progress with science-based programming",
+  "name": "Onyx",
   "short_name": "Onyx",
-  "description": "Track workouts and progress with science-based programming",
+  "description": "The home-gym tracker that just works. Log workouts, track progression, lift heavier.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "portrait",
