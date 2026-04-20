@@ -5,8 +5,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
-logger = logging.getLogger(__name__)
-
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
