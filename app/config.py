@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://homegym:homegym_secret@localhost:5432/homegym"
     database_sync_url: str = "postgresql://homegym:homegym_secret@localhost:5432/homegym"
 
+    # Observability — optional in dev, set in prod env
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    sentry_environment: str = ""  # falls back to `environment` if empty
+
 
 
 @lru_cache
