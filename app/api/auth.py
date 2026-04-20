@@ -122,6 +122,14 @@ def serialize_user(user: User) -> dict:
         "email": user.email,
         "email_verified": user.email_verified_at is not None,
         "created_at": user.created_at.isoformat(),
+        # Subscription (#869).  has_access is a convenience for the frontend.
+        "subscription_status": user.subscription_status,
+        "subscription_current_period_end": (
+            user.subscription_current_period_end.isoformat()
+            if user.subscription_current_period_end else None
+        ),
+        "trial_ends_at": user.trial_ends_at.isoformat() if user.trial_ends_at else None,
+        "has_access": _user_has_access(user),
     }
 
 
@@ -140,6 +148,16 @@ async def _send_verification_email(user: User) -> None:
         )
     except Exception:
         logger.exception("Failed to send verification email to %s", user.email)
+
+
+def _user_has_access(user: User) -> bool:
+    """Quick inline check — formalised in app/services/access.py in #871."""
+    now = datetime.utcnow()
+    if user.trial_ends_at and user.trial_ends_at > now:
+        return True
+    if user.subscription_status in ("trialing", "active"):
+        return True
+    return False
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
@@ -170,10 +188,13 @@ async def register(
             detail="Email already registered",
         )
 
+    from datetime import timedelta
     user = User(
         username=data.username,
         email=data.email,
         hashed_password=hash_password(data.password),
+        # 30-day free trial starts on signup (#869)
+        trial_ends_at=datetime.utcnow() + timedelta(days=30),
     )
     db.add(user)
     await db.flush()

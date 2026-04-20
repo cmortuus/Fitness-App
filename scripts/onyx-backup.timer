@@ -1,0 +1,13 @@
+[Unit]
+Description=Onyx — daily DB backup timer
+Requires=onyx-backup.service
+
+[Timer]
+# Run every day at 03:30 local time
+OnCalendar=*-*-* 03:30:00
+# If the system was off when the timer fired, run on next boot
+Persistent=true
+Unit=onyx-backup.service
+
+[Install]
+WantedBy=timers.target

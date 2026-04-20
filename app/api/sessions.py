@@ -1622,10 +1622,12 @@ async def create_session_from_plan(
         # block_ids, the plan template hasn't been re-edited — safe to reorder.
         _plan_unchanged = bool(_prior_block_ids) and _prior_block_ids <= _plan_block_ids
         # Also allow reorder for legacy sessions without block_ids if the
-        # exercise sets match (same exercises, no adds/removes).
+        # prior exercises are a subset of the plan (the user may have skipped
+        # some exercises, but the completed ones should keep their order).
         _legacy_match = (
             not _prior_block_ids
-            and set(prior_exercise_order) == set(new_exercise_order)
+            and bool(prior_exercise_order)
+            and set(prior_exercise_order) <= set(new_exercise_order)
         )
 
         if _plan_unchanged or _legacy_match:
