@@ -207,7 +207,7 @@ async def stripe_webhook(
     ))
     try:
         await db.flush()
-    except Exception as exc:
+    except Exception:
         # IntegrityError on event_id unique → already processed
         await db.rollback()
         logger.info("stripe webhook: replay of %s ignored", event_id)

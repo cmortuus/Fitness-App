@@ -108,7 +108,7 @@ class TestAccessGate:
     async def test_auth_endpoints_not_gated(self, db):
         """Login/register/refresh must always work even with expired trial."""
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as c:
-            auth = await _register(c, "gate_auth")
+            await _register(c, "gate_auth")
             # Expire trial
             result = await db.execute(select(User).where(User.username == "gate_auth"))
             user = result.scalar_one()
