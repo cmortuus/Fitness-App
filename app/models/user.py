@@ -23,6 +23,19 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
 
+    # ── Subscription (#869) ────────────────────────────────────────────────
+    # Populated via the Stripe webhook (/api/billing/webhook).  A user has
+    # access if either trial_ends_at is in the future OR subscription_status
+    # is trialing/active.  See app/services/access.py (#871).
+    stripe_customer_id: Mapped[str | None] = mapped_column(
+        String(255), unique=True, nullable=True
+    )
+    subscription_status: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    subscription_current_period_end: Mapped[datetime | None] = mapped_column(
+        DateTime, nullable=True
+    )
+    trial_ends_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Physical characteristics for exercise analysis
     height_cm: Mapped[float | None] = mapped_column(Float, nullable=True)
     weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
