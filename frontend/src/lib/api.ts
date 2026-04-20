@@ -33,6 +33,13 @@ api.interceptors.response.use(
       await new Promise(r => setTimeout(r, 2000));
       return api.request(config);
     }
+    // 402 Payment Required — subscription lapsed.  Dispatch a window event
+    // so the layout can show the subscription modal.
+    if (error.response?.status === 402 && typeof window !== 'undefined') {
+      const detail = (error.response.data as any)?.detail || {};
+      window.dispatchEvent(new CustomEvent('onyx:subscription-required', { detail }));
+      return Promise.reject(error);
+    }
     if (error.response?.status === 401 && typeof window !== 'undefined') {
       // Try refresh token
       const refreshToken = localStorage.getItem('hgt_refresh_token');
@@ -100,6 +107,11 @@ export interface AuthUser {
   username: string;
   email: string;
   created_at: string;
+  // Subscription fields from /api/auth/me (#869)
+  subscription_status?: string | null;
+  subscription_current_period_end?: string | null;
+  trial_ends_at?: string | null;
+  has_access?: boolean;
 }
 
 export interface AuthResponse {
@@ -154,6 +166,18 @@ export function clearAuthTokens(): void {
   localStorage.removeItem('hgt_access_token');
   localStorage.removeItem('hgt_refresh_token');
   localStorage.removeItem('hgt_user');
+}
+
+// ── Billing API ──────────────────────────────────────────────────────────────
+
+export async function createCheckoutSession(): Promise<{ url: string; id: string }> {
+  const response = await api.post('/billing/checkout');
+  return response.data;
+}
+
+export async function createPortalSession(): Promise<{ url: string }> {
+  const response = await api.post('/billing/portal');
+  return response.data;
 }
 
 // Settings (stored in DB, synced across devices)

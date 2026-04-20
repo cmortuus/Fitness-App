@@ -7,6 +7,7 @@
   import type { AuthUser } from '$lib/api';
   import { initLocale } from '$lib/i18n';
   import { initSentry, initPostHog, identify, resetAnalyticsIdentity } from '$lib/telemetry';
+  import SubscriptionBanner from '$lib/SubscriptionBanner.svelte';
 
   // Desktop shows all tabs including nutrition; mobile hides nutrition
   const desktopNavItems = [
@@ -25,7 +26,7 @@
   let authUser = $state<AuthUser | null>(null);
   let authChecked = $state(false);
 
-  const PUBLIC_PATHS = ['/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'];
+  const PUBLIC_PATHS = ['/login', '/signup', '/pricing', '/verify-email', '/forgot-password', '/reset-password'];
 
   onMount(async () => {
     initLocale(); // load saved language preference
@@ -198,6 +199,9 @@
 {:else}
 <!-- ── Full-height shell ──────────────────────────────────────────────── -->
 <div class="min-h-screen flex flex-col bg-zinc-950">
+
+  <!-- Subscription banner + modal (only when authed) -->
+  <SubscriptionBanner />
 
   <!-- Skip to main content (screen reader / keyboard nav) -->
   <a href="#main-content"
