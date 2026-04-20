@@ -6,6 +6,14 @@
   import { writeBodyWeight, isHealthKitAvailable, requestHealthKitPermissions } from '$lib/healthkit';
   import { locale, setLocale, SUPPORTED_LOCALES, LOCALE_NAMES, type Locale } from '$lib/i18n';
   import type { BodyWeightEntry, Exercise } from '$lib/api';
+  import { hasOptedOut, setAnalyticsOptOut } from '$lib/telemetry';
+
+  let analyticsOptedOut = $state(false);
+  onMount(() => { analyticsOptedOut = hasOptedOut(); });
+  function toggleAnalyticsOptOut(v: boolean) {
+    analyticsOptedOut = v;
+    setAnalyticsOptOut(v);
+  }
 
   let healthKitAvailable = $state(false);
   let healthKitConnected = $state(false);
@@ -1269,6 +1277,24 @@
       </div>
     </div>
   {/if}
+
+  <!-- ── Privacy & Analytics ─────────────────────────────────────────── -->
+  <div class="card space-y-3">
+    <h3 class="text-lg font-semibold">Privacy & Analytics</h3>
+    <p class="text-xs text-zinc-500">
+      We use privacy-respecting analytics (PostHog) to understand how Onyx is used and where it breaks.
+      We never sell your data. You can opt out at any time — your workouts keep working either way.
+    </p>
+    <label class="flex items-center justify-between gap-3 py-2 cursor-pointer">
+      <span class="text-sm text-zinc-200">Share anonymous usage analytics</span>
+      <input
+        type="checkbox"
+        checked={!analyticsOptedOut}
+        onchange={(e) => toggleAnalyticsOptOut(!(e.currentTarget as HTMLInputElement).checked)}
+        class="h-5 w-5 accent-primary-500"
+      />
+    </label>
+  </div>
 
   <!-- ── Account ──────────────────────────────────────────────────────── -->
   <div class="card space-y-3">
