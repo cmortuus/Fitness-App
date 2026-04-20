@@ -156,6 +156,34 @@ export function clearAuthTokens(): void {
   localStorage.removeItem('hgt_user');
 }
 
+// ── Account controls (#875) ───────────────────────────────────────────────
+
+export async function changePassword(currentPassword: string, newPassword: string): Promise<{ status: string }> {
+  const response = await api.post('/auth/change-password', {
+    current_password: currentPassword,
+    new_password: newPassword,
+  });
+  return response.data;
+}
+
+export async function changeEmail(currentPassword: string, newEmail: string): Promise<{ status: string; email: string }> {
+  const response = await api.post('/auth/change-email', {
+    current_password: currentPassword,
+    new_email: newEmail,
+  });
+  return response.data;
+}
+
+export async function deleteAccount(): Promise<{ status: string }> {
+  const response = await api.delete('/auth/account');
+  return response.data;
+}
+
+export async function exportUserData(): Promise<Record<string, any>> {
+  const response = await api.get('/auth/export', { timeout: 60000 });
+  return response.data;
+}
+
 // Settings (stored in DB, synced across devices)
 export async function getSettings(): Promise<Record<string, any>> {
   const response = await api.get('/auth/settings');
