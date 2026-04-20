@@ -47,7 +47,7 @@ export async function initPostHog() {
   }
 }
 
-function hasOptedOut(): boolean {
+export function hasOptedOut(): boolean {
   if (!browser) return true;
   // Honor Do Not Track
   // @ts-ignore

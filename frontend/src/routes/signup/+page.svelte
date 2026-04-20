@@ -29,6 +29,7 @@
       saveAuthTokens(auth);
       if (auth?.user?.id) identify(auth.user.id, { username: auth.user.username });
       track('signup');
+      track('trial_started', { trial_days: 30 });
       window.location.href = '/';
     } catch (e: any) {
       error = e.response?.data?.detail || 'Registration failed. Please try again.';
