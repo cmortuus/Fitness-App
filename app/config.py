@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     # Defaults are localhost for dev; production must set this via env.
     cors_allowed_origins: str = "http://localhost:5173,http://localhost:3000"
 
+    # Observability — optional in dev, set in prod env
+    sentry_dsn: str = ""
+    sentry_traces_sample_rate: float = 0.1
+    sentry_environment: str = ""  # falls back to `environment` if empty
+
     @field_validator("jwt_secret_key")
     @classmethod
     def _validate_jwt_secret(cls, v: str) -> str:

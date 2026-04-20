@@ -1,0 +1,19 @@
+[Unit]
+Description=Onyx — nightly Postgres backup to Backblaze B2
+After=docker.service
+Wants=docker.service
+# Don't rate-limit restarts
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+User=root
+EnvironmentFile=/etc/Fitness-App/.backup-env
+WorkingDirectory=/etc/Fitness-App
+ExecStart=/etc/Fitness-App/scripts/backup-db.sh
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=onyx-backup
+
+# Give the backup plenty of time but don't hang forever
+TimeoutStartSec=30min

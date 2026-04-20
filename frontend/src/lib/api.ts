@@ -63,9 +63,12 @@ api.interceptors.response.use(
     } else if (error.response) {
       console.error('API Error:', error.response.status, error.response.data);
     } else if (error.request) {
-      // Network error — queue write requests for offline sync
+      // Network error — only queue if the browser is truly offline.
+      // Transient server errors (container restart) shouldn't trigger
+      // the offline banner or queue stale requests.
       const method = error.config?.method?.toUpperCase();
-      if (method && ['PATCH', 'POST', 'PUT', 'DELETE'].includes(method) && error.config?.url) {
+      const browserOffline = typeof navigator !== 'undefined' && !navigator.onLine;
+      if (browserOffline && method && ['PATCH', 'POST', 'PUT', 'DELETE'].includes(method) && error.config?.url) {
         try {
           const { queueRequest, getPendingCount } = await import('$lib/offline');
           const { isOnline, pendingSyncCount } = await import('$lib/stores');

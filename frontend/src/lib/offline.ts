@@ -121,7 +121,13 @@ export async function syncPendingRequests(
         // Token expired — stop syncing, user needs to re-auth
         failed++;
         break;
+      } else if (response.status >= 400 && response.status < 500) {
+        // Client error (404 deleted resource, 422 validation, etc.) —
+        // this request will never succeed, discard it.
+        await removeRequest(req.id);
+        failed++;
       } else {
+        // Server error (5xx) — keep for retry
         failed++;
       }
     } catch {
