@@ -25,7 +25,11 @@
   let authUser = $state<AuthUser | null>(null);
   let authChecked = $state(false);
 
-  const PUBLIC_PATHS = ['/login', '/signup', '/verify-email', '/forgot-password', '/reset-password'];
+  const PUBLIC_PATHS = [
+    '/login', '/signup',
+    '/welcome', '/pricing', '/terms', '/privacy', '/about',
+    '/forgot-password', '/reset-password', '/verify-email',
+  ];
 
   onMount(async () => {
     initLocale(); // load saved language preference
@@ -39,7 +43,9 @@
       return; // Don't load data on auth pages
     }
     if (!isAuthenticated()) {
-      window.location.href = '/login';
+      // Unauthed hitting the app shell → send to the public landing
+      // (they can click from there into /login or /signup).
+      window.location.href = '/welcome';
       return;
     }
     authUser = getStoredUser();
