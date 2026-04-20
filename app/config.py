@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     sentry_traces_sample_rate: float = 0.1
     sentry_environment: str = ""  # falls back to `environment` if empty
 
+    # Stripe — no-op in dev/CI without keys.  stripe_price_id_yearly is the
+    # single $30/year price created in the Stripe dashboard.
+    stripe_secret_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id_yearly: str = ""
+
+    # Public base URL — used for Stripe redirect URLs and email links.
+    public_app_url: str = "http://localhost:5173"
+
     @field_validator("jwt_secret_key")
     @classmethod
     def _validate_jwt_secret(cls, v: str) -> str:

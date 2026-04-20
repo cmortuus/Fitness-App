@@ -6,9 +6,12 @@ from typing import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import auth, body_weight, checkin, diet_phase, errors, exercises, insights, nutrition, plans, progress, recipes, sessions, templates, websocket
+from fastapi import Depends
+
+from app.api import auth, billing, body_weight, checkin, diet_phase, errors, exercises, insights, nutrition, plans, progress, recipes, sessions, templates, websocket
 from app.config import get_settings
 from app.database import init_db
+from app.services.access import require_access_for_writes
 
 settings = get_settings()
 
@@ -62,20 +65,28 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routers
+# Access-gate dependency applied to every gated router.  Only raises 402
+# on write methods for users whose trial is expired AND don't have an
+# active subscription.  See app/services/access.py.
+_GATED = [Depends(require_access_for_writes)]
+
+# Include API routers.  Routers that touch user-owned data are gated by
+# the subscription access check (no-op on GET, 402 on write methods when
+# trial has lapsed and no active subscription).
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"])
-app.include_router(exercises.router, prefix="/api/exercises", tags=["exercises"])
+app.include_router(sessions.router, prefix="/api/sessions", tags=["sessions"], dependencies=_GATED)
+app.include_router(exercises.router, prefix="/api/exercises", tags=["exercises"], dependencies=_GATED)
 app.include_router(progress.router, prefix="/api/progress", tags=["progress"])
-app.include_router(plans.router, prefix="/api/plans", tags=["plans"])
-app.include_router(body_weight.router, prefix="/api/body-weight", tags=["body-weight"])
-app.include_router(nutrition.router, prefix="/api/nutrition", tags=["nutrition"])
-app.include_router(diet_phase.router, prefix="/api/nutrition/phases", tags=["diet-phases"])
-app.include_router(checkin.router, prefix="/api/nutrition", tags=["checkin"])
-app.include_router(insights.router, prefix="/api/nutrition", tags=["insights"])
-app.include_router(recipes.router, prefix="/api/recipes", tags=["recipes"])
+app.include_router(plans.router, prefix="/api/plans", tags=["plans"], dependencies=_GATED)
+app.include_router(body_weight.router, prefix="/api/body-weight", tags=["body-weight"], dependencies=_GATED)
+app.include_router(nutrition.router, prefix="/api/nutrition", tags=["nutrition"], dependencies=_GATED)
+app.include_router(diet_phase.router, prefix="/api/nutrition/phases", tags=["diet-phases"], dependencies=_GATED)
+app.include_router(checkin.router, prefix="/api/nutrition", tags=["checkin"], dependencies=_GATED)
+app.include_router(insights.router, prefix="/api/nutrition", tags=["insights"], dependencies=_GATED)
+app.include_router(recipes.router, prefix="/api/recipes", tags=["recipes"], dependencies=_GATED)
 app.include_router(templates.router, prefix="/api/templates", tags=["templates"])
 app.include_router(errors.router, prefix="/api/errors", tags=["errors"])
+app.include_router(billing.router, prefix="/api/billing", tags=["billing"])
 app.include_router(websocket.router, tags=["websocket"])
 
 
