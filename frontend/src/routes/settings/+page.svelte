@@ -1276,6 +1276,11 @@
     {#if currentUser}
       <p class="text-sm text-zinc-400">Signed in as <span class="text-white font-medium">{currentUser.username}</span></p>
     {/if}
+    <a href="/settings/account"
+       class="flex items-center justify-between w-full py-2.5 px-3 rounded-lg text-sm font-medium bg-zinc-800 text-zinc-200 hover:bg-zinc-700 transition-colors">
+      <span>Email, password, export, delete</span>
+      <span class="text-zinc-500">→</span>
+    </a>
     <div class="flex gap-2">
       <button
         onclick={async () => {

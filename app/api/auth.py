@@ -5,6 +5,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Annotated
 
+logger = logging.getLogger(__name__)
+
 import jwt
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -396,3 +398,137 @@ async def reset_password(
     user.hashed_password = hash_password(data.new_password)
     await db.flush()
     return {"status": "reset"}
+
+
+# ── Account controls (#875) ──────────────────────────────────────────────────
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=6)
+
+
+class ChangeEmailRequest(BaseModel):
+    current_password: str
+    new_email: str = Field(min_length=3)
+
+
+@router.post("/change-password")
+async def change_password(
+    data: ChangePasswordRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Rotate password. Requires the current password."""
+    if not verify_password(data.current_password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    user.hashed_password = hash_password(data.new_password)
+    await db.flush()
+    return {"status": "ok"}
+
+
+@router.post("/change-email")
+async def change_email(
+    data: ChangeEmailRequest,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Update email.  Requires current password.  Email is persisted
+    immediately.  If #885 (email verification) is in place, the new email
+    will be unverified until the user confirms via the emailed link."""
+    if not verify_password(data.current_password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    # Duplicate check
+    result = await db.execute(
+        select(User).where(User.email == data.new_email).where(User.id != user.id)
+    )
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Email already in use")
+
+    user.email = data.new_email
+    # If an email_verified_at column exists (added in #885), clear it so
+    # the user must re-verify.  Use getattr to tolerate branches where the
+    # column isn't present yet.
+    if hasattr(user, "email_verified_at"):
+        setattr(user, "email_verified_at", None)
+    await db.flush()
+    return {"status": "ok", "email": user.email}
+
+
+@router.delete("/account")
+async def delete_account(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Delete the account.  Cancels the Stripe subscription (if any) and
+    cascade-deletes all user-owned data (workout plans, sessions, exercises,
+    nutrition entries, etc.) via the existing SQLAlchemy relationships."""
+    # Best-effort Stripe cancellation — don't block deletion if Stripe errors
+    if user.stripe_customer_id:
+        try:
+            from app.api.billing import _stripe  # lazy import
+            stripe = _stripe()
+            if stripe is not None:
+                subs = stripe.Subscription.list(customer=user.stripe_customer_id, status="all", limit=10)
+                for sub in subs.auto_paging_iter():
+                    if sub.status not in ("canceled", "incomplete_expired"):
+                        stripe.Subscription.delete(sub.id)
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Stripe cancel during delete failed for user %s: %s", user.id, exc)
+
+    await db.delete(user)
+    await db.flush()
+    return {"status": "deleted"}
+
+
+@router.get("/export")
+async def export_user_data(
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Return a full JSON dump of the user's data (GDPR-safe export).
+
+    Pulls from the ORM rather than joining DB-side so the shape is stable
+    and the response body is streamable by FastAPI.
+    """
+    from app.models.body_weight import BodyWeightEntry
+    from app.models.nutrition import NutritionEntry
+    from app.models.workout import ExerciseSet, WorkoutPlan, WorkoutSession
+
+    async def dump(model_cls, where):
+        result = await db.execute(select(model_cls).where(where))
+        rows = result.scalars().all()
+        out = []
+        for row in rows:
+            item = {c.name: getattr(row, c.name) for c in model_cls.__table__.columns}
+            # ISO-format timestamps; the default JSON encoder can't handle
+            # datetimes and some session fields hold bytes/Decimal too.
+            for k, v in list(item.items()):
+                if isinstance(v, datetime):
+                    item[k] = v.isoformat()
+                elif isinstance(v, bytes):
+                    item[k] = v.decode(errors="replace")
+            out.append(item)
+        return out
+
+    payload = {
+        "exported_at": datetime.utcnow().isoformat() + "Z",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "email": user.email,
+            "created_at": user.created_at.isoformat(),
+        },
+        "settings": json.loads(user.settings_json) if user.settings_json else {},
+        "workout_plans": await dump(WorkoutPlan, WorkoutPlan.user_id == user.id),
+        "workout_sessions": await dump(WorkoutSession, WorkoutSession.user_id == user.id),
+        "exercise_sets": await dump(
+            ExerciseSet,
+            ExerciseSet.workout_session_id.in_(
+                select(WorkoutSession.id).where(WorkoutSession.user_id == user.id)
+            ),
+        ),
+        "body_weight_entries": await dump(BodyWeightEntry, BodyWeightEntry.user_id == user.id),
+        "nutrition_entries": await dump(NutritionEntry, NutritionEntry.user_id == user.id),
+    }
+    return payload
