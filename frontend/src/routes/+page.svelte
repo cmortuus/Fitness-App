@@ -85,6 +85,20 @@
       insights = insightData;
       progressMetrics = progress;
       allExercises = exercises;
+
+      // First-login onboarding (#873): if this is a brand-new account
+      // with no plans, no sessions, and they haven't been through or
+      // skipped the wizard yet, redirect to /onboarding.
+      try {
+        const onboardingState = typeof localStorage !== 'undefined'
+          ? localStorage.getItem('onyx_onboarding')
+          : null;
+        const isFirstLogin = !onboardingState && plans.length === 0 && sessions.length === 0;
+        if (isFirstLogin) {
+          window.location.href = '/onboarding';
+          return;
+        }
+      } catch { /* non-fatal */ }
     } catch (e) {
       console.error('Failed to load dashboard:', e);
     } finally {
