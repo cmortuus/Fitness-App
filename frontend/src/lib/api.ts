@@ -232,7 +232,14 @@ export interface Set {
   draft_reps: number | null;
   draft_reps_left: number | null;
   draft_reps_right: number | null;
+  is_extrapolated?: boolean;
 }
+
+export type SetUpdate = Partial<Set> & {
+  // The API accepts either parsed peg weights or the JSON string persisted by
+  // the active-workout draft saver.
+  peg_weights?: Set['peg_weights'] | string;
+};
 
 export interface WorkoutSession {
   id: number;
@@ -453,7 +460,7 @@ export async function addSet(
 export async function updateSet(
   sessionId: number,
   setId: number,
-  data: Partial<Set>
+  data: SetUpdate
 ): Promise<Set> {
   const response = await api.patch(`/sessions/${sessionId}/sets/${setId}`, data);
   return response.data;
@@ -484,8 +491,10 @@ export async function createExercise(data: {
   movement_type?: 'compound' | 'isolation';
   body_region?: 'upper' | 'lower' | 'full_body';
   equipment_type?: string;
+  is_unilateral?: boolean;
+  is_assisted?: boolean;
   is_prime?: boolean;
-  description?: string;
+  description?: string | null;
   primary_muscles?: string[];
   secondary_muscles?: string[];
 }): Promise<Exercise> {
@@ -1008,7 +1017,15 @@ export async function endPhase(): Promise<void> {
 export interface WorkoutTemplateDay {
   day_number: number;
   day_name: string;
-  exercises: { exercise_id: number; exercise_name: string; sets: number; reps: number; starting_weight_kg: number; progression_type: string }[];
+  exercises: {
+    exercise_id: number;
+    exercise_name: string;
+    sets: number;
+    reps: number;
+    rep_range_top?: number;
+    starting_weight_kg: number;
+    progression_type: string;
+  }[];
 }
 
 export interface WorkoutTemplate {

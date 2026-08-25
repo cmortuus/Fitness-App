@@ -12,7 +12,7 @@
     saveExerciseFeedback, getExerciseFeedback, syncSessionToPlan, patchSession, createExercise,
     updatePlan,
   } from '$lib/api';
-  import type { Exercise, WorkoutPlan, PlannedDay, PlannedExercise, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution, PersonalRecord } from '$lib/api';
+  import type { Exercise, Set as WorkoutSet, WorkoutPlan, PlannedDay, PlannedExercise, ExerciseHistorySession, WorkoutSession, NextWorkoutResolution, PersonalRecord } from '$lib/api';
   import { swipeable } from '$lib/actions/swipeable';
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
@@ -142,7 +142,7 @@
     return `tmp-${exerciseId}-${fallback}`;
   }
 
-  function getSessionSetBlockKey(set: Set): string {
+  function getSessionSetBlockKey(set: WorkoutSet): string {
     return set.exercise_block_id ? `block-${set.exercise_block_id}` : `legacy-${set.exercise_id}`;
   }
 
@@ -150,10 +150,10 @@
     key: string;
     blockId: string | null;
     exerciseId: number;
-    sets: Set[];
+    sets: WorkoutSet[];
   };
 
-  function groupSessionSetsByBlock(sets: Set[]): SessionSetBlock[] {
+  function groupSessionSetsByBlock(sets: WorkoutSet[]): SessionSetBlock[] {
     const orderedBlocks: SessionSetBlock[] = [];
     const byKey = new Map<string, SessionSetBlock>();
     for (const set of [...sets].sort((a, b) => a.id - b.id)) {
@@ -1800,6 +1800,7 @@
       oneRM: last?.oneRM ?? null,
       initWeight: null,
       initReps: null,
+      isExtrapolated: false,
       setType: ex.sets[0]?.setType || 'standard',
       partialReps: null, drops: [], pegWeights: null,
     }];
@@ -1852,6 +1853,7 @@
           repsRight: ex.isUnilateral ? w.reps : null,
           done: false, skipped: false, doneLeft: false, doneRight: false,
           saving: false, oneRM: null, initWeight: null, initReps: null,
+          isExtrapolated: false,
           setType: 'warmup', partialReps: null, drops: [], pegWeights: null,
         });
       }
@@ -1891,6 +1893,7 @@
         oneRM: null,
         initWeight: null,
         initReps: null,
+        isExtrapolated: false,
         setType: 'warmup',
         partialReps: null, drops: [], pegWeights: null,
       });
@@ -2375,6 +2378,7 @@
             doneRight: false,
             saving: false,
             oneRM: null, initWeight: null, initReps: null,
+            isExtrapolated: false,
             setType: 'standard' as string,
             partialReps: null, drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
           }));
@@ -2418,6 +2422,7 @@
         doneRight: false,
         saving: false,
         oneRM: null, initWeight: null, initReps: null,
+        isExtrapolated: false,
         setType: 'standard' as string,
         partialReps: null,
         drops: [] as { weightLbs: number | null; reps: number | null }[], pegWeights: null as { peg1: number; peg2: number; peg3: number } | null,
