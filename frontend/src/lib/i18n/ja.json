@@ -123,9 +123,6 @@
     "developer": "Developer",
     "forceUpdate": "Force Update",
     "version": "Version",
-    "appleHealth": "Apple Health",
-    "connected": "Connected",
-    "connectAppleHealth": "Connect Apple Health",
     "language": "Language"
   },
   "plans": {
