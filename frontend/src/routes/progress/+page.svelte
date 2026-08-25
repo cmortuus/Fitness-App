@@ -481,8 +481,6 @@
                        overviewChartData
   );
 
-  let activeChartOptions = $derived(selectedExercise ? selectedExerciseChartOptions : chartOptions);
-
   let chartTitle = $derived(
     selectedExercise
       ? `${selectedExercise} — Est. 1RM (${unit})`
@@ -530,6 +528,8 @@
       },
     },
   });
+
+  let activeChartOptions = $derived(selectedExercise ? selectedExerciseChartOptions : chartOptions);
 
   // Recommendations filtered to selected exercise / sub-group / group
   let filteredRecs = $derived.by(() => {

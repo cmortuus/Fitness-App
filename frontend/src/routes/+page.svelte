@@ -118,7 +118,7 @@
     if (!nextWorkout || skipping) return;
     skipping = true;
     try {
-      const overloadStyle = $settings.overloadStyle || 'weight';
+      const overloadStyle = $settings.progressionStyle;
       const bwKg = 0; // body weight not needed for skip
       const sess = await createSessionFromPlan(
         nextWorkout.plan.id, nextWorkout.day.day_number, overloadStyle, bwKg

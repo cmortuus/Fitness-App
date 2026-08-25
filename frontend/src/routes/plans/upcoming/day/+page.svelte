@@ -102,12 +102,13 @@
 
   async function saveDay() {
     if (!plan || !dayDraft) return;
+    const draft = dayDraft;
     saving = true;
     error = null;
     saveMessage = null;
     try {
       const days = plan.days.map((day) =>
-        day.day_number === dayDraft.day_number ? cloneDay(dayDraft) : cloneDay(day)
+        day.day_number === draft.day_number ? cloneDay(draft) : cloneDay(day)
       );
       const updated = await updatePlan(plan.id, {
         name: plan.name,
@@ -120,7 +121,7 @@
         is_draft: plan.is_draft,
       });
       plan = updated;
-      const savedDay = updated.days.find((day) => day.day_number === dayDraft.day_number) ?? cloneDay(dayDraft);
+      const savedDay = updated.days.find((day) => day.day_number === draft.day_number) ?? cloneDay(draft);
       dayDraft = cloneDay(savedDay);
       saveMessage = 'Future day updated.';
       dismissSaveMessageSoon();
@@ -407,7 +408,7 @@
                 {#each Array.from({ length: exercise.sets }, (_, setIndex) => setIndex + 1) as setNumber}
                   <div class="grid grid-cols-[4.5rem_1fr_5rem] gap-2 items-center">
                     <div class="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-xs text-zinc-400 text-center">
-                      {exercise.set_type === 'standard' ? `Set ${setNumber}` : exercise.set_type.replaceAll('_', ' ')}
+                      {(exercise.set_type ?? 'standard') === 'standard' ? `Set ${setNumber}` : (exercise.set_type ?? 'standard').replaceAll('_', ' ')}
                     </div>
                     <div class="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-200">
                       {repLabel(exercise)}
