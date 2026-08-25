@@ -66,6 +66,8 @@ docker-compose.yml      # Main + dev containers with nginx router
 Dockerfile              # Multi-stage build (Python + Node)
 ```
 
+The PWA is the only supported client. Native iOS projects are intentionally not part of this repository.
+
 ## Local Development
 
 ### Prerequisites

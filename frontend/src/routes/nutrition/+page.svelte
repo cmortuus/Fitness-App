@@ -11,7 +11,6 @@
   import type { Recipe } from '$lib/api';
   import { MICRO_META } from '$lib/api';
   import { localDateString, parseLocalDateString, shiftLocalDateString } from '$lib/date';
-  import { writeNutrition } from '$lib/healthkit';
   import type {
     NutritionEntry, DietPhase, DailySummary, DailyEntries,
     FoodSearchResult, FoodItem, Micronutrients,
@@ -448,7 +447,6 @@
       quantity_g: selectedQty,
       ...m,
     });
-    writeNutrition({ calories: m.calories ?? 0, proteinG: m.protein, carbsG: m.carbs, fatG: m.fat }).catch(() => {});
     showAddModal = false;
     selectedFood = null;
     await loadDay();
@@ -466,8 +464,6 @@
       carbs: manualCarbs ?? 0,
       fat: manualFat ?? 0,
     });
-    writeNutrition({ calories: manualCal ?? 0, proteinG: manualProtein ?? 0, carbsG: manualCarbs ?? 0, fatG: manualFat ?? 0 }).catch(() => {});
-
     if (saveAsCustom) {
       const scale = 100 / qty;
       await createCustomFood({

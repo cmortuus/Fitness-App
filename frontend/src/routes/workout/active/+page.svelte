@@ -17,7 +17,6 @@
   import PlateVisual from '$lib/components/PlateVisual.svelte';
   import PrimePegVisual from '$lib/components/PrimePegVisual.svelte';
   import html2canvas from 'html2canvas';
-  import { writeWorkout } from '$lib/healthkit';
 
   // ─── Constants ────────────────────────────────────────────────────────────
   const LBS_TO_KG = 0.453592;
@@ -2498,12 +2497,6 @@
     clearFeedbackDraftState(finishedSessionId);
     // Compute PRs before clearing UI state
     prs = detectPRs();
-    // Write workout to HealthKit (no-op on web/PWA)
-    writeWorkout({
-      startDate: new Date(startedAt ?? Date.now()),
-      endDate: new Date(),
-      workoutName: workoutName,
-    }).catch(() => {}); // fire and forget
     finished = true;
     finishing = false;
   }
